@@ -1,0 +1,14 @@
+services:
+  pam-pocketid:
+    image: ghcr.io/rinseaid/pam-pocketid:latest
+    ports:
+      - "8090:8090"
+    environment:
+      PAM_POCKETID_ISSUER_URL: "https://id.example.com"
+      PAM_POCKETID_CLIENT_ID: "your-oidc-client-id"
+      PAM_POCKETID_CLIENT_SECRET: "your-oidc-client-secret"
+      PAM_POCKETID_EXTERNAL_URL: "https://sudo.example.com"
+      PAM_POCKETID_LISTEN: ":8090"
+      PAM_POCKETID_CHALLENGE_TTL: "120"
+      PAM_POCKETID_SHARED_SECRET: "your-shared-secret"
+    restart: unless-stopped

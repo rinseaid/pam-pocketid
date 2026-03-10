@@ -1,0 +1,25 @@
+# Build artifacts
+bin/
+pam-pocketid
+*.exe
+
+# Go
+vendor/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude
+CLAUDE.md
+.claude/
+
+# macOS
+.DS_Store
+
+# Test artifacts
+*.test
+coverage.out
