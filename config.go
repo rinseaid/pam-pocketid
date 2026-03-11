@@ -1,12 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// DefaultConfigPath is the default location for the pam-pocketid config file.
+// The config file uses KEY=VALUE format (one per line, no export keyword).
+// Environment variables take precedence over config file values.
+const DefaultConfigPath = "/etc/pam-pocketid.conf"
 
 // Config holds all configuration for pam-pocketid.
 type Config struct {
@@ -72,17 +78,24 @@ func LoadServerConfig() (*Config, error) {
 	return cfg, nil
 }
 
-// LoadClientConfig loads PAM helper configuration from environment variables.
+// LoadClientConfig loads PAM helper configuration.
+// Values are resolved in this order (first non-empty wins):
+//  1. Environment variables
+//  2. Config file (/etc/pam-pocketid.conf)
+//  3. Built-in defaults
 func LoadClientConfig() (*Config, error) {
+	// Load config file as fallback values (env vars take precedence)
+	fileVars := loadConfigFile(DefaultConfigPath)
+
 	cfg := &Config{
-		ServerURL:    os.Getenv("PAM_POCKETID_SERVER_URL"),
-		SharedSecret: os.Getenv("PAM_POCKETID_SHARED_SECRET"),
+		ServerURL:    configValue("PAM_POCKETID_SERVER_URL", fileVars),
+		SharedSecret: configValue("PAM_POCKETID_SHARED_SECRET", fileVars),
 	}
 
-	pollMs := envOrDefaultInt("PAM_POCKETID_POLL_MS", 2000)
+	pollMs := configValueInt("PAM_POCKETID_POLL_MS", fileVars, 2000)
 	cfg.PollInterval = time.Duration(pollMs) * time.Millisecond
 
-	timeoutSec := envOrDefaultInt("PAM_POCKETID_TIMEOUT", 120)
+	timeoutSec := configValueInt("PAM_POCKETID_TIMEOUT", fileVars, 120)
 	cfg.Timeout = time.Duration(timeoutSec) * time.Second
 
 	if cfg.ServerURL == "" {
@@ -95,6 +108,61 @@ func LoadClientConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadConfigFile reads KEY=VALUE pairs from a file. Lines starting with #
+// are comments. Values may be optionally quoted. Returns an empty map on error.
+func loadConfigFile(path string) map[string]string {
+	vars := make(map[string]string)
+	f, err := os.Open(path)
+	if err != nil {
+		return vars
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		// Strip surrounding quotes
+		if len(v) >= 2 && ((v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'')) {
+			v = v[1 : len(v)-1]
+		}
+		vars[k] = v
+	}
+	return vars
+}
+
+// configValue returns the env var if set, otherwise the config file value.
+func configValue(key string, fileVars map[string]string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fileVars[key]
+}
+
+// configValueInt returns the env var as int if set, otherwise the config file
+// value as int, otherwise the default.
+func configValueInt(key string, fileVars map[string]string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	if v, ok := fileVars[key]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 func envOrDefault(key, def string) string {

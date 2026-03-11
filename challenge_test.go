@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -189,9 +190,9 @@ func TestUniqueIDs(t *testing.T) {
 	ids := make(map[string]bool)
 
 	for i := 0; i < 50; i++ {
-		c, err := store.Create("user")
+		c, err := store.Create(fmt.Sprintf("user%d", i))
 		if err != nil {
-			t.Fatalf("Create: %v", err)
+			t.Fatalf("Create %d: %v", i, err)
 		}
 		if ids[c.ID] {
 			t.Errorf("duplicate ID: %s", c.ID)

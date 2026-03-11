@@ -1,18 +1,22 @@
-# /etc/pam.d/sudo — add pam-pocketid for OIDC-based sudo elevation
+# /etc/pam.d/sudo — pam-pocketid for OIDC-based sudo elevation
 #
 # This replaces password-based sudo auth with browser-based Pocket ID approval.
 # The user is shown a URL + code, authenticates with passkey in the browser,
 # and sudo proceeds.
 #
 # Install pam-pocketid binary to /usr/local/bin/pam-pocketid and configure
-# PAM_POCKETID_SERVER_URL in /etc/environment or /etc/pam-pocketid.env.
+# /etc/pam-pocketid.conf with PAM_POCKETID_SERVER_URL and PAM_POCKETID_SHARED_SECRET.
+#
+# Do NOT use expose_authtok — it causes an unnecessary password prompt.
+# On systems where sudo -i uses a separate PAM config, copy this file to
+# /etc/pam.d/sudo-i as well.
 
-# Option 1: Replace password auth entirely
-auth    required    pam_exec.so    expose_authtok stdout /usr/local/bin/pam-pocketid
+# Option 1: Replace password auth entirely (recommended with pam-pocketid)
+auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid
 
 # Option 2: Allow either password OR Pocket ID (uncomment below, comment above)
 # auth    sufficient  pam_unix.so
-# auth    required    pam_exec.so    expose_authtok stdout /usr/local/bin/pam-pocketid
+# auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid
 
 # Keep the rest of the standard sudo PAM stack
 account required    pam_unix.so

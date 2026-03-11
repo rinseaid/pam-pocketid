@@ -74,43 +74,33 @@ curl -L -o /usr/local/bin/pam-pocketid \
 chmod +x /usr/local/bin/pam-pocketid
 ```
 
-Configure the helper environment variables in `/etc/environment`:
+Configure the helper via `/etc/pam-pocketid.conf`:
 
 ```bash
-cat >> /etc/environment <<EOF
+cat > /etc/pam-pocketid.conf <<EOF
 PAM_POCKETID_SERVER_URL=https://sudo.example.com
 PAM_POCKETID_SHARED_SECRET=your-shared-secret
 EOF
+chmod 600 /etc/pam-pocketid.conf
 ```
 
-> **Note:** `pam_exec.so` runs commands in a sanitized environment and does not read `/etc/environment` or `/etc/environment.d/` automatically. A wrapper script is needed to source the variables (see below).
+> pam-pocketid reads this config file directly — no wrapper scripts or environment variable tricks needed. Environment variables, if set, take precedence over config file values.
 
 ### 4. Configure PAM
 
-Create a wrapper script that sources the environment before calling pam-pocketid:
-
-```bash
-cat > /usr/local/bin/pam-pocketid-wrapper <<'EOF'
-#!/bin/bash
-set -a
-. /etc/environment
-set +a
-exec /usr/local/bin/pam-pocketid
-EOF
-chmod +x /usr/local/bin/pam-pocketid-wrapper
-```
-
-Edit `/etc/pam.d/sudo`:
+Edit `/etc/pam.d/sudo` (and `/etc/pam.d/sudo-i` if it exists):
 
 ```
 # Pocket ID browser-based authentication
-auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid-wrapper
+auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid
 
 account required    pam_unix.so
 session required    pam_limits.so
 ```
 
 > **Important:** Do not use `expose_authtok` — that flag causes sudo to prompt for a password before invoking pam-pocketid. Since authentication is browser-based, no password is needed.
+>
+> On some systems, `sudo -i` uses `/etc/pam.d/sudo-i` instead of `/etc/pam.d/sudo`. If `sudo -i` still prompts for a password, copy your `/etc/pam.d/sudo` to `/etc/pam.d/sudo-i`.
 
 ### 5. Configure glauth-pocketid for PAM-based sudo auth
 
@@ -374,28 +364,20 @@ curl -L -o /usr/local/bin/pam-pocketid \
   https://github.com/rinseaid/pam-pocketid/releases/latest/download/pam-pocketid-linux-amd64
 chmod +x /usr/local/bin/pam-pocketid
 
-# Configure the helper environment
-cat >> /etc/environment <<EOF
+# Configure the helper
+cat > /etc/pam-pocketid.conf <<EOF
 PAM_POCKETID_SERVER_URL=https://sudo.example.com
 PAM_POCKETID_SHARED_SECRET=your-shared-secret
 EOF
+chmod 600 /etc/pam-pocketid.conf
 
-# Create wrapper script (pam_exec doesn't read /etc/environment)
-cat > /usr/local/bin/pam-pocketid-wrapper <<'WRAPPER'
-#!/bin/bash
-set -a
-. /etc/environment
-set +a
-exec /usr/local/bin/pam-pocketid
-WRAPPER
-chmod +x /usr/local/bin/pam-pocketid-wrapper
-
-# Configure PAM for sudo
+# Configure PAM for sudo (and sudo -i)
 cat > /etc/pam.d/sudo <<EOF
-auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid-wrapper
+auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid
 account required    pam_unix.so
 session required    pam_limits.so
 EOF
+cp /etc/pam.d/sudo /etc/pam.d/sudo-i
 ```
 
 Restart sssd and sshd:
