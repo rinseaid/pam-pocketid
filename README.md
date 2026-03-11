@@ -95,9 +95,11 @@ account required    pam_unix.so
 session required    pam_limits.so
 ```
 
-### 5. Update sudo rules in glauth-pocketid
+### 5. Configure glauth-pocketid for PAM-based sudo auth
 
-Remove the `!authenticate` sudo option from your Pocket ID group claims so that sudo invokes PAM authentication (which now goes through Pocket ID instead of asking for a password).
+In glauth-pocketid, leave `POCKETID_SUDO_NO_AUTHENTICATE` at its default value (`false`). This ensures sudo rules do **not** include `!authenticate`, so sudo will invoke the PAM stack — which now routes through pam-pocketid for browser-based passkey approval instead of asking for a password.
+
+If you previously set `POCKETID_SUDO_NO_AUTHENTICATE=true`, remove it or set it to `false`. Also remove any `sudoOptions=!authenticate` from your Pocket ID group claims.
 
 ## What the user sees
 
@@ -148,7 +150,26 @@ This project is designed to work alongside [glauth-pocketid](https://github.com/
 | **sssd** | Linux client — resolves users/groups via LDAP, delivers sudo rules and SSH keys |
 | **pam-pocketid** | sudo auth — browser-based passkey approval when running sudo |
 
-glauth-pocketid defines *what* users can sudo (commands, hosts, run-as user). pam-pocketid defines *how* they authenticate — via passkey in a browser instead of a password. Without pam-pocketid, you would need to either skip sudo authentication entirely (`POCKETID_SUDO_NO_AUTHENTICATE=true` in glauth-pocketid) or use some other PAM module.
+glauth-pocketid defines *what* users can sudo (commands, hosts, run-as user). pam-pocketid defines *how* they authenticate — via passkey in a browser instead of a password.
+
+### How sudo authentication works
+
+When a user runs `sudo`, the `sudoRole` LDAP entries (synthesized by glauth-pocketid) determine what commands they're allowed to run. Then sudo needs to verify who they are:
+
+- If the sudo rule includes `!authenticate`, sudo **skips verification entirely** and runs the command
+- If the sudo rule does **not** include `!authenticate`, sudo **invokes the PAM auth stack**
+
+With pam-pocketid installed in the PAM stack, the "invoke PAM" step becomes a browser-based passkey approval instead of a password prompt. The user sees a URL, opens it, taps their passkey, and sudo proceeds.
+
+glauth-pocketid controls whether `!authenticate` appears in sudo rules via `POCKETID_SUDO_NO_AUTHENTICATE`:
+
+| Setting | Behavior | Use with pam-pocketid? |
+|---|---|---|
+| `false` (default) | Sudo always invokes PAM | **Yes — recommended.** Every sudo invocation requires passkey approval. |
+| `true` | Sudo never invokes PAM (`!authenticate` on all rules) | No — pam-pocketid is bypassed entirely. |
+| `claims` | Per-group: groups with `sudoOptions=!authenticate` skip PAM, others invoke it | Partial — some groups use passkey auth, others skip it. |
+
+The recommended setup is `false` (the default) + pam-pocketid. This gives you per-invocation identity verification via passkey with zero passwords in the entire chain.
 
 ### Full stack Docker Compose
 
@@ -208,7 +229,7 @@ This walkthrough assumes Pocket ID is already running at `id.example.com` and th
    Group: full-admins     Claims: sudoCommands=ALL, sudoHosts=ALL, sudoRunAsUser=ALL
    Group: ops-team        Claims: sudoCommands=/usr/bin/systemctl restart *,/usr/bin/journalctl
    ```
-   Do **not** set `sudoOptions=!authenticate` — pam-pocketid handles authentication.
+   Do **not** set `sudoOptions=!authenticate` — leave `POCKETID_SUDO_NO_AUTHENTICATE=false` (the default) so that sudo invokes pam-pocketid for passkey-based authentication.
 5. Add users to the appropriate groups
 
 **Step 2: Create `glauth.cfg`**
