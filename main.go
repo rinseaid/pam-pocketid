@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
+	"syscall"
+	"time"
 )
 
 // messageWriter is where PAM messages are written. pam_exec sends stdout to
@@ -31,10 +35,6 @@ func runServer() {
 		log.Fatalf("config error: %v", err)
 	}
 
-	if cfg.SharedSecret == "" {
-		log.Printf("WARNING: PAM_POCKETID_SHARED_SECRET is not set - API endpoints are unauthenticated!")
-	}
-
 	srv, err := NewServer(cfg)
 	if err != nil {
 		log.Fatalf("server init error: %v", err)
@@ -43,11 +43,37 @@ func runServer() {
 	log.Printf("pam-pocketid server listening on %s", cfg.ListenAddr)
 	log.Printf("External URL: %s", cfg.ExternalURL)
 	log.Printf("OIDC issuer: %s", cfg.IssuerURL)
+	log.Printf("OIDC redirect URI: %s/callback", cfg.ExternalURL)
 	log.Printf("Challenge TTL: %s", cfg.ChallengeTTL)
 
-	if err := http.ListenAndServe(cfg.ListenAddr, srv); err != nil {
+	server := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           srv,
+		ReadTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    8192,
+	}
+
+	// Graceful shutdown: drain in-flight requests and stop the reap goroutine
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Printf("received %s, shutting down gracefully...", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("shutdown error: %v", err)
+		}
+		srv.Stop()
+	}()
+
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
+	log.Printf("server stopped")
 }
 
 func runPAMHelper() {

@@ -10,7 +10,7 @@ func TestChallengeCreate(t *testing.T) {
 	store := NewChallengeStore(60 * time.Second)
 	defer store.Stop()
 
-	c, err := store.Create("jordan")
+	c, err := store.Create("jordan", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestChallengeGetByID(t *testing.T) {
 	store := NewChallengeStore(60 * time.Second)
 	defer store.Stop()
 
-	c, _ := store.Create("alice")
+	c, _ := store.Create("alice", "")
 	got, ok := store.Get(c.ID)
 	if !ok {
 		t.Fatal("Get returned false")
@@ -52,7 +52,7 @@ func TestChallengeGetByCode(t *testing.T) {
 	store := NewChallengeStore(60 * time.Second)
 	defer store.Stop()
 
-	c, _ := store.Create("bob")
+	c, _ := store.Create("bob", "")
 	got, ok := store.GetByCode(c.UserCode)
 	if !ok {
 		t.Fatal("GetByCode returned false")
@@ -66,7 +66,7 @@ func TestChallengeApprove(t *testing.T) {
 	store := NewChallengeStore(60 * time.Second)
 	defer store.Stop()
 
-	c, _ := store.Create("jordan")
+	c, _ := store.Create("jordan", "")
 	if err := store.Approve(c.ID, "jordan"); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestChallengeDeny(t *testing.T) {
 	store := NewChallengeStore(60 * time.Second)
 	defer store.Stop()
 
-	c, _ := store.Create("jordan")
+	c, _ := store.Create("jordan", "")
 	if err := store.Deny(c.ID); err != nil {
 		t.Fatalf("Deny: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestChallengeExpiry(t *testing.T) {
 	store := NewChallengeStore(1 * time.Millisecond)
 	defer store.Stop()
 
-	c, _ := store.Create("jordan")
+	c, _ := store.Create("jordan", "")
 	time.Sleep(10 * time.Millisecond)
 
 	_, ok := store.Get(c.ID)
@@ -118,7 +118,7 @@ func TestChallengeDoubleApprove(t *testing.T) {
 	store := NewChallengeStore(60 * time.Second)
 	defer store.Stop()
 
-	c, _ := store.Create("jordan")
+	c, _ := store.Create("jordan", "")
 	store.Approve(c.ID, "jordan")
 
 	err := store.Approve(c.ID, "jordan")
@@ -131,7 +131,7 @@ func TestChallengeApproveExpired(t *testing.T) {
 	store := NewChallengeStore(1 * time.Millisecond)
 	defer store.Stop()
 
-	c, _ := store.Create("jordan")
+	c, _ := store.Create("jordan", "")
 	time.Sleep(10 * time.Millisecond)
 
 	err := store.Approve(c.ID, "jordan")
@@ -190,7 +190,7 @@ func TestUniqueIDs(t *testing.T) {
 	ids := make(map[string]bool)
 
 	for i := 0; i < 50; i++ {
-		c, err := store.Create(fmt.Sprintf("user%d", i))
+		c, err := store.Create(fmt.Sprintf("user%d", i), "")
 		if err != nil {
 			t.Fatalf("Create %d: %v", i, err)
 		}
@@ -207,20 +207,20 @@ func TestRateLimitPerUser(t *testing.T) {
 
 	// Create maxChallengesPerUser challenges for one user
 	for i := 0; i < maxChallengesPerUser; i++ {
-		_, err := store.Create("jordan")
+		_, err := store.Create("jordan", "")
 		if err != nil {
 			t.Fatalf("Create %d: %v", i, err)
 		}
 	}
 
 	// Next one should fail
-	_, err := store.Create("jordan")
+	_, err := store.Create("jordan", "")
 	if err == nil {
 		t.Error("expected rate limit error")
 	}
 
 	// A different user should still work
-	_, err = store.Create("alice")
+	_, err = store.Create("alice", "")
 	if err != nil {
 		t.Fatalf("Create for different user: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestSetNonce(t *testing.T) {
 	store := NewChallengeStore(60 * time.Second)
 	defer store.Stop()
 
-	c, _ := store.Create("jordan")
+	c, _ := store.Create("jordan", "")
 
 	// First set should succeed
 	if err := store.SetNonce(c.ID, "nonce1"); err != nil {
@@ -266,4 +266,30 @@ func TestStoreStop(t *testing.T) {
 	// Should not panic on double stop
 	store.Stop()
 	store.Stop()
+}
+
+func TestDenyExpiredChallenge(t *testing.T) {
+	store := NewChallengeStore(1 * time.Millisecond)
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "")
+	time.Sleep(10 * time.Millisecond)
+
+	err := store.Deny(c.ID)
+	if err == nil {
+		t.Error("expected error denying expired challenge")
+	}
+}
+
+func TestDenyAfterApprove(t *testing.T) {
+	store := NewChallengeStore(60 * time.Second)
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "")
+	store.Approve(c.ID, "jordan")
+
+	err := store.Deny(c.ID)
+	if err == nil {
+		t.Error("expected error denying already-approved challenge")
+	}
 }

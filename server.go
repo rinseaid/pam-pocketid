@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -35,12 +40,29 @@ type Server struct {
 // and ensuring sane input. Max 64 chars, alphanumeric + dash/underscore/dot.
 var validUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 
+// validHostname restricts hostnames to RFC 1035 characters, preventing log injection.
+// Max 253 chars, alphanumeric + hyphens + dots.
+var validHostname = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,253}$`)
+
 // maxRequestBodySize limits the size of incoming request bodies (1KB is plenty for JSON payloads).
 const maxRequestBodySize = 1024
 
+// oidcDiscoveryTimeout limits how long we wait for OIDC provider discovery at startup.
+const oidcDiscoveryTimeout = 30 * time.Second
+
 // NewServer creates a new auth server.
 func NewServer(cfg *Config) (*Server, error) {
-	ctx := context.Background()
+	// Use a hardened HTTP client for OIDC discovery to prevent SSRF via redirects
+	// and OOM via unbounded response bodies. Matches the pattern used for token exchange.
+	discoveryClient := &http.Client{
+		Timeout: oidcDiscoveryTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), oidcDiscoveryTimeout)
+	defer cancel()
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, discoveryClient)
 
 	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
 	if err != nil {
@@ -75,13 +97,27 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
-// ServeHTTP implements http.Handler. Adds security headers to all responses.
+// Stop cleanly shuts down the server's background resources.
+func (s *Server) Stop() {
+	s.store.Stop()
+}
+
+// ServeHTTP implements http.Handler. Adds security headers and panic recovery.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rv := recover(); rv != nil {
+			log.Printf("ERROR: panic in handler from %s: %v", remoteAddr(r), rv)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+	}()
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cache-Control", "no-store")
+	if s.cfg.ExternalURL != "" && strings.HasPrefix(s.cfg.ExternalURL, "https://") {
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -95,7 +131,21 @@ func (s *Server) verifySharedSecret(r *http.Request) bool {
 	if provided == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(s.cfg.SharedSecret), []byte(provided)) == 1
+	// Hash both values before comparison to prevent length leakage.
+	// subtle.ConstantTimeCompare returns 0 immediately for different-length
+	// inputs, which would leak the secret's length via timing.
+	expectedHash := sha256.Sum256([]byte(s.cfg.SharedSecret))
+	providedHash := sha256.Sum256([]byte(provided))
+	return subtle.ConstantTimeCompare(expectedHash[:], providedHash[:]) == 1
+}
+
+// remoteAddr extracts the client IP from a request for logging.
+func remoteAddr(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // handleCreateChallenge creates a new sudo challenge.
@@ -107,7 +157,15 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.verifySharedSecret(r) {
+		log.Printf("AUTH_FAILURE: invalid shared secret from %s on POST /api/challenge", remoteAddr(r))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Verify Content-Type to prevent cross-origin form submission
+	ct := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		http.Error(w, "content-type must be application/json", http.StatusUnsupportedMediaType)
 		return
 	}
 
@@ -116,6 +174,7 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Username string `json:"username"`
+		Hostname string `json:"hostname"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -132,10 +191,17 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	challenge, err := s.store.Create(req.Username)
+	// Validate hostname to prevent log injection (hostname is optional, empty is OK)
+	if req.Hostname != "" && !validHostname.MatchString(req.Hostname) {
+		http.Error(w, "invalid hostname format", http.StatusBadRequest)
+		return
+	}
+
+	challenge, err := s.store.Create(req.Username, req.Hostname)
 	if err != nil {
 		// Rate limit errors are returned by the store when too many challenges exist
 		if strings.Contains(err.Error(), "too many") {
+			log.Printf("RATE_LIMIT: user %q from %s (host %q)", req.Username, remoteAddr(r), req.Hostname)
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -143,6 +209,8 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("CHALLENGE: created %s for user %q from %s (host %q)", challenge.ID[:8], req.Username, remoteAddr(r), req.Hostname)
 
 	approvalURL := fmt.Sprintf("%s/approve/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode)
 
@@ -164,6 +232,7 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.verifySharedSecret(r) {
+		log.Printf("AUTH_FAILURE: invalid shared secret from %s on GET /api/challenge/", remoteAddr(r))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -188,16 +257,32 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"status":     challenge.Status,
 		"expires_in": int(time.Until(challenge.ExpiresAt).Seconds()),
-	})
+	}
+	// Include HMAC status tokens so the PAM client can verify the response
+	// is genuine and not injected by a MITM
+	if s.cfg.SharedSecret != "" {
+		switch challenge.Status {
+		case StatusApproved:
+			resp["approval_token"] = s.computeStatusHMAC(id, challenge.Username, "approved")
+		case StatusDenied:
+			resp["denial_token"] = s.computeStatusHMAC(id, challenge.Username, "denied")
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // handleApprovalPage shows the user a page to confirm the sudo request.
 // GET /approve/{user_code}
 func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	code := strings.TrimPrefix(r.URL.Path, "/approve/")
 	if code == "" {
 		http.Error(w, "code required", http.StatusBadRequest)
@@ -210,6 +295,8 @@ func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("ACCESS: GET /approve/ from %s (code=%s...)", remoteAddr(r), code[:6])
+
 	challenge, ok := s.store.GetByCode(code)
 	if !ok {
 		w.Header().Set("Content-Type", "text/html")
@@ -220,23 +307,32 @@ func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
 
 	if challenge.Status != StatusPending {
 		w.Header().Set("Content-Type", "text/html")
-		approvalAlreadyTmpl.Execute(w, map[string]string{
+		if err := approvalAlreadyTmpl.Execute(w, map[string]string{
 			"Status": string(challenge.Status),
-		})
+		}); err != nil {
+			log.Printf("ERROR: template execution: %v", err)
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	approvalPageTmpl.Execute(w, map[string]string{
+	if err := approvalPageTmpl.Execute(w, map[string]string{
 		"Username": challenge.Username,
 		"Code":     challenge.UserCode,
 		"LoginURL": fmt.Sprintf("%s/login/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode),
-	})
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
 }
 
 // handleLogin starts the OIDC flow, storing challenge ID in the state parameter.
 // GET /login/{user_code}
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	userCode := strings.TrimPrefix(r.URL.Path, "/login/")
 	if userCode == "" {
 		http.Error(w, "code required", http.StatusBadRequest)
@@ -248,6 +344,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid code format", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("ACCESS: GET /login/ from %s (code=%s...)", remoteAddr(r), userCode[:6])
 
 	challenge, ok := s.store.GetByCode(userCode)
 	if !ok {
@@ -305,10 +403,16 @@ const oidcExchangeTimeout = 15 * time.Second
 
 // handleOIDCCallback processes the OIDC callback after Pocket ID authentication.
 func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	// Parse state = challengeID:nonce
 	state := r.URL.Query().Get("state")
 	parts := strings.SplitN(state, ":", 2)
 	if len(parts) != 2 {
+		log.Printf("SECURITY: invalid state parameter (no colon) from %s", remoteAddr(r))
 		http.Error(w, "invalid state", http.StatusBadRequest)
 		return
 	}
@@ -317,19 +421,49 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Validate format of parsed fields
 	if len(challengeID) != 32 || !isHex(challengeID) || len(stateNonce) != 32 || !isHex(stateNonce) {
+		log.Printf("SECURITY: malformed state format from %s", remoteAddr(r))
 		http.Error(w, "invalid state format", http.StatusBadRequest)
 		return
 	}
 
-	// Check for error from IdP (sanitize — errParam is attacker-controlled query input)
+	// Look up the challenge FIRST, before processing any parameters.
+	challenge, found := s.store.Get(challengeID)
+	if !found {
+		log.Printf("SECURITY: callback for unknown/expired challenge %s from %s", challengeID[:8], remoteAddr(r))
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, approvalExpiredHTML)
+		return
+	}
+
+	// CRITICAL: Verify the nonce from the state matches what we stored on the challenge.
+	// This MUST happen before acting on any other parameters (error, code) to prevent
+	// an attacker from denying challenges by forging callbacks with error= parameters.
+	if challenge.Nonce == "" {
+		// Login was never initiated through our /login/ endpoint
+		log.Printf("SECURITY: callback for challenge %s with no nonce set (login never initiated) from %s", challengeID[:8], remoteAddr(r))
+		http.Error(w, "invalid challenge state", http.StatusBadRequest)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(challenge.Nonce), []byte(stateNonce)) != 1 {
+		log.Printf("SECURITY: nonce mismatch for challenge %s from %s — possible forged callback", challengeID[:8], remoteAddr(r))
+		http.Error(w, "invalid state", http.StatusBadRequest)
+		return
+	}
+
+	// Check for error from IdP (sanitize — errParam is attacker-controlled query input).
+	// Safe to act on now that the nonce has been verified.
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
-		// Only log a safe prefix, strip newlines to prevent log injection
-		safeErr := strings.ReplaceAll(errParam, "\n", "")
-		safeErr = strings.ReplaceAll(safeErr, "\r", "")
+		// Strip all control characters (newlines, ANSI escapes, null bytes) to prevent log injection
+		safeErr := strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, errParam)
 		if len(safeErr) > 64 {
 			safeErr = safeErr[:64]
 		}
-		log.Printf("OIDC error for challenge %s: %s", challengeID[:8], safeErr)
+		log.Printf("OIDC error for challenge %s from %s: %s", challengeID[:8], remoteAddr(r), safeErr)
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, approvalDeniedHTML)
@@ -338,38 +472,28 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
+		log.Printf("SECURITY: callback with missing authorization code from %s (challenge %s)", remoteAddr(r), challengeID[:8])
 		http.Error(w, "missing authorization code", http.StatusBadRequest)
 		return
 	}
 
-	// Look up the challenge FIRST, before exchanging the code.
-	challenge, found := s.store.Get(challengeID)
-	if !found {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, approvalExpiredHTML)
-		return
-	}
-
-	// CRITICAL: Verify the nonce from the state matches what we stored on the challenge.
-	if challenge.Nonce == "" {
-		// Login was never initiated through our /login/ endpoint
-		http.Error(w, "invalid challenge state", http.StatusBadRequest)
-		return
-	}
-	if subtle.ConstantTimeCompare([]byte(challenge.Nonce), []byte(stateNonce)) != 1 {
-		log.Printf("SECURITY: nonce mismatch for challenge %s — denying", challengeID[:8])
-		s.store.Deny(challengeID)
-		http.Error(w, "invalid state", http.StatusBadRequest)
-		return
-	}
-
-	// Exchange code for token with a bounded timeout
+	// Exchange code for token with a bounded timeout.
+	// Use a hardened HTTP client: disable redirect following to prevent the
+	// authorization code from being forwarded if the IdP's token endpoint
+	// redirects to an attacker-controlled server.
 	exchangeCtx, cancel := context.WithTimeout(r.Context(), oidcExchangeTimeout)
 	defer cancel()
+	exchangeClient := &http.Client{
+		Timeout: oidcExchangeTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	exchangeCtx = context.WithValue(exchangeCtx, oauth2.HTTPClient, exchangeClient)
 
 	token, err := s.oidcConfig.Exchange(exchangeCtx, code)
 	if err != nil {
-		log.Printf("ERROR exchanging code for challenge %s: token exchange failed", challengeID[:8])
+		log.Printf("ERROR exchanging code for challenge %s from %s: token exchange failed", challengeID[:8], remoteAddr(r))
 		http.Error(w, "authentication failed", http.StatusInternalServerError)
 		return
 	}
@@ -377,20 +501,21 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// Extract and verify ID token
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
+		log.Printf("ERROR: no id_token in token response for challenge %s from %s", challengeID[:8], remoteAddr(r))
 		http.Error(w, "no id_token in response", http.StatusInternalServerError)
 		return
 	}
 
 	idToken, err := s.verifier.Verify(exchangeCtx, rawIDToken)
 	if err != nil {
-		log.Printf("ERROR verifying ID token for challenge %s: verification failed", challengeID[:8])
+		log.Printf("ERROR verifying ID token for challenge %s from %s: verification failed", challengeID[:8], remoteAddr(r))
 		http.Error(w, "token verification failed", http.StatusInternalServerError)
 		return
 	}
 
-	// Verify the OIDC nonce claim matches what we sent.
-	if idToken.Nonce != challenge.Nonce {
-		log.Printf("SECURITY: OIDC token nonce mismatch for challenge %s — denying", challengeID[:8])
+	// Verify the OIDC nonce claim matches what we sent (constant-time comparison).
+	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(challenge.Nonce)) != 1 {
+		log.Printf("SECURITY: OIDC token nonce mismatch for challenge %s from %s — denying", challengeID[:8], remoteAddr(r))
 		s.store.Deny(challengeID)
 		http.Error(w, "token nonce mismatch", http.StatusBadRequest)
 		return
@@ -403,7 +528,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		Subject          string `json:"sub"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
-		log.Printf("ERROR parsing claims for challenge %s", challengeID[:8])
+		log.Printf("ERROR parsing claims for challenge %s from %s", challengeID[:8], remoteAddr(r))
 		http.Error(w, "failed to parse identity", http.StatusInternalServerError)
 		return
 	}
@@ -414,15 +539,24 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// allows cross-domain privilege escalation in multi-tenant IdP setups.
 	authenticatedUser := claims.PreferredUsername
 	if authenticatedUser == "" {
-		log.Printf("DENIED: OIDC token has no preferred_username for challenge %s", challengeID[:8])
+		log.Printf("DENIED: OIDC token has no preferred_username for challenge %s from %s", challengeID[:8], remoteAddr(r))
+		s.store.Deny(challengeID)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, approvalMismatchHTML)
+		return
+	}
+	// Validate the IdP-provided username format to prevent log injection
+	// and catch IdP misconfigurations (e.g., email as preferred_username).
+	if !validUsername.MatchString(authenticatedUser) {
+		log.Printf("DENIED: OIDC preferred_username %q fails validation for challenge %s from %s", authenticatedUser, challengeID[:8], remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, approvalMismatchHTML)
 		return
 	}
 
-	if !strings.EqualFold(challenge.Username, authenticatedUser) {
-		log.Printf("DENIED: authenticated identity does not match challenge user for challenge %s", challengeID[:8])
+	if challenge.Username != authenticatedUser {
+		log.Printf("DENIED: user %q authenticated but challenge %s is for %q (host %q) from %s", authenticatedUser, challengeID[:8], challenge.Username, challenge.Hostname, remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, approvalMismatchHTML)
@@ -431,23 +565,39 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Approve the challenge
 	if err := s.store.Approve(challengeID, authenticatedUser); err != nil {
-		log.Printf("ERROR approving challenge %s", challengeID[:8])
+		log.Printf("ERROR approving challenge %s from %s", challengeID[:8], remoteAddr(r))
 		http.Error(w, "failed to approve", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("APPROVED: sudo for user %q (challenge %s)", challenge.Username, challengeID[:8])
+	log.Printf("APPROVED: sudo for user %q on host %q (challenge %s) from %s", challenge.Username, challenge.Hostname, challengeID[:8], remoteAddr(r))
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, approvalSuccessHTML)
 }
 
+// computeStatusHMAC creates an HMAC-SHA256 token binding a challenge status
+// to the specific challengeID, username, and status string, preventing
+// poll response forgery by MITM for both approvals and denials.
+// Uses length-prefixed fields instead of delimiter-separated to prevent
+// field injection (e.g., a username containing ":" could shift field boundaries
+// in a colon-delimited format).
+func (s *Server) computeStatusHMAC(challengeID, username, status string) string {
+	mac := hmac.New(sha256.New, []byte(s.cfg.SharedSecret))
+	fmt.Fprintf(mac, "%d:%s%d:%s%d:%s", len(challengeID), challengeID, len(status), status, len(username), username)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }
 
-// isHex returns true if s contains only hexadecimal characters.
+// isHex returns true if s is non-empty and contains only hexadecimal characters.
 func isHex(s string) bool {
+	if s == "" {
+		return false
+	}
 	for _, c := range s {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
 			return false

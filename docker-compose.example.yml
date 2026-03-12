@@ -12,3 +12,8 @@ services:
       PAM_POCKETID_CHALLENGE_TTL: "120"
       PAM_POCKETID_SHARED_SECRET: "your-shared-secret"
     restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true

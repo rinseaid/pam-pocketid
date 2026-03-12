@@ -3,9 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -50,6 +53,14 @@ func LoadServerConfig() (*Config, error) {
 	if cfg.IssuerURL == "" {
 		return nil, fmt.Errorf("PAM_POCKETID_ISSUER_URL is required")
 	}
+	// Validate IssuerURL scheme (consistent with ExternalURL/ServerURL validation)
+	if !strings.HasPrefix(cfg.IssuerURL, "https://") && !strings.HasPrefix(cfg.IssuerURL, "http://") {
+		return nil, fmt.Errorf("PAM_POCKETID_ISSUER_URL must start with https:// or http://")
+	}
+	// Reject embedded credentials in IssuerURL
+	if u, err := url.Parse(cfg.IssuerURL); err == nil && u.User != nil {
+		return nil, fmt.Errorf("PAM_POCKETID_ISSUER_URL must not contain embedded credentials")
+	}
 	if cfg.ClientID == "" {
 		return nil, fmt.Errorf("PAM_POCKETID_CLIENT_ID is required")
 	}
@@ -65,6 +76,10 @@ func LoadServerConfig() (*Config, error) {
 	if !strings.HasPrefix(cfg.ExternalURL, "https://") && !strings.HasPrefix(cfg.ExternalURL, "http://") {
 		return nil, fmt.Errorf("PAM_POCKETID_EXTERNAL_URL must start with https:// or http://")
 	}
+	// Reject embedded credentials — they would leak in approval URLs sent to users
+	if u, err := url.Parse(cfg.ExternalURL); err == nil && u.User != nil {
+		return nil, fmt.Errorf("PAM_POCKETID_EXTERNAL_URL must not contain embedded credentials")
+	}
 
 	// Enforce minimum TTL to prevent unreasonably short challenges
 	if cfg.ChallengeTTL < 10*time.Second {
@@ -74,6 +89,29 @@ func LoadServerConfig() (*Config, error) {
 	if cfg.ChallengeTTL > 10*time.Minute {
 		return nil, fmt.Errorf("PAM_POCKETID_CHALLENGE_TTL must not exceed 600 seconds")
 	}
+
+	// Require shared secret unless explicitly opted out
+	if cfg.SharedSecret == "" {
+		if os.Getenv("PAM_POCKETID_INSECURE") == "true" {
+			log.Printf("WARNING: PAM_POCKETID_SHARED_SECRET is not set — API endpoints are unauthenticated (PAM_POCKETID_INSECURE=true)")
+		} else {
+			return nil, fmt.Errorf("PAM_POCKETID_SHARED_SECRET is required (set PAM_POCKETID_INSECURE=true to override)")
+		}
+	} else if len(cfg.SharedSecret) < 16 {
+		return nil, fmt.Errorf("PAM_POCKETID_SHARED_SECRET must be at least 16 characters")
+	}
+
+	// Warn if ExternalURL uses plain HTTP (secrets and auth codes will be in cleartext)
+	if strings.HasPrefix(cfg.ExternalURL, "http://") {
+		log.Printf("WARNING: PAM_POCKETID_EXTERNAL_URL uses http:// — OIDC callbacks and approval URLs are not encrypted")
+	}
+
+	// Best-effort: clear secrets from environment to reduce exposure window.
+	// Note: this does NOT scrub /proc/PID/environ on Linux (the initial
+	// environment snapshot is immutable), but it prevents os.Getenv from
+	// returning the values and removes them from child process inheritance.
+	os.Unsetenv("PAM_POCKETID_SHARED_SECRET")
+	os.Unsetenv("PAM_POCKETID_CLIENT_SECRET")
 
 	return cfg, nil
 }
@@ -107,6 +145,37 @@ func LoadClientConfig() (*Config, error) {
 		return nil, fmt.Errorf("PAM_POCKETID_SERVER_URL must start with https:// or http://")
 	}
 
+	// Reject URLs with embedded credentials (prevents secret leakage in logs/errors)
+	if u, err := url.Parse(cfg.ServerURL); err == nil && u.User != nil {
+		return nil, fmt.Errorf("PAM_POCKETID_SERVER_URL must not contain embedded credentials")
+	}
+
+	// Warn if ServerURL uses plain HTTP (shared secret will be sent in cleartext)
+	if strings.HasPrefix(cfg.ServerURL, "http://") {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_SERVER_URL uses http:// — shared secret is transmitted in cleartext\n")
+	}
+
+	// Enforce poll interval bounds to prevent tight-loop DoS
+	if cfg.PollInterval < 500*time.Millisecond {
+		cfg.PollInterval = 500 * time.Millisecond
+	}
+	if cfg.PollInterval > 30*time.Second {
+		cfg.PollInterval = 30 * time.Second
+	}
+
+	// Enforce timeout bounds to prevent indefinite PAM session blocking
+	if cfg.Timeout < 10*time.Second {
+		cfg.Timeout = 10 * time.Second
+	}
+	if cfg.Timeout > 600*time.Second {
+		cfg.Timeout = 600 * time.Second
+	}
+
+	// Enforce minimum SharedSecret length on client side (mirrors server check)
+	if cfg.SharedSecret != "" && len(cfg.SharedSecret) < 16 {
+		return nil, fmt.Errorf("PAM_POCKETID_SHARED_SECRET must be at least 16 characters")
+	}
+
 	return cfg, nil
 }
 
@@ -114,15 +183,51 @@ func LoadClientConfig() (*Config, error) {
 // are comments. Values may be optionally quoted. Returns an empty map on error.
 func loadConfigFile(path string) map[string]string {
 	vars := make(map[string]string)
-	f, err := os.Open(path)
+
+	// Open with O_NOFOLLOW to atomically reject symlinks (no TOCTOU gap
+	// between symlink check and open). All subsequent checks (permissions,
+	// ownership) use the opened fd's Stat, ensuring consistency.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			// O_NOFOLLOW returns ELOOP for symlinks — report it clearly
+			fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: cannot open %s: %v\n", path, err)
+		}
 		return vars
 	}
 	defer f.Close()
 
+	info, err := f.Stat()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: cannot stat %s: %v\n", path, err)
+		return vars
+	}
+	if !info.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: ERROR: %s is not a regular file — refusing to load\n", path)
+		return vars
+	}
+	mode := info.Mode().Perm()
+	if mode&0077 != 0 {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: ERROR: %s has group/other permissions (mode %04o) — refusing to load (fix with: chmod 600 %s)\n", path, mode, path)
+		return vars
+	}
+	// Check file ownership — config must be owned by root to prevent
+	// a non-root user from pre-creating it with a known shared secret.
+	if uid, ok := fileOwnerUID(info); ok && uid != 0 {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: ERROR: %s is not owned by root (uid=%d) — refusing to load\n", path, uid)
+		return vars
+	}
+
 	scanner := bufio.NewScanner(f)
+	firstLine := true
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		line := scanner.Text()
+		// Strip UTF-8 BOM from first line (common when edited on Windows)
+		if firstLine {
+			line = strings.TrimPrefix(line, "\xef\xbb\xbf")
+			firstLine = false
+		}
+		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -137,6 +242,9 @@ func loadConfigFile(path string) map[string]string {
 			v = v[1 : len(v)-1]
 		}
 		vars[k] = v
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: error reading %s: %v\n", path, err)
 	}
 	return vars
 }

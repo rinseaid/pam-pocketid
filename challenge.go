@@ -41,6 +41,9 @@ type Challenge struct {
 	// The nonce is generated when the user clicks "login" and verified on callback.
 	Nonce string `json:"-"`
 
+	// Hostname of the machine requesting sudo (sent by PAM client, optional)
+	Hostname string `json:"hostname,omitempty"`
+
 	// Set after OIDC callback confirms identity
 	ApprovedBy string    `json:"-"`
 	ApprovedAt time.Time `json:"-"`
@@ -48,37 +51,37 @@ type Challenge struct {
 
 // ChallengeStore manages in-memory sudo challenges with TTL expiration.
 type ChallengeStore struct {
-	mu         sync.RWMutex
-	challenges map[string]*Challenge // keyed by ID
-	byCode     map[string]string     // user_code -> ID
-	ttl        time.Duration
-	stopCh     chan struct{} // signals reapLoop to stop
+	mu          sync.RWMutex
+	challenges  map[string]*Challenge // keyed by ID
+	byCode      map[string]string     // user_code -> ID
+	pendingByUser map[string]int      // username -> count of pending non-expired challenges
+	ttl         time.Duration
+	stopCh      chan struct{} // signals reapLoop to stop
+	stopOnce    sync.Once    // ensures Stop is safe to call concurrently
 }
 
 // NewChallengeStore creates a new store with the given challenge TTL.
 func NewChallengeStore(ttl time.Duration) *ChallengeStore {
 	s := &ChallengeStore{
-		challenges: make(map[string]*Challenge),
-		byCode:     make(map[string]string),
-		ttl:        ttl,
-		stopCh:     make(chan struct{}),
+		challenges:    make(map[string]*Challenge),
+		byCode:        make(map[string]string),
+		pendingByUser: make(map[string]int),
+		ttl:           ttl,
+		stopCh:        make(chan struct{}),
 	}
 	go s.reapLoop()
 	return s
 }
 
-// Stop cleanly shuts down the reap goroutine.
+// Stop cleanly shuts down the reap goroutine. Safe to call concurrently.
 func (s *ChallengeStore) Stop() {
-	select {
-	case <-s.stopCh:
-		// already stopped
-	default:
+	s.stopOnce.Do(func() {
 		close(s.stopCh)
-	}
+	})
 }
 
-// Create generates a new challenge for the given username.
-func (s *ChallengeStore) Create(username string) (*Challenge, error) {
+// Create generates a new challenge for the given username and optional hostname.
+func (s *ChallengeStore) Create(username, hostname string) (*Challenge, error) {
 	id, err := randomHex(16)
 	if err != nil {
 		return nil, fmt.Errorf("generating challenge ID: %w", err)
@@ -94,6 +97,7 @@ func (s *ChallengeStore) Create(username string) (*Challenge, error) {
 		ID:        id,
 		UserCode:  code,
 		Username:  username,
+		Hostname:  hostname,
 		Status:    StatusPending,
 		CreatedAt: now,
 		ExpiresAt: now.Add(s.ttl),
@@ -107,14 +111,8 @@ func (s *ChallengeStore) Create(username string) (*Challenge, error) {
 		return nil, fmt.Errorf("too many active challenges, try again later")
 	}
 
-	// Rate limit: cap per-user pending challenges
-	pendingCount := 0
-	for _, existing := range s.challenges {
-		if existing.Username == username && existing.Status == StatusPending && now.Before(existing.ExpiresAt) {
-			pendingCount++
-		}
-	}
-	if pendingCount >= maxChallengesPerUser {
+	// Rate limit: cap per-user pending challenges (O(1) via counter map)
+	if s.pendingByUser[username] >= maxChallengesPerUser {
 		return nil, fmt.Errorf("too many pending challenges for user %q, wait for existing ones to expire", username)
 	}
 
@@ -125,6 +123,7 @@ func (s *ChallengeStore) Create(username string) (*Challenge, error) {
 
 	s.challenges[id] = c
 	s.byCode[code] = id
+	s.pendingByUser[username]++
 	return c, nil
 }
 
@@ -156,12 +155,20 @@ func (s *ChallengeStore) GetByCode(code string) (Challenge, bool) {
 
 // SetNonce stores the OIDC nonce on a challenge when the login flow begins.
 // This binds the OIDC authentication to this specific challenge, preventing CSRF.
+// Also re-checks status and expiry under the write lock to close the TOCTOU gap
+// between GetByCode (which returns a snapshot) and this mutation.
 func (s *ChallengeStore) SetNonce(id string, nonce string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.challenges[id]
 	if !ok {
 		return fmt.Errorf("challenge not found")
+	}
+	if time.Now().After(c.ExpiresAt) {
+		return fmt.Errorf("challenge expired")
+	}
+	if c.Status != StatusPending {
+		return fmt.Errorf("challenge already resolved")
 	}
 	if c.Nonce != "" {
 		return fmt.Errorf("nonce already set (login already initiated)")
@@ -187,6 +194,7 @@ func (s *ChallengeStore) Approve(id string, approvedBy string) error {
 	c.Status = StatusApproved
 	c.ApprovedBy = approvedBy
 	c.ApprovedAt = time.Now()
+	s.decPending(c.Username)
 	return nil
 }
 
@@ -198,11 +206,25 @@ func (s *ChallengeStore) Deny(id string) error {
 	if !ok {
 		return fmt.Errorf("challenge not found")
 	}
+	if time.Now().After(c.ExpiresAt) {
+		return fmt.Errorf("challenge expired")
+	}
 	if c.Status != StatusPending {
 		return fmt.Errorf("challenge already resolved")
 	}
 	c.Status = StatusDenied
+	s.decPending(c.Username)
 	return nil
+}
+
+// decPending decrements the pending counter for a username. Must be called under write lock.
+func (s *ChallengeStore) decPending(username string) {
+	if s.pendingByUser[username] > 0 {
+		s.pendingByUser[username]--
+	}
+	if s.pendingByUser[username] == 0 {
+		delete(s.pendingByUser, username)
+	}
 }
 
 // reapLoop removes expired challenges periodically.
@@ -225,6 +247,10 @@ func (s *ChallengeStore) reap() {
 	defer s.mu.Unlock()
 	for id, c := range s.challenges {
 		if now.After(c.ExpiresAt.Add(30 * time.Second)) {
+			// If the challenge was still pending when reaped, decrement the counter
+			if c.Status == StatusPending {
+				s.decPending(c.Username)
+			}
 			delete(s.byCode, c.UserCode)
 			delete(s.challenges, id)
 		}
