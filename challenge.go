@@ -250,6 +250,8 @@ func (s *ChallengeStore) reap() {
 			// If the challenge was still pending when reaped, decrement the counter
 			if c.Status == StatusPending {
 				s.decPending(c.Username)
+				challengesExpired.Inc()
+				activeChallenges.Dec()
 			}
 			delete(s.byCode, c.UserCode)
 			delete(s.challenges, id)

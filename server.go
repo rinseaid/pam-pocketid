@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/oauth2"
 )
 
@@ -93,6 +94,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.mux.HandleFunc("/login/", s.handleLogin)
 	s.mux.HandleFunc("/callback", s.handleOIDCCallback)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
+	s.mux.Handle("/metrics", promhttp.Handler())
 
 	return s, nil
 }
@@ -157,6 +159,7 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.verifySharedSecret(r) {
+		authFailures.Inc()
 		log.Printf("AUTH_FAILURE: invalid shared secret from %s on POST /api/challenge", remoteAddr(r))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -201,6 +204,7 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Rate limit errors are returned by the store when too many challenges exist
 		if strings.Contains(err.Error(), "too many") {
+			rateLimitRejections.Inc()
 			log.Printf("RATE_LIMIT: user %q from %s (host %q)", req.Username, remoteAddr(r), req.Hostname)
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
@@ -210,6 +214,8 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	challengesCreated.WithLabelValues(req.Username).Inc()
+	activeChallenges.Inc()
 	log.Printf("CHALLENGE: created %s for user %q from %s (host %q)", challenge.ID[:8], req.Username, remoteAddr(r), req.Hostname)
 
 	approvalURL := fmt.Sprintf("%s/approve/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode)
@@ -232,6 +238,7 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.verifySharedSecret(r) {
+		authFailures.Inc()
 		log.Printf("AUTH_FAILURE: invalid shared secret from %s on GET /api/challenge/", remoteAddr(r))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -463,6 +470,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		if len(safeErr) > 64 {
 			safeErr = safeErr[:64]
 		}
+		challengesDenied.WithLabelValues("oidc_error").Inc()
+		activeChallenges.Dec()
+		challengeDuration.Observe(time.Since(challenge.CreatedAt).Seconds())
 		log.Printf("OIDC error for challenge %s from %s: %s", challengeID[:8], remoteAddr(r), safeErr)
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
@@ -515,6 +525,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Verify the OIDC nonce claim matches what we sent (constant-time comparison).
 	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(challenge.Nonce)) != 1 {
+		challengesDenied.WithLabelValues("nonce_mismatch").Inc()
+		activeChallenges.Dec()
+		challengeDuration.Observe(time.Since(challenge.CreatedAt).Seconds())
 		log.Printf("SECURITY: OIDC token nonce mismatch for challenge %s from %s — denying", challengeID[:8], remoteAddr(r))
 		s.store.Deny(challengeID)
 		http.Error(w, "token nonce mismatch", http.StatusBadRequest)
@@ -539,6 +552,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// allows cross-domain privilege escalation in multi-tenant IdP setups.
 	authenticatedUser := claims.PreferredUsername
 	if authenticatedUser == "" {
+		challengesDenied.WithLabelValues("identity_mismatch").Inc()
+		activeChallenges.Dec()
+		challengeDuration.Observe(time.Since(challenge.CreatedAt).Seconds())
 		log.Printf("DENIED: OIDC token has no preferred_username for challenge %s from %s", challengeID[:8], remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
@@ -548,6 +564,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// Validate the IdP-provided username format to prevent log injection
 	// and catch IdP misconfigurations (e.g., email as preferred_username).
 	if !validUsername.MatchString(authenticatedUser) {
+		challengesDenied.WithLabelValues("identity_mismatch").Inc()
+		activeChallenges.Dec()
+		challengeDuration.Observe(time.Since(challenge.CreatedAt).Seconds())
 		log.Printf("DENIED: OIDC preferred_username %q fails validation for challenge %s from %s", authenticatedUser, challengeID[:8], remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
@@ -556,6 +575,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if challenge.Username != authenticatedUser {
+		challengesDenied.WithLabelValues("identity_mismatch").Inc()
+		activeChallenges.Dec()
+		challengeDuration.Observe(time.Since(challenge.CreatedAt).Seconds())
 		log.Printf("DENIED: user %q authenticated but challenge %s is for %q (host %q) from %s", authenticatedUser, challengeID[:8], challenge.Username, challenge.Hostname, remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
@@ -570,6 +592,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	challengesApproved.Inc()
+	activeChallenges.Dec()
+	challengeDuration.Observe(time.Since(challenge.CreatedAt).Seconds())
 	log.Printf("APPROVED: sudo for user %q on host %q (challenge %s) from %s", challenge.Username, challenge.Hostname, challengeID[:8], remoteAddr(r))
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, approvalSuccessHTML)
