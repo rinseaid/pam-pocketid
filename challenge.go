@@ -51,22 +51,26 @@ type Challenge struct {
 
 // ChallengeStore manages in-memory sudo challenges with TTL expiration.
 type ChallengeStore struct {
-	mu          sync.RWMutex
-	challenges  map[string]*Challenge // keyed by ID
-	byCode      map[string]string     // user_code -> ID
-	pendingByUser map[string]int      // username -> count of pending non-expired challenges
-	ttl         time.Duration
-	stopCh      chan struct{} // signals reapLoop to stop
-	stopOnce    sync.Once    // ensures Stop is safe to call concurrently
+	mu            sync.RWMutex
+	challenges    map[string]*Challenge // keyed by ID
+	byCode        map[string]string     // user_code -> ID
+	pendingByUser map[string]int        // username -> count of pending non-expired challenges
+	lastApproval  map[string]time.Time  // username -> last approval time (for grace period)
+	ttl           time.Duration
+	gracePeriod   time.Duration
+	stopCh        chan struct{} // signals reapLoop to stop
+	stopOnce      sync.Once    // ensures Stop is safe to call concurrently
 }
 
-// NewChallengeStore creates a new store with the given challenge TTL.
-func NewChallengeStore(ttl time.Duration) *ChallengeStore {
+// NewChallengeStore creates a new store with the given challenge TTL and grace period.
+func NewChallengeStore(ttl, gracePeriod time.Duration) *ChallengeStore {
 	s := &ChallengeStore{
 		challenges:    make(map[string]*Challenge),
 		byCode:        make(map[string]string),
 		pendingByUser: make(map[string]int),
+		lastApproval:  make(map[string]time.Time),
 		ttl:           ttl,
+		gracePeriod:   gracePeriod,
 		stopCh:        make(chan struct{}),
 	}
 	go s.reapLoop()
@@ -194,6 +198,7 @@ func (s *ChallengeStore) Approve(id string, approvedBy string) error {
 	c.Status = StatusApproved
 	c.ApprovedBy = approvedBy
 	c.ApprovedAt = time.Now()
+	s.lastApproval[c.Username] = c.ApprovedAt
 	s.decPending(c.Username)
 	return nil
 }
@@ -213,6 +218,39 @@ func (s *ChallengeStore) Deny(id string) error {
 		return fmt.Errorf("challenge already resolved")
 	}
 	c.Status = StatusDenied
+	s.decPending(c.Username)
+	return nil
+}
+
+// WithinGracePeriod returns true if the user has a recent approval within the grace period.
+func (s *ChallengeStore) WithinGracePeriod(username string) bool {
+	if s.gracePeriod <= 0 {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.lastApproval[username]
+	if !ok {
+		return false
+	}
+	return time.Since(t) < s.gracePeriod
+}
+
+// AutoApprove immediately approves a challenge (used for grace period bypass).
+func (s *ChallengeStore) AutoApprove(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.challenges[id]
+	if !ok {
+		return fmt.Errorf("challenge not found")
+	}
+	if c.Status != StatusPending {
+		return fmt.Errorf("challenge already resolved")
+	}
+	c.Status = StatusApproved
+	c.ApprovedBy = c.Username
+	c.ApprovedAt = time.Now()
+	s.lastApproval[c.Username] = c.ApprovedAt
 	s.decPending(c.Username)
 	return nil
 }

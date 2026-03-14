@@ -7,7 +7,7 @@ import (
 )
 
 func TestChallengeCreate(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, err := store.Create("jordan", "")
@@ -35,7 +35,7 @@ func TestChallengeCreate(t *testing.T) {
 }
 
 func TestChallengeGetByID(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("alice", "")
@@ -49,7 +49,7 @@ func TestChallengeGetByID(t *testing.T) {
 }
 
 func TestChallengeGetByCode(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("bob", "")
@@ -63,7 +63,7 @@ func TestChallengeGetByCode(t *testing.T) {
 }
 
 func TestChallengeApprove(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -84,7 +84,7 @@ func TestChallengeApprove(t *testing.T) {
 }
 
 func TestChallengeDeny(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -102,7 +102,7 @@ func TestChallengeDeny(t *testing.T) {
 }
 
 func TestChallengeExpiry(t *testing.T) {
-	store := NewChallengeStore(1 * time.Millisecond)
+	store := NewChallengeStore(1*time.Millisecond, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -115,7 +115,7 @@ func TestChallengeExpiry(t *testing.T) {
 }
 
 func TestChallengeDoubleApprove(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -128,7 +128,7 @@ func TestChallengeDoubleApprove(t *testing.T) {
 }
 
 func TestChallengeApproveExpired(t *testing.T) {
-	store := NewChallengeStore(1 * time.Millisecond)
+	store := NewChallengeStore(1*time.Millisecond, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -141,7 +141,7 @@ func TestChallengeApproveExpired(t *testing.T) {
 }
 
 func TestChallengeNotFound(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	_, ok := store.Get("nonexistent")
@@ -185,7 +185,7 @@ func TestUserCodeFormat(t *testing.T) {
 }
 
 func TestUniqueIDs(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 	ids := make(map[string]bool)
 
@@ -202,7 +202,7 @@ func TestUniqueIDs(t *testing.T) {
 }
 
 func TestRateLimitPerUser(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	// Create maxChallengesPerUser challenges for one user
@@ -227,7 +227,7 @@ func TestRateLimitPerUser(t *testing.T) {
 }
 
 func TestSetNonce(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -253,7 +253,7 @@ func TestSetNonce(t *testing.T) {
 }
 
 func TestSetNonceNotFound(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	if err := store.SetNonce("nonexistent", "nonce"); err == nil {
@@ -262,14 +262,14 @@ func TestSetNonceNotFound(t *testing.T) {
 }
 
 func TestStoreStop(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	// Should not panic on double stop
 	store.Stop()
 	store.Stop()
 }
 
 func TestDenyExpiredChallenge(t *testing.T) {
-	store := NewChallengeStore(1 * time.Millisecond)
+	store := NewChallengeStore(1*time.Millisecond, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -282,7 +282,7 @@ func TestDenyExpiredChallenge(t *testing.T) {
 }
 
 func TestDenyAfterApprove(t *testing.T) {
-	store := NewChallengeStore(60 * time.Second)
+	store := NewChallengeStore(60*time.Second, 0)
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "")
@@ -291,5 +291,79 @@ func TestDenyAfterApprove(t *testing.T) {
 	err := store.Deny(c.ID)
 	if err == nil {
 		t.Error("expected error denying already-approved challenge")
+	}
+}
+
+func TestGracePeriodDisabledByDefault(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0)
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "")
+	store.Approve(c.ID, "jordan")
+
+	if store.WithinGracePeriod("jordan") {
+		t.Error("grace period should be disabled when set to 0")
+	}
+}
+
+func TestGracePeriodApproval(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Hour)
+	defer store.Stop()
+
+	// No approval yet
+	if store.WithinGracePeriod("jordan") {
+		t.Error("should not be within grace period before any approval")
+	}
+
+	// Approve a challenge
+	c, _ := store.Create("jordan", "")
+	store.Approve(c.ID, "jordan")
+
+	// Should be within grace period now
+	if !store.WithinGracePeriod("jordan") {
+		t.Error("should be within grace period after approval")
+	}
+
+	// Different user should not be affected
+	if store.WithinGracePeriod("alice") {
+		t.Error("grace period should be per-user")
+	}
+}
+
+func TestGracePeriodExpiry(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Millisecond)
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "")
+	store.Approve(c.ID, "jordan")
+
+	time.Sleep(5 * time.Millisecond)
+
+	if store.WithinGracePeriod("jordan") {
+		t.Error("grace period should have expired")
+	}
+}
+
+func TestAutoApprove(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Hour)
+	defer store.Stop()
+
+	// First challenge approved normally
+	c1, _ := store.Create("jordan", "")
+	store.Approve(c1.ID, "jordan")
+
+	// Second challenge auto-approved
+	c2, _ := store.Create("jordan", "host2")
+	err := store.AutoApprove(c2.ID)
+	if err != nil {
+		t.Fatalf("auto-approve failed: %v", err)
+	}
+
+	got, ok := store.Get(c2.ID)
+	if !ok {
+		t.Fatal("auto-approved challenge not found")
+	}
+	if got.Status != StatusApproved {
+		t.Errorf("expected approved, got %s", got.Status)
 	}
 }

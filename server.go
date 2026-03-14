@@ -82,7 +82,7 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	s := &Server{
 		cfg:        cfg,
-		store:      NewChallengeStore(cfg.ChallengeTTL),
+		store:      NewChallengeStore(cfg.ChallengeTTL, cfg.GracePeriod),
 		oidcConfig: oidcConfig,
 		verifier:   verifier,
 		mux:        http.NewServeMux(),
@@ -217,6 +217,29 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	challengesCreated.WithLabelValues(req.Username).Inc()
 	activeChallenges.Inc()
 	log.Printf("CHALLENGE: created %s for user %q from %s (host %q)", challenge.ID[:8], req.Username, remoteAddr(r), req.Hostname)
+
+	// Auto-approve if within grace period
+	if s.store.WithinGracePeriod(req.Username) {
+		if err := s.store.AutoApprove(challenge.ID); err == nil {
+			challengesAutoApproved.Inc()
+			activeChallenges.Dec()
+			challengeDuration.Observe(0)
+			log.Printf("GRACE: auto-approved sudo for user %q (challenge %s) — recent authentication within grace period", req.Username, challenge.ID[:8])
+
+			w.Header().Set("Content-Type", "application/json")
+			resp := map[string]interface{}{
+				"challenge_id": challenge.ID,
+				"user_code":    challenge.UserCode,
+				"expires_in":   int(s.cfg.ChallengeTTL.Seconds()),
+				"status":       "approved",
+			}
+			if s.cfg.SharedSecret != "" {
+				resp["approval_token"] = s.computeStatusHMAC(challenge.ID, req.Username, "approved")
+			}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+	}
 
 	approvalURL := fmt.Sprintf("%s/approve/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode)
 

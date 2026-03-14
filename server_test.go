@@ -22,7 +22,7 @@ func newTestServer(t *testing.T) *Server {
 			SharedSecret: "test-secret-that-is-long-enough",
 			ChallengeTTL: 120 * time.Second,
 		},
-		store: NewChallengeStore(120 * time.Second),
+		store: NewChallengeStore(120*time.Second, 0),
 		mux:   http.NewServeMux(),
 	}
 }
@@ -653,7 +653,7 @@ func TestPanicRecovery(t *testing.T) {
 			SharedSecret: "test-secret-that-is-long-enough",
 			ChallengeTTL: 120 * time.Second,
 		},
-		store: NewChallengeStore(120 * time.Second),
+		store: NewChallengeStore(120*time.Second, 0),
 		mux:   http.NewServeMux(),
 	}
 	// Register a handler that panics
@@ -910,7 +910,7 @@ func TestHSTSHeaderOnHTTPS(t *testing.T) {
 			SharedSecret: "test-secret-that-is-long-enough",
 			ChallengeTTL: 120 * time.Second,
 		},
-		store: NewChallengeStore(120 * time.Second),
+		store: NewChallengeStore(120*time.Second, 0),
 		mux:   http.NewServeMux(),
 	}
 	s.mux.HandleFunc("/healthz", s.handleHealthz)

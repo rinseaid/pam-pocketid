@@ -25,10 +25,11 @@ type Config struct {
 	ClientSecret string // OIDC client secret
 
 	// Server settings
-	ListenAddr  string        // Address to listen on (default ":8090")
-	ExternalURL string        // Public URL of this server (for redirects)
+	ListenAddr   string        // Address to listen on (default ":8090")
+	ExternalURL  string        // Public URL of this server (for redirects)
 	ChallengeTTL time.Duration // How long challenges stay valid (default 120s)
 	SharedSecret string        // Shared secret for PAM helper auth
+	GracePeriod  time.Duration // Skip re-auth if user approved within this window (default 0 = disabled)
 
 	// PAM helper settings (used by client mode)
 	ServerURL   string        // URL of the auth server
@@ -49,6 +50,9 @@ func LoadServerConfig() (*Config, error) {
 
 	ttlSec := envOrDefaultInt("PAM_POCKETID_CHALLENGE_TTL", 120)
 	cfg.ChallengeTTL = time.Duration(ttlSec) * time.Second
+
+	graceSec := envOrDefaultInt("PAM_POCKETID_GRACE_PERIOD", 0)
+	cfg.GracePeriod = time.Duration(graceSec) * time.Second
 
 	if cfg.IssuerURL == "" {
 		return nil, fmt.Errorf("PAM_POCKETID_ISSUER_URL is required")
@@ -88,6 +92,11 @@ func LoadServerConfig() (*Config, error) {
 	// Enforce maximum TTL to limit exposure window
 	if cfg.ChallengeTTL > 10*time.Minute {
 		return nil, fmt.Errorf("PAM_POCKETID_CHALLENGE_TTL must not exceed 600 seconds")
+	}
+
+	// Enforce maximum grace period to limit trust window
+	if cfg.GracePeriod > 24*time.Hour {
+		return nil, fmt.Errorf("PAM_POCKETID_GRACE_PERIOD must not exceed 86400 seconds (24 hours)")
 	}
 
 	// Require shared secret unless explicitly opted out

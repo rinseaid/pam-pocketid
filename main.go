@@ -45,6 +45,9 @@ func runServer() {
 	log.Printf("OIDC issuer: %s", cfg.IssuerURL)
 	log.Printf("OIDC redirect URI: %s/callback", cfg.ExternalURL)
 	log.Printf("Challenge TTL: %s", cfg.ChallengeTTL)
+	if cfg.GracePeriod > 0 {
+		log.Printf("Grace period: %s (sudo re-auth skipped within this window)", cfg.GracePeriod)
+	}
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,

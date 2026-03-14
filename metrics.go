@@ -15,7 +15,13 @@ var (
 	challengesApproved = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "pam_pocketid",
 		Name:      "challenges_approved_total",
-		Help:      "Total number of sudo challenges approved.",
+		Help:      "Total number of sudo challenges approved via OIDC authentication.",
+	})
+
+	challengesAutoApproved = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "pam_pocketid",
+		Name:      "challenges_auto_approved_total",
+		Help:      "Total number of sudo challenges auto-approved via grace period.",
 	})
 
 	challengesDenied = promauto.NewCounterVec(prometheus.CounterOpts{

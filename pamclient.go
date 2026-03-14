@@ -52,6 +52,8 @@ type challengeResponse struct {
 	UserCode        string `json:"user_code"`
 	VerificationURL string `json:"verification_url"`
 	ExpiresIn       int    `json:"expires_in"`
+	Status          string `json:"status,omitempty"`
+	ApprovalToken   string `json:"approval_token,omitempty"`
 }
 
 // pollResponse is the response from GET /api/challenge/{id}.
@@ -75,7 +77,18 @@ func (p *PAMClient) Authenticate(username string) error {
 		return fmt.Errorf("creating challenge: %w", err)
 	}
 
-	// 2. Display approval info to user.
+	// 2. Check if auto-approved via grace period
+	if challenge.Status == string(StatusApproved) {
+		if p.cfg.SharedSecret != "" {
+			if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", challenge.ApprovalToken) {
+				return fmt.Errorf("auto-approval token verification failed (possible MITM attack)")
+			}
+		}
+		fmt.Fprintf(messageWriter, "\n  Sudo approved (recent authentication).\n\n")
+		return nil
+	}
+
+	// 3. Display approval info to user.
 	// Sanitize all server-provided values before terminal display to prevent
 	// ANSI escape injection from a compromised server.
 	fmt.Fprintf(messageWriter, "\n")
@@ -87,7 +100,7 @@ func (p *PAMClient) Authenticate(username string) error {
 	fmt.Fprintf(messageWriter, "\n")
 	fmt.Fprintf(messageWriter, "  Waiting for approval (expires in %ds)...\n", challenge.ExpiresIn)
 
-	// 3. Poll until resolved
+	// 4. Poll until resolved
 	if p.cfg.SharedSecret == "" {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: no shared secret configured — HMAC verification disabled\n")
 	}
