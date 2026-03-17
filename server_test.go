@@ -187,7 +187,7 @@ func TestPollChallenge(t *testing.T) {
 	s, ts := setupTestServer(t)
 
 	// Create a challenge directly
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/challenge/"+c.ID, nil)
 	req.Header.Set("X-Shared-Secret", "test-secret-that-is-long-enough")
@@ -209,7 +209,7 @@ func TestPollChallenge(t *testing.T) {
 func TestPollChallengeApproved(t *testing.T) {
 	s, ts := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 	s.store.Approve(c.ID, "jordan")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/challenge/"+c.ID, nil)
@@ -267,7 +267,7 @@ func TestPollChallengeInvalidID(t *testing.T) {
 func TestApprovalPage(t *testing.T) {
 	s, ts := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	resp, err := http.Get(ts.URL + "/approve/" + c.UserCode)
 	if err != nil {
@@ -324,7 +324,7 @@ func TestApprovalPageInvalidFormat(t *testing.T) {
 func TestLoginEndpointSetsNonce(t *testing.T) {
 	s, ts := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	// Use a client that doesn't follow redirects (the OIDC redirect will fail)
 	client := &http.Client{
@@ -529,7 +529,7 @@ func TestContentTypeRequired(t *testing.T) {
 func TestApprovalTokenInPollResponse(t *testing.T) {
 	s, ts := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "testhost")
+	c, _ := s.store.Create("jordan", "testhost", "")
 	s.store.Approve(c.ID, "jordan")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/challenge/"+c.ID, nil)
@@ -554,7 +554,7 @@ func TestApprovalTokenInPollResponse(t *testing.T) {
 	}
 
 	// Verify the token is a correct HMAC, not just any 64-char hex string
-	expected := s.computeStatusHMAC(c.ID, "jordan", "approved")
+	expected := s.computeStatusHMAC(c.ID, "jordan", "approved", "")
 	if token != expected {
 		t.Errorf("approval_token = %q, want %q", token, expected)
 	}
@@ -563,7 +563,7 @@ func TestApprovalTokenInPollResponse(t *testing.T) {
 func TestDenialTokenInPollResponse(t *testing.T) {
 	s, ts := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 	s.store.Deny(c.ID)
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/challenge/"+c.ID, nil)
@@ -587,7 +587,7 @@ func TestDenialTokenInPollResponse(t *testing.T) {
 		t.Fatal("denial_token missing from denied challenge poll response")
 	}
 
-	expected := s.computeStatusHMAC(c.ID, "jordan", "denied")
+	expected := s.computeStatusHMAC(c.ID, "jordan", "denied", "")
 	if token != expected {
 		t.Errorf("denial_token = %q, want %q", token, expected)
 	}
@@ -596,7 +596,7 @@ func TestDenialTokenInPollResponse(t *testing.T) {
 func TestApprovalTokenNotPresentForPending(t *testing.T) {
 	s, ts := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/challenge/"+c.ID, nil)
 	req.Header.Set("X-Shared-Secret", "test-secret-that-is-long-enough")
@@ -635,7 +635,7 @@ func TestCallbackRejectsPost(t *testing.T) {
 func TestChallengeHostname(t *testing.T) {
 	s, _ := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "web-server-01")
+	c, _ := s.store.Create("jordan", "web-server-01", "")
 
 	got, ok := s.store.Get(c.ID)
 	if !ok {
@@ -686,21 +686,21 @@ func TestVerifyStatusToken(t *testing.T) {
 
 	// Server-side computation
 	srv := &Server{cfg: &Config{SharedSecret: "test-secret-that-is-long-enough"}}
-	approvedToken := srv.computeStatusHMAC(challengeID, username, "approved")
-	deniedToken := srv.computeStatusHMAC(challengeID, username, "denied")
+	approvedToken := srv.computeStatusHMAC(challengeID, username, "approved", "")
+	deniedToken := srv.computeStatusHMAC(challengeID, username, "denied", "")
 
 	// Valid approval token
-	if !client.verifyStatusToken(challengeID, username, "approved", approvedToken) {
+	if !client.verifyStatusToken(challengeID, username, "approved", approvedToken, "") {
 		t.Error("valid approval token rejected")
 	}
 
 	// Valid denial token
-	if !client.verifyStatusToken(challengeID, username, "denied", deniedToken) {
+	if !client.verifyStatusToken(challengeID, username, "denied", deniedToken, "") {
 		t.Error("valid denial token rejected")
 	}
 
 	// Empty token
-	if client.verifyStatusToken(challengeID, username, "approved", "") {
+	if client.verifyStatusToken(challengeID, username, "approved", "", "") {
 		t.Error("empty token accepted")
 	}
 
@@ -709,22 +709,22 @@ func TestVerifyStatusToken(t *testing.T) {
 	if tampered == approvedToken {
 		tampered = approvedToken[:63] + "1"
 	}
-	if client.verifyStatusToken(challengeID, username, "approved", tampered) {
+	if client.verifyStatusToken(challengeID, username, "approved", tampered, "") {
 		t.Error("tampered token accepted")
 	}
 
 	// Wrong username
-	if client.verifyStatusToken(challengeID, "alice", "approved", approvedToken) {
+	if client.verifyStatusToken(challengeID, "alice", "approved", approvedToken, "") {
 		t.Error("token for wrong username accepted")
 	}
 
 	// Wrong challengeID
-	if client.verifyStatusToken("00000000000000000000000000000000", username, "approved", approvedToken) {
+	if client.verifyStatusToken("00000000000000000000000000000000", username, "approved", approvedToken, "") {
 		t.Error("token for wrong challengeID accepted")
 	}
 
 	// Approval token used for denial (cross-status)
-	if client.verifyStatusToken(challengeID, username, "denied", approvedToken) {
+	if client.verifyStatusToken(challengeID, username, "denied", approvedToken, "") {
 		t.Error("approval token accepted as denial token")
 	}
 }
@@ -854,7 +854,7 @@ func TestContentTypeVariants(t *testing.T) {
 func TestPollWithWrongSecret(t *testing.T) {
 	s, ts := setupTestServer(t)
 
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/challenge/"+c.ID, nil)
 	req.Header.Set("X-Shared-Secret", "wrong-secret")
@@ -872,7 +872,7 @@ func TestPollWithWrongSecret(t *testing.T) {
 
 func TestApprovalPageMethodRestriction(t *testing.T) {
 	s, ts := setupTestServer(t)
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	req, _ := http.NewRequest("POST", ts.URL+"/approve/"+c.UserCode, nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -888,7 +888,7 @@ func TestApprovalPageMethodRestriction(t *testing.T) {
 
 func TestLoginMethodRestriction(t *testing.T) {
 	s, ts := setupTestServer(t)
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	req, _ := http.NewRequest("POST", ts.URL+"/login/"+c.UserCode, nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -988,7 +988,7 @@ func TestCallbackRequiresNonceBeforeDeny(t *testing.T) {
 	s.mux.HandleFunc("/callback", s.handleOIDCCallback)
 
 	// Create a challenge but don't initiate login (no nonce set)
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 
 	// Try to deny via forged error callback — should fail because nonce not set
 	state := c.ID + ":aabbccdd11223344aabbccdd11223344"
@@ -1017,7 +1017,7 @@ func TestCallbackNonceMismatchDoesNotDeny(t *testing.T) {
 	s.mux.HandleFunc("/callback", s.handleOIDCCallback)
 
 	// Create a challenge and set a nonce (simulating login initiation)
-	c, _ := s.store.Create("jordan", "")
+	c, _ := s.store.Create("jordan", "", "")
 	s.store.SetNonce(c.ID, "aaaabbbbccccddddaaaabbbbccccdddd")
 
 	// Try callback with wrong nonce — should reject but NOT deny the challenge

@@ -12,6 +12,10 @@ import (
 	"time"
 )
 
+// clientConfigAllowNoServer allows LoadClientConfig to succeed without SERVER_URL.
+// Set to true by rotate-breakglass subcommand for local-only rotation.
+var clientConfigAllowNoServer bool
+
 // DefaultConfigPath is the default location for the pam-pocketid config file.
 // The config file uses KEY=VALUE format (one per line, no export keyword).
 // Environment variables take precedence over config file values.
@@ -35,6 +39,17 @@ type Config struct {
 	ServerURL   string        // URL of the auth server
 	PollInterval time.Duration // How often to poll (default 2s)
 	Timeout     time.Duration  // Max time to wait for approval (default 120s)
+
+	// Break-glass settings (client mode)
+	BreakglassEnabled      bool   // Whether break-glass fallback is enabled (default true)
+	BreakglassFile         string // Path to local bcrypt hash file (default /etc/pam-pocketid-breakglass)
+	BreakglassRotationDays int    // Rotation interval in days (default 90)
+	BreakglassPasswordType string // Password type: random, passphrase, alphanumeric (default random)
+
+	// Break-glass settings (server mode)
+	EscrowCommand          string    // Shell command to escrow break-glass passwords
+	EscrowEnvPassthrough   []string  // Additional env var prefixes to pass to escrow command (e.g., AWS_,VAULT_)
+	BreakglassRotateBefore time.Time // Tell clients to rotate if their hash file is older than this
 }
 
 // LoadServerConfig loads server configuration from environment variables.
@@ -115,6 +130,29 @@ func LoadServerConfig() (*Config, error) {
 		log.Printf("WARNING: PAM_POCKETID_EXTERNAL_URL uses http:// — OIDC callbacks and approval URLs are not encrypted")
 	}
 
+	cfg.EscrowCommand = os.Getenv("PAM_POCKETID_ESCROW_COMMAND")
+
+	// Additional env var prefixes to pass through to the escrow command.
+	// Comma-separated list of prefixes, e.g., "AWS_,VAULT_,OP_".
+	// Only env vars matching these prefixes are passed; all others are stripped
+	// to prevent leaking server secrets (CLIENT_SECRET, SHARED_SECRET, etc.).
+	if v := os.Getenv("PAM_POCKETID_ESCROW_ENV"); v != "" {
+		for _, prefix := range strings.Split(v, ",") {
+			prefix = strings.TrimSpace(prefix)
+			if prefix != "" {
+				cfg.EscrowEnvPassthrough = append(cfg.EscrowEnvPassthrough, prefix)
+			}
+		}
+	}
+
+	if v := os.Getenv("PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE must be RFC3339 format (e.g., 2025-01-15T00:00:00Z): %w", err)
+		}
+		cfg.BreakglassRotateBefore = t
+	}
+
 	// Best-effort: clear secrets from environment to reduce exposure window.
 	// Note: this does NOT scrub /proc/PID/environ on Linux (the initial
 	// environment snapshot is immutable), but it prevents os.Getenv from
@@ -145,23 +183,25 @@ func LoadClientConfig() (*Config, error) {
 	timeoutSec := configValueInt("PAM_POCKETID_TIMEOUT", fileVars, 120)
 	cfg.Timeout = time.Duration(timeoutSec) * time.Second
 
-	if cfg.ServerURL == "" {
+	if cfg.ServerURL == "" && !clientConfigAllowNoServer {
 		return nil, fmt.Errorf("PAM_POCKETID_SERVER_URL is required")
 	}
 
-	// Validate ServerURL scheme to prevent SSRF via malicious config
-	if !strings.HasPrefix(cfg.ServerURL, "https://") && !strings.HasPrefix(cfg.ServerURL, "http://") {
-		return nil, fmt.Errorf("PAM_POCKETID_SERVER_URL must start with https:// or http://")
-	}
+	if cfg.ServerURL != "" {
+		// Validate ServerURL scheme to prevent SSRF via malicious config
+		if !strings.HasPrefix(cfg.ServerURL, "https://") && !strings.HasPrefix(cfg.ServerURL, "http://") {
+			return nil, fmt.Errorf("PAM_POCKETID_SERVER_URL must start with https:// or http://")
+		}
 
-	// Reject URLs with embedded credentials (prevents secret leakage in logs/errors)
-	if u, err := url.Parse(cfg.ServerURL); err == nil && u.User != nil {
-		return nil, fmt.Errorf("PAM_POCKETID_SERVER_URL must not contain embedded credentials")
-	}
+		// Reject URLs with embedded credentials (prevents secret leakage in logs/errors)
+		if u, err := url.Parse(cfg.ServerURL); err == nil && u.User != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_SERVER_URL must not contain embedded credentials")
+		}
 
-	// Warn if ServerURL uses plain HTTP (shared secret will be sent in cleartext)
-	if strings.HasPrefix(cfg.ServerURL, "http://") {
-		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_SERVER_URL uses http:// — shared secret is transmitted in cleartext\n")
+		// Warn if ServerURL uses plain HTTP (shared secret and break-glass passwords will be in cleartext)
+		if strings.HasPrefix(cfg.ServerURL, "http://") {
+			fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_SERVER_URL uses http:// — shared secret and break-glass passwords are transmitted in cleartext\n")
+		}
 	}
 
 	// Enforce poll interval bounds to prevent tight-loop DoS
@@ -183,6 +223,35 @@ func LoadClientConfig() (*Config, error) {
 	// Enforce minimum SharedSecret length on client side (mirrors server check)
 	if cfg.SharedSecret != "" && len(cfg.SharedSecret) < 16 {
 		return nil, fmt.Errorf("PAM_POCKETID_SHARED_SECRET must be at least 16 characters")
+	}
+
+	// Break-glass settings
+	cfg.BreakglassEnabled = configValueBool("PAM_POCKETID_BREAKGLASS_ENABLED", fileVars, true)
+	cfg.BreakglassFile = configValue("PAM_POCKETID_BREAKGLASS_FILE", fileVars)
+	if cfg.BreakglassFile == "" {
+		cfg.BreakglassFile = "/etc/pam-pocketid-breakglass"
+	}
+	// Require absolute path to prevent writing to user-controlled cwd
+	if !strings.HasPrefix(cfg.BreakglassFile, "/") {
+		return nil, fmt.Errorf("PAM_POCKETID_BREAKGLASS_FILE must be an absolute path (got %q)", cfg.BreakglassFile)
+	}
+	cfg.BreakglassRotationDays = configValueInt("PAM_POCKETID_BREAKGLASS_ROTATION_DAYS", fileVars, 90)
+	if cfg.BreakglassRotationDays < 1 {
+		cfg.BreakglassRotationDays = 1
+	}
+	// Clamp to prevent time.Duration overflow (int64 nanoseconds max ~292 years ≈ 106751 days)
+	if cfg.BreakglassRotationDays > 3650 {
+		cfg.BreakglassRotationDays = 3650
+	}
+	cfg.BreakglassPasswordType = configValue("PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE", fileVars)
+	if cfg.BreakglassPasswordType == "" {
+		cfg.BreakglassPasswordType = "random"
+	}
+	switch cfg.BreakglassPasswordType {
+	case "random", "passphrase", "alphanumeric":
+		// valid
+	default:
+		return nil, fmt.Errorf("PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE must be one of: random, passphrase, alphanumeric")
 	}
 
 	return cfg, nil
@@ -278,6 +347,18 @@ func configValueInt(key string, fileVars map[string]string, def int) int {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
+	}
+	return def
+}
+
+// configValueBool returns the env var as bool if set, otherwise the config file
+// value as bool, otherwise the default. Accepts "true"/"1" as true, "false"/"0" as false.
+func configValueBool(key string, fileVars map[string]string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		return v == "true" || v == "1"
+	}
+	if v, ok := fileVars[key]; ok {
+		return v == "true" || v == "1"
 	}
 	return def
 }

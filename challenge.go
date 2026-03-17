@@ -3,10 +3,19 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"sync"
 	"time"
+)
+
+// Sentinel errors for rate limiting. Checked via errors.Is in server.go
+// instead of fragile string matching.
+var (
+	ErrTooManyChallenges = errors.New("too many active challenges")
+	ErrTooManyPerUser    = errors.New("too many pending challenges for user")
 )
 
 // ChallengeStatus represents the state of a sudo challenge.
@@ -43,6 +52,11 @@ type Challenge struct {
 
 	// Hostname of the machine requesting sudo (sent by PAM client, optional)
 	Hostname string `json:"hostname,omitempty"`
+
+	// BreakglassRotateBefore is the server's rotation signal at challenge creation time.
+	// Stored per-challenge so the HMAC is consistent even if the server config changes
+	// between challenge creation and poll-time approval.
+	BreakglassRotateBefore string `json:"-"`
 
 	// Set after OIDC callback confirms identity
 	ApprovedBy string    `json:"-"`
@@ -84,8 +98,9 @@ func (s *ChallengeStore) Stop() {
 	})
 }
 
-// Create generates a new challenge for the given username and optional hostname.
-func (s *ChallengeStore) Create(username, hostname string) (*Challenge, error) {
+// Create generates a new challenge for the given username, optional hostname,
+// and optional BreakglassRotateBefore snapshot (set before insertion to avoid data races).
+func (s *ChallengeStore) Create(username, hostname, breakglassRotateBefore string) (*Challenge, error) {
 	id, err := randomHex(16)
 	if err != nil {
 		return nil, fmt.Errorf("generating challenge ID: %w", err)
@@ -98,13 +113,14 @@ func (s *ChallengeStore) Create(username, hostname string) (*Challenge, error) {
 
 	now := time.Now()
 	c := &Challenge{
-		ID:        id,
-		UserCode:  code,
-		Username:  username,
-		Hostname:  hostname,
-		Status:    StatusPending,
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.ttl),
+		ID:                     id,
+		UserCode:               code,
+		Username:               username,
+		Hostname:               hostname,
+		BreakglassRotateBefore: breakglassRotateBefore,
+		Status:                 StatusPending,
+		CreatedAt:              now,
+		ExpiresAt:              now.Add(s.ttl),
 	}
 
 	s.mu.Lock()
@@ -112,12 +128,12 @@ func (s *ChallengeStore) Create(username, hostname string) (*Challenge, error) {
 
 	// Rate limit: cap total challenges to prevent memory exhaustion DoS
 	if len(s.challenges) >= maxTotalChallenges {
-		return nil, fmt.Errorf("too many active challenges, try again later")
+		return nil, fmt.Errorf("try again later: %w", ErrTooManyChallenges)
 	}
 
 	// Rate limit: cap per-user pending challenges (O(1) via counter map)
 	if s.pendingByUser[username] >= maxChallengesPerUser {
-		return nil, fmt.Errorf("too many pending challenges for user %q, wait for existing ones to expire", username)
+		return nil, fmt.Errorf("user %q, wait for existing ones to expire: %w", username, ErrTooManyPerUser)
 	}
 
 	// Ensure no user code collision (astronomically unlikely, but defense in depth)
@@ -267,6 +283,14 @@ func (s *ChallengeStore) decPending(username string) {
 
 // reapLoop removes expired challenges periodically.
 func (s *ChallengeStore) reapLoop() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ERROR: panic in challenge reaper (recovered): %v", r)
+			// Restart the reaper after a brief delay
+			time.Sleep(5 * time.Second)
+			go s.reapLoop()
+		}
+	}()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -293,6 +317,16 @@ func (s *ChallengeStore) reap() {
 			}
 			delete(s.byCode, c.UserCode)
 			delete(s.challenges, id)
+		}
+	}
+	// Prune stale grace period entries to prevent unbounded memory growth.
+	// Entries older than gracePeriod will never return true from
+	// WithinGracePeriod(), so they serve no purpose.
+	if s.gracePeriod > 0 {
+		for username, t := range s.lastApproval {
+			if now.Sub(t) > s.gracePeriod {
+				delete(s.lastApproval, username)
+			}
 		}
 	}
 }

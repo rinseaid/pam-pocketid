@@ -7,11 +7,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -27,6 +30,13 @@ var (
 	approvalPageTmpl    = template.Must(template.New("approve").Parse(approvalPageHTML))
 	approvalAlreadyTmpl = template.Must(template.New("already").Parse(approvalAlreadyHTML))
 )
+
+// escrowTimeout limits how long we wait for the escrow command to complete.
+const escrowTimeout = 30 * time.Second
+
+// escrowSemaphore limits concurrent escrow command executions to prevent
+// resource exhaustion from an attacker flooding the endpoint.
+var escrowSemaphore = make(chan struct{}, 5)
 
 // Server is the companion auth server that bridges PAM challenges to Pocket ID OIDC.
 type Server struct {
@@ -90,6 +100,7 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	s.mux.HandleFunc("/api/challenge", s.handleCreateChallenge)
 	s.mux.HandleFunc("/api/challenge/", s.handlePollChallenge)
+	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 	s.mux.HandleFunc("/approve/", s.handleApprovalPage)
 	s.mux.HandleFunc("/login/", s.handleLogin)
 	s.mux.HandleFunc("/callback", s.handleOIDCCallback)
@@ -200,10 +211,18 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	challenge, err := s.store.Create(req.Username, req.Hostname)
+	// Snapshot the rotation signal BEFORE creating the challenge so the value
+	// is set on the struct before it enters the store's map (avoids data race
+	// with concurrent Get() calls that copy the struct under RLock).
+	var rotateBefore string
+	if !s.cfg.BreakglassRotateBefore.IsZero() {
+		rotateBefore = s.cfg.BreakglassRotateBefore.Format(time.RFC3339)
+	}
+
+	challenge, err := s.store.Create(req.Username, req.Hostname, rotateBefore)
 	if err != nil {
 		// Rate limit errors are returned by the store when too many challenges exist
-		if strings.Contains(err.Error(), "too many") {
+		if errors.Is(err, ErrTooManyChallenges) || errors.Is(err, ErrTooManyPerUser) {
 			rateLimitRejections.Inc()
 			log.Printf("RATE_LIMIT: user %q from %s (host %q)", req.Username, remoteAddr(r), req.Hostname)
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
@@ -214,7 +233,7 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	challengesCreated.WithLabelValues(req.Username).Inc()
+	challengesCreated.Inc()
 	activeChallenges.Inc()
 	log.Printf("CHALLENGE: created %s for user %q from %s (host %q)", challenge.ID[:8], req.Username, remoteAddr(r), req.Hostname)
 
@@ -234,7 +253,10 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 				"status":       "approved",
 			}
 			if s.cfg.SharedSecret != "" {
-				resp["approval_token"] = s.computeStatusHMAC(challenge.ID, req.Username, "approved")
+				resp["approval_token"] = s.computeStatusHMAC(challenge.ID, req.Username, "approved", challenge.BreakglassRotateBefore)
+			}
+			if challenge.BreakglassRotateBefore != "" {
+				resp["rotate_breakglass_before"] = challenge.BreakglassRotateBefore
 			}
 			json.NewEncoder(w).Encode(resp)
 			return
@@ -244,12 +266,16 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	approvalURL := fmt.Sprintf("%s/approve/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"challenge_id":     challenge.ID,
 		"user_code":        challenge.UserCode,
 		"verification_url": approvalURL,
 		"expires_in":       int(s.cfg.ChallengeTTL.Seconds()),
-	})
+	}
+	if challenge.BreakglassRotateBefore != "" {
+		resp["rotate_breakglass_before"] = challenge.BreakglassRotateBefore
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // handlePollChallenge checks challenge status.
@@ -296,9 +322,9 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.SharedSecret != "" {
 		switch challenge.Status {
 		case StatusApproved:
-			resp["approval_token"] = s.computeStatusHMAC(id, challenge.Username, "approved")
+			resp["approval_token"] = s.computeStatusHMAC(id, challenge.Username, "approved", challenge.BreakglassRotateBefore)
 		case StatusDenied:
-			resp["denial_token"] = s.computeStatusHMAC(id, challenge.Username, "denied")
+			resp["denial_token"] = s.computeStatusHMAC(id, challenge.Username, "denied", challenge.BreakglassRotateBefore)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -623,16 +649,153 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, approvalSuccessHTML)
 }
 
-// computeStatusHMAC creates an HMAC-SHA256 token binding a challenge status
-// to the specific challengeID, username, and status string, preventing
-// poll response forgery by MITM for both approvals and denials.
-// Uses length-prefixed fields instead of delimiter-separated to prevent
-// field injection (e.g., a username containing ":" could shift field boundaries
-// in a colon-delimited format).
-func (s *Server) computeStatusHMAC(challengeID, username, status string) string {
+// computeStatusHMAC creates an HMAC-SHA256 token binding a challenge status to the
+// specific challengeID, username, status, and rotateBefore. Uses length-prefixed fields
+// to prevent field injection. The rotateBefore parameter is the per-challenge snapshot
+// of BreakglassRotateBefore stored at challenge creation, ensuring HMAC consistency
+// even if the server config changes between creation and poll.
+func (s *Server) computeStatusHMAC(challengeID, username, status, rotateBefore string) string {
 	mac := hmac.New(sha256.New, []byte(s.cfg.SharedSecret))
 	fmt.Fprintf(mac, "%d:%s%d:%s%d:%s", len(challengeID), challengeID, len(status), status, len(username), username)
+	// Include rotate_breakglass_before in the HMAC so a MITM cannot inject
+	// a rotation signal without invalidating the token.
+	if rotateBefore != "" {
+		fmt.Fprintf(mac, "%d:%s", len(rotateBefore), rotateBefore)
+	}
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// handleBreakglassEscrow receives a break-glass password from a client and
+// passes it to the configured escrow command.
+// POST /api/breakglass/escrow
+func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Escrow endpoint ALWAYS requires authentication — even with PAM_POCKETID_INSECURE=true.
+	// Unlike the challenge API, this endpoint executes a shell command with caller-provided
+	// data on stdin, so unauthenticated access would be a command execution vector.
+	if s.cfg.SharedSecret == "" {
+		http.Error(w, "escrow endpoint requires shared secret authentication", http.StatusForbidden)
+		return
+	}
+
+	if !s.verifySharedSecret(r) {
+		authFailures.Inc()
+		log.Printf("AUTH_FAILURE: invalid shared secret from %s on POST /api/breakglass/escrow", remoteAddr(r))
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	ct := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		http.Error(w, "content-type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var req struct {
+		Hostname string `json:"hostname"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Password == "" {
+		http.Error(w, "password required", http.StatusBadRequest)
+		return
+	}
+	// Hostname is required for escrow (used for per-host token verification
+	// and as the key in the escrow command's BREAKGLASS_HOSTNAME env var).
+	if req.Hostname == "" {
+		http.Error(w, "hostname required", http.StatusBadRequest)
+		return
+	}
+	if !validHostname.MatchString(req.Hostname) {
+		http.Error(w, "invalid hostname format", http.StatusBadRequest)
+		return
+	}
+
+	// Verify per-host escrow token to prevent a compromised host from
+	// planting a known password for a different host. The token is
+	// HMAC(shared_secret, "escrow:" + hostname), so each host can only
+	// escrow for its own hostname.
+	if s.cfg.SharedSecret != "" {
+		expectedToken := computeEscrowToken(s.cfg.SharedSecret, req.Hostname)
+		providedToken := r.Header.Get("X-Escrow-Token")
+		if subtle.ConstantTimeCompare([]byte(expectedToken), []byte(providedToken)) != 1 {
+			log.Printf("AUTH_FAILURE: invalid escrow token for host %q from %s", req.Hostname, remoteAddr(r))
+			http.Error(w, "invalid escrow token for hostname", http.StatusForbidden)
+			return
+		}
+	}
+
+	if s.cfg.EscrowCommand == "" {
+		log.Printf("BREAKGLASS: escrow received from host %q but no escrow command configured — password discarded", req.Hostname)
+		http.Error(w, "escrow not configured on server", http.StatusNotImplemented)
+		return
+	}
+
+	// Limit concurrent escrow command executions
+	select {
+	case escrowSemaphore <- struct{}{}:
+		defer func() { <-escrowSemaphore }()
+	default:
+		http.Error(w, "too many concurrent escrow operations", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Execute escrow command with password on stdin and hostname as env var.
+	// Password is NOT passed as an argument to avoid /proc/cmdline exposure.
+	// Use a minimal environment to avoid leaking server secrets (CLIENT_SECRET,
+	// SHARED_SECRET, etc.) to the escrow command.
+	ctx, cancel := context.WithTimeout(r.Context(), escrowTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", s.cfg.EscrowCommand)
+	cmd.Stdin = strings.NewReader(req.Password)
+	// Start with minimal env, then add configured passthrough prefixes.
+	// This prevents leaking server secrets while allowing cloud CLI tools
+	// (AWS, Vault, etc.) to function when explicitly configured via
+	// PAM_POCKETID_ESCROW_ENV=AWS_,VAULT_,OP_
+	cmdEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"BREAKGLASS_HOSTNAME=" + req.Hostname,
+	}
+	if len(s.cfg.EscrowEnvPassthrough) > 0 {
+		for _, env := range os.Environ() {
+			// Skip vars that are already in the baseline to prevent shadowing
+			if strings.HasPrefix(env, "PATH=") || strings.HasPrefix(env, "HOME=") || strings.HasPrefix(env, "BREAKGLASS_HOSTNAME=") {
+				continue
+			}
+			for _, prefix := range s.cfg.EscrowEnvPassthrough {
+				if strings.HasPrefix(env, prefix) {
+					cmdEnv = append(cmdEnv, env)
+					break
+				}
+			}
+		}
+	}
+	cmd.Env = cmdEnv
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		breakglassEscrowTotal.WithLabelValues("failure").Inc()
+		log.Printf("BREAKGLASS: escrow command failed for host %q: %v (output: %s)", req.Hostname, err, strings.TrimSpace(string(output)))
+		http.Error(w, "escrow command failed", http.StatusInternalServerError)
+		return
+	}
+
+	breakglassEscrowTotal.WithLabelValues("success").Inc()
+	log.Printf("BREAKGLASS: password escrowed for host %q", req.Hostname)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

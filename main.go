@@ -9,8 +9,11 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // messageWriter is where PAM messages are written. pam_exec sends stdout to
@@ -22,11 +25,20 @@ var messageWriter io.Writer = os.Stdout
 var safeUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "serve" {
-		runServer()
-	} else {
-		runPAMHelper()
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve":
+			runServer()
+			return
+		case "rotate-breakglass":
+			runRotateBreakglass()
+			return
+		case "verify-breakglass":
+			runVerifyBreakglass()
+			return
+		}
 	}
+	runPAMHelper()
 }
 
 func runServer() {
@@ -79,7 +91,136 @@ func runServer() {
 	log.Printf("server stopped")
 }
 
+func runRotateBreakglass() {
+	force := false
+	for _, arg := range os.Args[2:] {
+		switch arg {
+		case "--force", "-f":
+			force = true
+		default:
+			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", arg)
+			fmt.Fprintf(os.Stderr, "usage: pam-pocketid rotate-breakglass [--force]\n")
+			os.Exit(1)
+		}
+	}
+
+	// Security: strip PAM_POCKETID_* and proxy env vars (same as PAM helper)
+	// to prevent env-based config injection when run via cron or wrapper scripts.
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "PAM_POCKETID_") {
+			key, _, _ := strings.Cut(env, "=")
+			os.Unsetenv(key)
+		}
+	}
+	for _, key := range []string{
+		"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+		"NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+	} {
+		os.Unsetenv(key)
+	}
+
+	// Allow rotation without a server URL (local-only, no escrow)
+	clientConfigAllowNoServer = true
+	cfg, err := LoadClientConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	plaintext, err := rotateBreakglass(cfg, force)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if plaintext != "" {
+		fmt.Fprintf(os.Stderr, "\n*** IMPORTANT: Break-glass password was NOT escrowed. Save it now! ***\n")
+		fmt.Fprintln(os.Stdout, plaintext)
+		fmt.Fprintf(os.Stderr, "*** Store this password securely. It will not be shown again. ***\n\n")
+	}
+}
+
+func runVerifyBreakglass() {
+	// Security: strip PAM_POCKETID_* and proxy env vars (same as other subcommands)
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "PAM_POCKETID_") {
+			key, _, _ := strings.Cut(env, "=")
+			os.Unsetenv(key)
+		}
+	}
+	for _, key := range []string{
+		"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+		"NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+	} {
+		os.Unsetenv(key)
+	}
+
+	// Allow verification without a server URL (local-only check)
+	clientConfigAllowNoServer = true
+	cfg, err := LoadClientConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Read the break-glass hash file
+	hash, err := readBreakglassHash(cfg.BreakglassFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Prompt for password via /dev/tty
+	tty, err := openTTY()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot open terminal: %v\n", err)
+		os.Exit(1)
+	}
+	defer tty.Close()
+
+	fmt.Fprintf(tty, "Break-glass password: ")
+	password, err := readPasswordFn(int(tty.Fd()))
+	fmt.Fprintf(tty, "\n")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Verify with bcrypt
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), password); err != nil {
+		fmt.Fprintln(os.Stderr, "Break-glass password does NOT match")
+		os.Exit(1)
+	}
+
+	fmt.Fprintln(os.Stderr, "Break-glass password verified successfully")
+	os.Exit(0)
+}
+
 func runPAMHelper() {
+	// Security: strip PAM_POCKETID_* env vars that a user might inject.
+	// When running under sudo, the environment is normally sanitized by sudo's
+	// env_reset. However, if env_keep is misconfigured to preserve PAM_POCKETID_*
+	// vars, a non-root user could override SERVER_URL (pointing to a malicious server),
+	// BREAKGLASS_FILE (pointing to a controlled hash file), or SHARED_SECRET.
+	// By unsetting these, we force the PAM helper to read config from the
+	// root-owned config file only.
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "PAM_POCKETID_") {
+			key, _, _ := strings.Cut(env, "=")
+			os.Unsetenv(key)
+		}
+	}
+
+	// Security: strip proxy env vars that could redirect HTTP requests through
+	// an attacker-controlled proxy, leaking the shared secret (X-Shared-Secret header)
+	// and break-glass passwords (escrow POST body), or enabling auth bypass by
+	// making the server appear unreachable (triggering break-glass fallback).
+	for _, key := range []string{
+		"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+		"NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+	} {
+		os.Unsetenv(key)
+	}
+
 	// pam_exec sets PAM_USER in the environment.
 	// When called via pam_exec, PAM_USER is set by the PAM framework and cannot
 	// be spoofed by the calling user. However, if someone runs this binary

@@ -6,11 +6,11 @@ import (
 )
 
 var (
-	challengesCreated = promauto.NewCounterVec(prometheus.CounterOpts{
+	challengesCreated = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "pam_pocketid",
 		Name:      "challenges_created_total",
 		Help:      "Total number of sudo challenges created.",
-	}, []string{"username"})
+	})
 
 	challengesApproved = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: "pam_pocketid",
@@ -60,4 +60,10 @@ var (
 		Name:      "active_challenges",
 		Help:      "Number of currently active (pending) challenges.",
 	})
+
+	breakglassEscrowTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "pam_pocketid",
+		Name:      "breakglass_escrow_total",
+		Help:      "Total number of break-glass password escrow operations.",
+	}, []string{"status"})
 )

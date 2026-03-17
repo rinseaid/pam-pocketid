@@ -10,13 +10,96 @@
 # Do NOT use expose_authtok — it causes an unnecessary password prompt.
 # On systems where sudo -i uses a separate PAM config, copy this file to
 # /etc/pam.d/sudo-i as well.
+#
+# IMPORTANT: Do NOT add PAM_POCKETID_* to sudoers env_keep. The PAM helper
+# strips these vars on startup to prevent environment-based config injection.
 
-# Option 1: Replace password auth entirely (recommended with pam-pocketid)
+# =============================================================================
+# Option 1: Pocket ID only (with built-in break-glass fallback)
+#
+# When the auth server is unreachable, pam-pocketid automatically falls back
+# to break-glass password authentication if a hash file exists at
+# /etc/pam-pocketid-breakglass. No PAM stacking needed for basic fallback.
+#
+# Setup:
+#   1. pam-pocketid rotate-breakglass --force    # generates password + hash
+#   2. Store the printed password in your vault    # only shown once!
+#   3. pam-pocketid verify-breakglass             # test it works
+#
+# Auto-rotate via cron (daily check, rotates when due per ROTATION_DAYS):
+#   0 2 * * * /usr/local/bin/pam-pocketid rotate-breakglass
+#
+# To disable break-glass fallback (OIDC-only, no emergency password):
+#   Set PAM_POCKETID_BREAKGLASS_ENABLED=false in /etc/pam-pocketid.conf
+#
+# Best when combined with the grace period feature
+# (PAM_POCKETID_GRACE_PERIOD on the server).
+# =============================================================================
 auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid
 
-# Option 2: Allow either password OR Pocket ID (uncomment below, comment above)
+# =============================================================================
+# Option 2: Pocket ID with password fallback
+#
+# Tries Pocket ID first; if the server is unreachable (fails within seconds),
+# falls through to a password prompt. Good when users have local passwords.
+# Note: with break-glass enabled (Option 1), this is rarely needed since
+# pam-pocketid handles its own fallback internally.
+# =============================================================================
+# auth    sufficient  pam_exec.so    stdout /usr/local/bin/pam-pocketid
 # auth    sufficient  pam_unix.so
-# auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid
+# auth    required    pam_deny.so
+
+# =============================================================================
+# Option 3a: Pocket ID with SSH agent fallback (local authorized_keys)
+#
+# Tries Pocket ID first; if the server is unreachable, falls through to
+# SSH agent authentication. This validates that the user's ssh-agent holds
+# a key listed in their authorized_keys file — no password needed.
+#
+# Ideal for environments using glauth-pocketid or other LDAP setups where
+# users have no passwords. Requires pam_ssh_agent_auth to be installed:
+#   Alpine:  apk add pam-ssh-agent-auth
+#   Debian:  apt install libpam-ssh-agent-auth
+#   RHEL:    dnf install pam_ssh_agent_auth
+#
+# You must also preserve SSH_AUTH_SOCK through sudo. Add to /etc/sudoers
+# (or /etc/sudoers.d/ssh-agent-auth):
+#   Defaults    env_keep += "SSH_AUTH_SOCK"
+# =============================================================================
+# auth    sufficient  pam_exec.so    stdout /usr/local/bin/pam-pocketid
+# auth    sufficient  pam_ssh_agent_auth.so authorized_keys_file=%h/.ssh/authorized_keys
+# auth    required    pam_deny.so
+
+# =============================================================================
+# Option 3b: Pocket ID with SSH agent fallback (SSSD/LDAP keys)
+#
+# Same as 3a, but retrieves public keys from LDAP via sss_ssh_authorizedkeys
+# instead of a local file. Use this when SSH keys are stored in LDAP (e.g.,
+# glauth-pocketid, FreeIPA, or SSSD-backed directories) and users have no
+# local ~/.ssh/authorized_keys file.
+# =============================================================================
+# auth    sufficient  pam_exec.so    stdout /usr/local/bin/pam-pocketid
+# auth    sufficient  pam_ssh_agent_auth.so authorized_keys_command=/usr/bin/sss_ssh_authorizedkeys authorized_keys_command_user=nobody
+# auth    required    pam_deny.so
+
+# =============================================================================
+# Break-glass client configuration reference (/etc/pam-pocketid.conf)
+#
+# PAM_POCKETID_BREAKGLASS_FILE=/etc/pam-pocketid-breakglass  (default)
+# PAM_POCKETID_BREAKGLASS_ENABLED=true                       (default; set false to disable)
+# PAM_POCKETID_BREAKGLASS_ROTATION_DAYS=90                   (default)
+# PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE=random                (random|passphrase|alphanumeric)
+#
+# Server-side escrow configuration (environment variables on the server):
+#
+# PAM_POCKETID_ESCROW_COMMAND="op item edit ..."              (shell command, password on stdin)
+# PAM_POCKETID_ESCROW_ENV=AWS_,VAULT_,OP_                    (env var prefixes to pass through)
+# PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE=2025-06-01T00:00:00Z (force client rotation)
+#
+# Subcommands:
+#   pam-pocketid rotate-breakglass [--force]   # generate new password + hash
+#   pam-pocketid verify-breakglass             # verify password matches hash
+# =============================================================================
 
 # Keep the rest of the standard sudo PAM stack
 account required    pam_unix.so

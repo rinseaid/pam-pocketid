@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -30,12 +31,34 @@ type PAMClient struct {
 // Prevents a malicious/compromised server from causing OOM in the PAM helper.
 const maxResponseSize = 64 * 1024
 
+// serverHTTPError represents an HTTP error from a reachable server.
+// Distinguished from connection-level errors to control break-glass fallback:
+// server returned an HTTP response (even an error) → server is reachable → no fallback.
+type serverHTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *serverHTTPError) Error() string {
+	return fmt.Sprintf("server returned %d: %s", e.StatusCode, e.Body)
+}
+
 // NewPAMClient creates a new PAM helper client.
 func NewPAMClient(cfg *Config) *PAMClient {
 	return &PAMClient{
 		cfg: cfg,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				// Never use proxy env vars — prevents an attacker from routing
+				// requests through a malicious proxy via HTTP_PROXY/HTTPS_PROXY.
+				Proxy: nil,
+				// Explicit dial timeout (shorter than client Timeout) ensures that
+				// connection-phase failures (SYN dropped by firewall) always produce
+				// net.OpError{Op:"dial"} rather than racing with the client-level
+				// timeout. This makes isServerUnreachable detection reliable.
+				DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+			},
 			// Do not follow redirects. The PAM client talks to a known API server;
 			// following redirects could enable SSRF if the server URL is misconfigured
 			// or if a MITM redirects to internal services.
@@ -48,12 +71,13 @@ func NewPAMClient(cfg *Config) *PAMClient {
 
 // challengeResponse is the response from POST /api/challenge.
 type challengeResponse struct {
-	ChallengeID     string `json:"challenge_id"`
-	UserCode        string `json:"user_code"`
-	VerificationURL string `json:"verification_url"`
-	ExpiresIn       int    `json:"expires_in"`
-	Status          string `json:"status,omitempty"`
-	ApprovalToken   string `json:"approval_token,omitempty"`
+	ChallengeID            string `json:"challenge_id"`
+	UserCode               string `json:"user_code"`
+	VerificationURL        string `json:"verification_url"`
+	ExpiresIn              int    `json:"expires_in"`
+	Status                 string `json:"status,omitempty"`
+	ApprovalToken          string `json:"approval_token,omitempty"`
+	RotateBreakglassBefore string `json:"rotate_breakglass_before,omitempty"`
 }
 
 // pollResponse is the response from GET /api/challenge/{id}.
@@ -74,17 +98,33 @@ func (p *PAMClient) Authenticate(username string) error {
 	// 1. Create challenge
 	challenge, err := p.createChallenge(username)
 	if err != nil {
+		// Break-glass fallback: if the server is unreachable and a break-glass
+		// hash file exists, fall back to local password authentication.
+		if p.cfg.BreakglassEnabled && breakglassFileExists(p.cfg.BreakglassFile) && isServerUnreachable(err) {
+			return authenticateBreakglass(username, p.cfg.BreakglassFile)
+		}
 		return fmt.Errorf("creating challenge: %w", err)
+	}
+
+	// Parse server-requested rotation timestamp (if any).
+	// Only acted on after HMAC verification (the field is included in the HMAC),
+	// so a MITM cannot inject a rotation signal without invalidating the token.
+	var rotateBefore time.Time
+	if challenge.RotateBreakglassBefore != "" {
+		if t, err := time.Parse(time.RFC3339, challenge.RotateBreakglassBefore); err == nil {
+			rotateBefore = t
+		}
 	}
 
 	// 2. Check if auto-approved via grace period
 	if challenge.Status == string(StatusApproved) {
 		if p.cfg.SharedSecret != "" {
-			if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", challenge.ApprovalToken) {
+			if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", challenge.ApprovalToken, challenge.RotateBreakglassBefore) {
 				return fmt.Errorf("auto-approval token verification failed (possible MITM attack)")
 			}
 		}
 		fmt.Fprintf(messageWriter, "\n  Sudo approved (recent authentication).\n\n")
+		maybeRotateBreakglass(p.cfg, rotateBefore)
 		return nil
 	}
 
@@ -128,11 +168,12 @@ func (p *PAMClient) Authenticate(username string) error {
 		case StatusApproved:
 			// Verify HMAC approval token to prevent MITM forgery
 			if p.cfg.SharedSecret != "" {
-				if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", status.ApprovalToken) {
+				if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", status.ApprovalToken, challenge.RotateBreakglassBefore) {
 					return fmt.Errorf("approval token verification failed (possible MITM attack)")
 				}
 			}
 			fmt.Fprintf(messageWriter, "  Approved!\n\n")
+			maybeRotateBreakglass(p.cfg, rotateBefore)
 			return nil
 		case StatusDenied:
 			// Verify HMAC denial token to prevent MITM injecting fake denials.
@@ -140,7 +181,7 @@ func (p *PAMClient) Authenticate(username string) error {
 			// We never accept unverified denials — a MITM should not be able to
 			// deny sudo requests by injecting fake denial responses.
 			if p.cfg.SharedSecret != "" {
-				if !p.verifyStatusToken(challenge.ChallengeID, username, "denied", status.DenialToken) {
+				if !p.verifyStatusToken(challenge.ChallengeID, username, "denied", status.DenialToken, challenge.RotateBreakglassBefore) {
 					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: denial token verification failed — ignoring possible forged denial\n")
 					time.Sleep(p.cfg.PollInterval)
 					continue
@@ -173,12 +214,17 @@ func (p *PAMClient) Authenticate(username string) error {
 // verifyStatusToken verifies an HMAC-SHA256 status token from the server.
 // The status parameter must match what the server used (e.g., "approved", "denied").
 // Uses length-prefixed fields to match the server's computeStatusHMAC format.
-func (p *PAMClient) verifyStatusToken(challengeID, username, status, token string) bool {
+// rotateBefore is included in the HMAC to prevent a MITM from injecting
+// rotate_breakglass_before without invalidating the token.
+func (p *PAMClient) verifyStatusToken(challengeID, username, status, token, rotateBefore string) bool {
 	if token == "" {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(p.cfg.SharedSecret))
 	fmt.Fprintf(mac, "%d:%s%d:%s%d:%s", len(challengeID), challengeID, len(status), status, len(username), username)
+	if rotateBefore != "" {
+		fmt.Fprintf(mac, "%d:%s", len(rotateBefore), rotateBefore)
+	}
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(token))
 }
@@ -209,7 +255,7 @@ func (p *PAMClient) createChallenge(username string) (*challengeResponse, error)
 		// Limit how much of the error response we read and sanitize for terminal safety
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		safe := sanitizeForTerminal(string(b))
-		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, safe)
+		return nil, &serverHTTPError{StatusCode: resp.StatusCode, Body: safe}
 	}
 
 	var cr challengeResponse
