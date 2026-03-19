@@ -214,7 +214,9 @@ func (s *ChallengeStore) Approve(id string, approvedBy string) error {
 	c.Status = StatusApproved
 	c.ApprovedBy = approvedBy
 	c.ApprovedAt = time.Now()
-	s.lastApproval[c.Username] = c.ApprovedAt
+	if s.gracePeriod > 0 {
+		s.lastApproval[c.Username] = c.ApprovedAt
+	}
 	s.decPending(c.Username)
 	return nil
 }
@@ -266,7 +268,9 @@ func (s *ChallengeStore) AutoApprove(id string) error {
 	c.Status = StatusApproved
 	c.ApprovedBy = c.Username
 	c.ApprovedAt = time.Now()
-	s.lastApproval[c.Username] = c.ApprovedAt
+	if s.gracePeriod > 0 {
+		s.lastApproval[c.Username] = c.ApprovedAt
+	}
 	s.decPending(c.Username)
 	return nil
 }

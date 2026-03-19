@@ -46,6 +46,11 @@ type Config struct {
 	BreakglassRotationDays int    // Rotation interval in days (default 90)
 	BreakglassPasswordType string // Password type: random, passphrase, alphanumeric (default random)
 
+	// Notification settings (server mode)
+	NotifyCommand        string   // Shell command to run when a new challenge is created
+	NotifyEnvPassthrough []string // Additional env var prefixes to pass to notify command (e.g., APPRISE_,TELEGRAM_)
+	NotifyUsersFile      string   // Path to JSON file mapping usernames to per-user notification URLs
+
 	// Break-glass settings (server mode)
 	EscrowCommand          string    // Shell command to escrow break-glass passwords
 	EscrowEnvPassthrough   []string  // Additional env var prefixes to pass to escrow command (e.g., AWS_,VAULT_)
@@ -130,6 +135,35 @@ func LoadServerConfig() (*Config, error) {
 		log.Printf("WARNING: PAM_POCKETID_EXTERNAL_URL uses http:// — OIDC callbacks and approval URLs are not encrypted")
 	}
 
+	cfg.NotifyCommand = os.Getenv("PAM_POCKETID_NOTIFY_COMMAND")
+
+	// Additional env var prefixes to pass through to the notify command.
+	// Comma-separated list of prefixes, e.g., "APPRISE_,TELEGRAM_,NTFY_".
+	if v := os.Getenv("PAM_POCKETID_NOTIFY_ENV"); v != "" {
+		for _, prefix := range strings.Split(v, ",") {
+			prefix = strings.TrimSpace(prefix)
+			if prefix != "" {
+				cfg.NotifyEnvPassthrough = append(cfg.NotifyEnvPassthrough, prefix)
+			}
+		}
+	}
+
+	cfg.NotifyUsersFile = os.Getenv("PAM_POCKETID_NOTIFY_USERS_FILE")
+	if cfg.NotifyUsersFile != "" && !strings.HasPrefix(cfg.NotifyUsersFile, "/") {
+		return nil, fmt.Errorf("PAM_POCKETID_NOTIFY_USERS_FILE must be an absolute path (got %q)", cfg.NotifyUsersFile)
+	}
+
+	// Warn about likely misconfigurations: per-user file or env passthrough
+	// without a notify command means those settings have no effect.
+	if cfg.NotifyCommand == "" {
+		if cfg.NotifyUsersFile != "" {
+			log.Printf("WARNING: PAM_POCKETID_NOTIFY_USERS_FILE is set but PAM_POCKETID_NOTIFY_COMMAND is empty — per-user routing will have no effect")
+		}
+		if len(cfg.NotifyEnvPassthrough) > 0 {
+			log.Printf("WARNING: PAM_POCKETID_NOTIFY_ENV is set but PAM_POCKETID_NOTIFY_COMMAND is empty — env passthrough will have no effect")
+		}
+	}
+
 	cfg.EscrowCommand = os.Getenv("PAM_POCKETID_ESCROW_COMMAND")
 
 	// Additional env var prefixes to pass through to the escrow command.
@@ -206,17 +240,21 @@ func LoadClientConfig() (*Config, error) {
 
 	// Enforce poll interval bounds to prevent tight-loop DoS
 	if cfg.PollInterval < 500*time.Millisecond {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_POLL_MS clamped to minimum 500ms\n")
 		cfg.PollInterval = 500 * time.Millisecond
 	}
 	if cfg.PollInterval > 30*time.Second {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_POLL_MS clamped to maximum 30s\n")
 		cfg.PollInterval = 30 * time.Second
 	}
 
 	// Enforce timeout bounds to prevent indefinite PAM session blocking
 	if cfg.Timeout < 10*time.Second {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_TIMEOUT clamped to minimum 10s\n")
 		cfg.Timeout = 10 * time.Second
 	}
 	if cfg.Timeout > 600*time.Second {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_TIMEOUT clamped to maximum 600s\n")
 		cfg.Timeout = 600 * time.Second
 	}
 
@@ -237,10 +275,12 @@ func LoadClientConfig() (*Config, error) {
 	}
 	cfg.BreakglassRotationDays = configValueInt("PAM_POCKETID_BREAKGLASS_ROTATION_DAYS", fileVars, 90)
 	if cfg.BreakglassRotationDays < 1 {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_BREAKGLASS_ROTATION_DAYS clamped to minimum 1\n")
 		cfg.BreakglassRotationDays = 1
 	}
 	// Clamp to prevent time.Duration overflow (int64 nanoseconds max ~292 years ≈ 106751 days)
 	if cfg.BreakglassRotationDays > 3650 {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_BREAKGLASS_ROTATION_DAYS clamped to maximum 3650\n")
 		cfg.BreakglassRotationDays = 3650
 	}
 	cfg.BreakglassPasswordType = configValue("PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE", fileVars)
@@ -291,7 +331,10 @@ func loadConfigFile(path string) map[string]string {
 	}
 	// Check file ownership — config must be owned by root to prevent
 	// a non-root user from pre-creating it with a known shared secret.
-	if uid, ok := fileOwnerUID(info); ok && uid != 0 {
+	if uid, ok := fileOwnerUID(info); !ok {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: ERROR: cannot determine owner of %s — refusing to load\n", path)
+		return vars
+	} else if uid != 0 {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: ERROR: %s is not owned by root (uid=%d) — refusing to load\n", path, uid)
 		return vars
 	}

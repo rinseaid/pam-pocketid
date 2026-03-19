@@ -66,4 +66,21 @@ var (
 		Name:      "breakglass_escrow_total",
 		Help:      "Total number of break-glass password escrow operations.",
 	}, []string{"status"})
+
+	notificationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "pam_pocketid",
+		Name:      "notifications_total",
+		Help:      "Total number of push notification attempts.",
+	}, []string{"status"}) // status: sent, failed, skipped
 )
+
+func init() {
+	notificationsTotal.WithLabelValues("sent")
+	notificationsTotal.WithLabelValues("failed")
+	notificationsTotal.WithLabelValues("skipped")
+	breakglassEscrowTotal.WithLabelValues("success")
+	breakglassEscrowTotal.WithLabelValues("failure")
+	challengesDenied.WithLabelValues("oidc_error")
+	challengesDenied.WithLabelValues("nonce_mismatch")
+	challengesDenied.WithLabelValues("identity_mismatch")
+}

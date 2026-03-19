@@ -192,7 +192,9 @@ func readBreakglassHash(path string) (string, error) {
 		return "", fmt.Errorf("break-glass file has group/other permissions (mode %04o)", mode)
 	}
 
-	if uid, ok := fileOwnerUID(info); ok && uid != 0 {
+	if uid, ok := fileOwnerUID(info); !ok {
+		return "", fmt.Errorf("break-glass file: cannot determine owner")
+	} else if uid != 0 {
 		return "", fmt.Errorf("break-glass file is not owned by root (uid=%d)", uid)
 	}
 
@@ -346,7 +348,7 @@ func authenticateBreakglass(username, hashFilePath string) error {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: BREAKGLASS: hash file error for user %q: %v\n", username, err)
 		// Run a dummy bcrypt comparison to equalize timing with the wrong-password path,
 		// preventing a timing oracle that distinguishes "file error" from "wrong password".
-		bcrypt.CompareHashAndPassword([]byte("$2a$12$000000000000000000000000000000000000000000000000000000"), password)
+		bcrypt.CompareHashAndPassword([]byte("$2a$12$00000000000000000000000000000000000000000000000000000"), password)
 		recordBreakglassFailure()
 		return fmt.Errorf("break-glass authentication failed")
 	}

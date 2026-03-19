@@ -1,0 +1,9 @@
+.git
+.gitignore
+*.md
+*_test.go
+mockups/
+bin/
+.env
+*.pem
+*.key

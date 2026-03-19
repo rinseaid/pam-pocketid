@@ -27,6 +27,17 @@ var safeUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--help", "-h", "help":
+			fmt.Print(`pam-pocketid — browser-based sudo authentication via Pocket ID
+
+Usage:
+  pam-pocketid                   PAM helper (called by pam_exec)
+  pam-pocketid serve             Run the authentication server
+  pam-pocketid rotate-breakglass Rotate the break-glass password
+  pam-pocketid verify-breakglass Verify a break-glass password
+  pam-pocketid --help            Show this help message
+`)
+			os.Exit(0)
 		case "serve":
 			runServer()
 			return
@@ -60,6 +71,12 @@ func runServer() {
 	if cfg.GracePeriod > 0 {
 		log.Printf("Grace period: %s (sudo re-auth skipped within this window)", cfg.GracePeriod)
 	}
+	if cfg.NotifyCommand != "" {
+		log.Printf("Notify command configured (push notifications enabled)")
+		if cfg.NotifyUsersFile != "" {
+			log.Printf("Per-user notification routing: %s", cfg.NotifyUsersFile)
+		}
+	}
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -71,23 +88,38 @@ func runServer() {
 		MaxHeaderBytes:    8192,
 	}
 
-	// Graceful shutdown: drain in-flight requests and stop the reap goroutine
+	// Graceful shutdown: drain in-flight requests, wait for notifications, stop reaper.
+	// The shutdownDone channel ensures main waits for the full shutdown sequence
+	// before returning (otherwise main exits as soon as ListenAndServe unblocks).
+	shutdownDone := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
+		defer close(shutdownDone)
 		sig := <-sigCh
 		log.Printf("received %s, shutting down gracefully...", sig)
+		// A second signal forces immediate exit (e.g., double Ctrl+C).
+		go func() {
+			sig2 := <-sigCh
+			log.Printf("received second signal, forcing exit")
+			if s, ok := sig2.(syscall.Signal); ok {
+				os.Exit(128 + int(s))
+			}
+			os.Exit(1)
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("shutdown error: %v", err)
 		}
+		srv.WaitForNotifications(5 * time.Second)
 		srv.Stop()
 	}()
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
+	<-shutdownDone
 	log.Printf("server stopped")
 }
 

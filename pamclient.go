@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,8 +12,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -78,6 +81,7 @@ type challengeResponse struct {
 	Status                 string `json:"status,omitempty"`
 	ApprovalToken          string `json:"approval_token,omitempty"`
 	RotateBreakglassBefore string `json:"rotate_breakglass_before,omitempty"`
+	NotificationSent       bool   `json:"notification_sent,omitempty"`
 }
 
 // pollResponse is the response from GET /api/challenge/{id}.
@@ -95,6 +99,21 @@ type pollResponse struct {
 // Authenticate runs the full PAM authentication flow for the given username.
 // Returns nil on success (sudo approved), non-nil on failure.
 func (p *PAMClient) Authenticate(username string) error {
+	// Set up signal handling so Ctrl+C produces a clean message.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-sigCh:
+			fmt.Fprintf(messageWriter, "\n  Cancelled.\n\n")
+			os.Exit(1)
+		case <-ctx.Done():
+		}
+	}()
+	defer signal.Stop(sigCh)
+
 	// 1. Create challenge
 	challenge, err := p.createChallenge(username)
 	if err != nil {
@@ -132,13 +151,16 @@ func (p *PAMClient) Authenticate(username string) error {
 	// Sanitize all server-provided values before terminal display to prevent
 	// ANSI escape injection from a compromised server.
 	fmt.Fprintf(messageWriter, "\n")
-	fmt.Fprintf(messageWriter, "  Sudo elevation requires Pocket ID approval.\n")
-	fmt.Fprintf(messageWriter, "  Code: %s\n", sanitizeForTerminal(challenge.UserCode))
+	fmt.Fprintf(messageWriter, "  Sudo requires Pocket ID approval.\n")
 	if challenge.VerificationURL != "" {
 		fmt.Fprintf(messageWriter, "  Approve at: %s\n", sanitizeForTerminal(challenge.VerificationURL))
 	}
+	fmt.Fprintf(messageWriter, "  Code: %s\n", sanitizeForTerminal(challenge.UserCode))
+	if challenge.NotificationSent {
+		fmt.Fprintf(messageWriter, "  (A notification has also been sent.)\n")
+	}
 	fmt.Fprintf(messageWriter, "\n")
-	fmt.Fprintf(messageWriter, "  Waiting for approval (expires in %ds)...\n", challenge.ExpiresIn)
+	fmt.Fprintf(messageWriter, "  Waiting for approval (expires in %ds)...", challenge.ExpiresIn)
 
 	// 4. Poll until resolved
 	if p.cfg.SharedSecret == "" {
@@ -146,10 +168,13 @@ func (p *PAMClient) Authenticate(username string) error {
 	}
 
 	var consecutiveErrors int
+	var pollCount int
 	deadline := time.Now().Add(p.cfg.Timeout)
 	// Initial delay before first poll — the challenge was just created,
 	// give the user a moment to start the approval flow.
-	time.Sleep(p.cfg.PollInterval)
+	if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
+		return err
+	}
 
 	for time.Now().Before(deadline) {
 		status, err := p.pollChallenge(challenge.ChallengeID)
@@ -159,7 +184,15 @@ func (p *PAMClient) Authenticate(username string) error {
 			if consecutiveErrors == 1 || consecutiveErrors%10 == 0 {
 				fmt.Fprintf(os.Stderr, "pam-pocketid: poll error (%d consecutive): %v\n", consecutiveErrors, err)
 			}
-			time.Sleep(p.cfg.PollInterval)
+			// Break-glass fallback: if server becomes unreachable during polling
+			if consecutiveErrors > 5 && isServerUnreachable(err) &&
+				p.cfg.BreakglassEnabled && breakglassFileExists(p.cfg.BreakglassFile) {
+				fmt.Fprintf(messageWriter, "\n  Server became unreachable during approval.\n\n")
+				return authenticateBreakglass(username, p.cfg.BreakglassFile)
+			}
+			if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
+				return err
+			}
 			continue
 		}
 		consecutiveErrors = 0
@@ -172,7 +205,7 @@ func (p *PAMClient) Authenticate(username string) error {
 					return fmt.Errorf("approval token verification failed (possible MITM attack)")
 				}
 			}
-			fmt.Fprintf(messageWriter, "  Approved!\n\n")
+			fmt.Fprintf(messageWriter, "\n  Approved!\n\n")
 			maybeRotateBreakglass(p.cfg, rotateBefore)
 			return nil
 		case StatusDenied:
@@ -183,10 +216,13 @@ func (p *PAMClient) Authenticate(username string) error {
 			if p.cfg.SharedSecret != "" {
 				if !p.verifyStatusToken(challenge.ChallengeID, username, "denied", status.DenialToken, challenge.RotateBreakglassBefore) {
 					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: denial token verification failed — ignoring possible forged denial\n")
-					time.Sleep(p.cfg.PollInterval)
+					if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
+						return err
+					}
 					continue
 				}
 			}
+			fmt.Fprintf(messageWriter, "\n  Request denied.\n\n")
 			return fmt.Errorf("sudo request denied")
 		case StatusExpired:
 			// When HMAC is configured, don't trust ANY unverified expiry.
@@ -195,9 +231,12 @@ func (p *PAMClient) Authenticate(username string) error {
 			// own client-side timeout (cfg.Timeout) expires instead.
 			if p.cfg.SharedSecret != "" {
 				fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: ignoring unverified expiry — continuing to poll until client timeout\n")
-				time.Sleep(p.cfg.PollInterval)
+				if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
+					return err
+				}
 				continue
 			}
+			fmt.Fprintf(messageWriter, "\n  Request expired.\n\n")
 			return fmt.Errorf("sudo request expired")
 		case StatusPending:
 			// Poll again after interval
@@ -205,10 +244,27 @@ func (p *PAMClient) Authenticate(username string) error {
 			return fmt.Errorf("unexpected status: %s", sanitizeForTerminal(status.Status))
 		}
 
-		time.Sleep(p.cfg.PollInterval)
+		pollCount++
+		if pollCount%5 == 0 {
+			fmt.Fprintf(messageWriter, ".")
+		}
+		if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
+			return err
+		}
 	}
 
+	fmt.Fprintf(messageWriter, "\n  Request expired.\n\n")
 	return fmt.Errorf("timed out waiting for approval")
+}
+
+// sleepWithContext sleeps for the given duration but returns early if ctx is cancelled.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-time.After(d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // verifyStatusToken verifies an HMAC-SHA256 status token from the server.

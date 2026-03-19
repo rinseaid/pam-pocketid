@@ -115,9 +115,9 @@ If you previously set `POCKETID_SUDO_NO_AUTHENTICATE=true`, remove it or set it 
 ```
 $ sudo apt update
 
-  Sudo elevation requires Pocket ID approval.
-  Approve at: https://sudo.example.com/approve/ABCD-1234
-  Code: ABCD-1234
+  Sudo requires Pocket ID approval.
+  Approve at: https://sudo.example.com/approve/ABCDEF-123456
+  Code: ABCDEF-123456
 
   Waiting for approval (expires in 120s)...
   Approved!
@@ -138,6 +138,14 @@ $ sudo apt update
 | `PAM_POCKETID_LISTEN` | `:8090` | Listen address |
 | `PAM_POCKETID_CHALLENGE_TTL` | `120` | Challenge lifetime in seconds |
 | `PAM_POCKETID_SHARED_SECRET` | *(empty)* | Shared secret for PAM helper auth |
+| `PAM_POCKETID_GRACE_PERIOD` | `0` | Skip re-auth if user approved within this many seconds (0 = disabled) |
+| `PAM_POCKETID_NOTIFY_COMMAND` | *(empty)* | Shell command for push notifications on new challenges |
+| `PAM_POCKETID_NOTIFY_ENV` | *(empty)* | Comma-separated env var prefixes to pass to notify command |
+| `PAM_POCKETID_NOTIFY_USERS_FILE` | *(empty)* | Path to JSON file mapping usernames to per-user notification URLs |
+| `PAM_POCKETID_ESCROW_COMMAND` | *(empty)* | Shell command to escrow break-glass passwords |
+| `PAM_POCKETID_ESCROW_ENV` | *(empty)* | Comma-separated env var prefixes to pass to escrow command |
+| `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` | *(empty)* | RFC3339 timestamp; signal clients to rotate if older |
+| `PAM_POCKETID_INSECURE` | `false` | Allow unauthenticated API (not recommended) |
 
 ### PAM helper environment variables
 
@@ -147,6 +155,220 @@ $ sudo apt update
 | `PAM_POCKETID_SHARED_SECRET` | *(empty)* | Shared secret (must match server) |
 | `PAM_POCKETID_POLL_MS` | `2000` | Poll interval in milliseconds |
 | `PAM_POCKETID_TIMEOUT` | `120` | Max seconds to wait for approval |
+| `PAM_POCKETID_BREAKGLASS_ENABLED` | `true` | Enable break-glass fallback authentication |
+| `PAM_POCKETID_BREAKGLASS_FILE` | `/etc/pam-pocketid-breakglass` | Path to break-glass bcrypt hash file |
+| `PAM_POCKETID_BREAKGLASS_ROTATION_DAYS` | `90` | Automatic rotation interval in days |
+| `PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE` | `random` | Password type: random, passphrase, or alphanumeric |
+
+## Push notifications
+
+When a new sudo challenge is created, the server can run a shell command to send a push notification to your phone. This lets you tap the approval URL directly from the notification instead of copy-pasting from the terminal.
+
+Notifications are **not** sent for grace-period auto-approvals (no action needed).
+
+### Using Apprise (recommended)
+
+[Apprise](https://github.com/caronc/apprise) supports 80+ notification services with a single tool. It's included in the Docker image.
+
+```yaml
+# docker-compose.yml
+environment:
+  PAM_POCKETID_NOTIFY_COMMAND: >-
+    apprise -t "Sudo approval needed"
+    -b "User: $NOTIFY_USERNAME\nHost: $NOTIFY_HOSTNAME\nCode: $NOTIFY_USER_CODE\nApprove: $NOTIFY_APPROVAL_URL\nExpires: ${NOTIFY_EXPIRES_IN}s"
+    "$APPRISE_URLS"
+  PAM_POCKETID_NOTIFY_ENV: "APPRISE_"
+```
+
+Set `APPRISE_URLS` to one or more notification service URLs (space-separated):
+
+```bash
+# Telegram
+APPRISE_URLS="tgram://bot_token/chat_id"
+
+# ntfy
+APPRISE_URLS="ntfy://ntfy.sh/my-sudo-alerts"
+
+# Pushover
+APPRISE_URLS="pover://user_key@app_token"
+
+# Gotify
+APPRISE_URLS="gotify://gotify.example.com/token"
+
+# Multiple services at once
+APPRISE_URLS="tgram://bot/chat ntfy://ntfy.sh/sudo-alerts"
+```
+
+### Using a custom command
+
+Any shell command works. The following environment variables are available:
+
+| Variable | Example | Description |
+|---|---|---|
+| `NOTIFY_USERNAME` | `jordan` | User requesting sudo |
+| `NOTIFY_HOSTNAME` | `web-prod-1` | Host where sudo was invoked |
+| `NOTIFY_USER_CODE` | `ABCDEF-123456` | Challenge code |
+| `NOTIFY_APPROVAL_URL` | `https://sudo.example.com/approve/ABCDEF-123456` | Clickable approval link |
+| `NOTIFY_EXPIRES_IN` | `120` | Seconds until challenge expires |
+| `NOTIFY_USER_URLS` | `tgram://bot/12345` | Per-user notification URL(s) from mapping file (empty if no mapping) |
+
+Notification failures never block sudo — the challenge is created regardless, and the approval URL is always shown in the terminal.
+
+Example with curl to ntfy:
+
+```yaml
+environment:
+  PAM_POCKETID_NOTIFY_COMMAND: >-
+    curl -s
+    -H "Title: Sudo approval needed"
+    -H "Click: $NOTIFY_APPROVAL_URL"
+    -d "Sudo: $NOTIFY_USERNAME@$NOTIFY_HOSTNAME — Code: $NOTIFY_USER_CODE — $NOTIFY_APPROVAL_URL"
+    ntfy.sh/my-sudo-alerts
+  # The Click: header makes the notification clickable in ntfy mobile/desktop apps
+```
+
+### Per-user routing
+
+By default, all notifications go to the same destination. To route notifications to individual users (e.g., each person gets their own Telegram message), create a JSON mapping file:
+
+```json
+{
+  "hazely": "tgram://bot_token/hazely_chat_id",
+  "sunny": "tgram://bot_token/sunny_chat_id ntfy://ntfy.sh/sunny-alerts",
+  "*": "slack://token/channel/#ops-alerts"
+}
+```
+
+- Each key is a username, mapped to one or more Apprise URLs (space-separated).
+- `"*"` is the fallback for users without an explicit entry (optional but recommended).
+- The file must be an absolute path, mode `0600`, and owned by root (it contains bot tokens).
+- The file is re-read on each notification, so changes take effect without restarting the server.
+- When adding new system users, remember to add their notification mapping. Users without a mapping (and no `"*"` fallback) will not receive push notifications.
+
+Point the server at the file. The recommended pattern combines per-user URLs with a global ops channel, so unmapped users still generate an ops notification:
+
+```yaml
+environment:
+  PAM_POCKETID_NOTIFY_USERS_FILE: /etc/pam-pocketid-notify-users.json
+  PAM_POCKETID_NOTIFY_COMMAND: >-
+    apprise -t "Sudo approval needed"
+    -b "User: $NOTIFY_USERNAME\nHost: $NOTIFY_HOSTNAME\nCode: $NOTIFY_USER_CODE\nApprove: $NOTIFY_APPROVAL_URL\nExpires: ${NOTIFY_EXPIRES_IN}s"
+    $NOTIFY_USER_URLS "$APPRISE_OPS_CHANNEL"
+  PAM_POCKETID_NOTIFY_ENV: "APPRISE_"
+```
+
+For per-user only routing (no global ops channel), use a `"*"` wildcard in the JSON to ensure every user has a destination, or guard the command to skip when empty:
+
+```yaml
+  PAM_POCKETID_NOTIFY_COMMAND: >-
+    [ -z "$NOTIFY_USER_URLS" ] && exit 0;
+    apprise -t "Sudo approval needed"
+    -b "User: $NOTIFY_USERNAME\nHost: $NOTIFY_HOSTNAME\nApprove: $NOTIFY_APPROVAL_URL"
+    $NOTIFY_USER_URLS
+```
+
+The per-user URL(s) are passed as `NOTIFY_USER_URLS`. Do not quote `$NOTIFY_USER_URLS` in the command — when unquoted, shell word splitting correctly passes multiple space-separated URLs as separate arguments to apprise. Quoting it would pass the entire string as a single (invalid) URL.
+
+### Limitations
+
+- Notifications are best-effort with no retry on failure.
+- Concurrency is limited to 10 simultaneous notification commands; excess notifications are skipped.
+- Each notification command has a 15-second timeout.
+- Per-user routing requires a JSON mapping file (see above); without it, all challenges go to the same destination.
+- Failures are logged but never block the sudo challenge flow.
+- If the user has multiple devices, all devices receiving the notification service will get the alert (routing is handled by the notification service, not pam-pocketid).
+
+## Break-glass authentication
+
+Break-glass is a fallback authentication mechanism that activates when the pam-pocketid server is unreachable. It allows sudo to proceed using a locally stored password, ensuring you are never locked out of your hosts.
+
+### When it activates
+
+Break-glass only activates on **network-level failures** — dial errors (connection refused, host unreachable) and DNS resolution failures. It does **not** activate on HTTP errors (e.g., 500 Internal Server Error) or request timeouts, because those indicate the server is reachable but having issues. This distinction prevents a malicious server from intentionally triggering break-glass fallback.
+
+### Setup
+
+Generate a break-glass password on each managed host:
+
+```bash
+pam-pocketid rotate-breakglass
+```
+
+This generates a password, stores a bcrypt hash at `/etc/pam-pocketid-breakglass`, and optionally escrows the plaintext to the server. If escrow is not configured, the password is printed to stdout — save it securely.
+
+### Password types
+
+| Type | Format | Entropy |
+|---|---|---|
+| `random` (default) | 32 random bytes, base64url-encoded (43 chars) | 256 bits |
+| `passphrase` | 10 words joined with dashes (e.g., `calm-grip-hawk-note-surf-atom-bold-deer-flux-iron`) | 80 bits |
+| `alphanumeric` | 24 unambiguous alphanumeric characters | ~138 bits |
+
+Set via `PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE` in `/etc/pam-pocketid.conf`.
+
+### Rotation
+
+Passwords are automatically rotated based on `PAM_POCKETID_BREAKGLASS_ROTATION_DAYS` (default 90 days). Rotation happens opportunistically during sudo sessions when the hash file's age exceeds the configured interval.
+
+To force an immediate rotation:
+
+```bash
+pam-pocketid rotate-breakglass --force
+```
+
+The server can also signal all clients to rotate by setting `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` to an RFC3339 timestamp. Clients with hash files older than this timestamp will rotate after their next successful authentication.
+
+### Rate limiting
+
+After 3 consecutive failed break-glass attempts, exponential backoff kicks in: 1s, 2s, 4s, ... up to a maximum of 300s. The failure counter is stored in `/var/run/pam-pocketid-breakglass-failures` (tmpfs, resets on reboot) and is cleared on successful authentication.
+
+### Escrow
+
+The server can escrow break-glass passwords to external systems (1Password, HashiCorp Vault, etc.) by configuring `PAM_POCKETID_ESCROW_COMMAND`. When a client rotates its password, the plaintext is sent to the server's `/api/breakglass/escrow` endpoint, which pipes it to the escrow command via stdin. The hostname is available as `BREAKGLASS_HOSTNAME`.
+
+Each host can only escrow for its own hostname (verified via an HMAC-based per-host token).
+
+### Verification
+
+To test a break-glass password against the stored hash without triggering a sudo session:
+
+```bash
+pam-pocketid verify-breakglass
+```
+
+## CLI reference
+
+| Command | Description |
+|---|---|
+| `pam-pocketid` | PAM helper (called by pam_exec, not run directly) |
+| `pam-pocketid serve` | Run the authentication server |
+| `pam-pocketid rotate-breakglass [--force]` | Rotate the break-glass password |
+| `pam-pocketid verify-breakglass` | Verify a break-glass password against the stored hash |
+| `pam-pocketid --help` | Show usage information |
+
+## Monitoring
+
+### Health check
+
+`GET /healthz` returns `ok` with HTTP 200. Use this for load balancer or container health checks.
+
+### Prometheus metrics
+
+`GET /metrics` exposes metrics in Prometheus format. All metrics are prefixed with `pam_pocketid_`.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `challenges_created_total` | counter | | Total sudo challenges created |
+| `challenges_approved_total` | counter | | Challenges approved via OIDC authentication |
+| `challenges_auto_approved_total` | counter | | Challenges auto-approved via grace period |
+| `challenges_denied_total` | counter | `reason` | Challenges denied (reasons: `oidc_error`, `nonce_mismatch`, `identity_mismatch`) |
+| `challenges_expired_total` | counter | | Challenges that expired without resolution |
+| `challenge_duration_seconds` | histogram | | Time from challenge creation to resolution |
+| `rate_limit_rejections_total` | counter | | Challenge creation requests rejected by rate limiting |
+| `auth_failures_total` | counter | | Requests rejected due to invalid shared secret |
+| `active_challenges` | gauge | | Number of currently pending challenges |
+| `breakglass_escrow_total` | counter | `status` | Break-glass escrow operations (status: `success`, `failure`) |
+| `notifications_total` | counter | `status` | Push notification attempts (status: `sent`, `failed`, `skipped`) |
 
 ## Integration with glauth-pocketid
 
@@ -421,6 +643,19 @@ When a user runs `sudo`, they see a URL and approval code. They open the URL in 
 - **URL scheme validation** — Server and client URLs must be `https://` or `http://`
 - **Challenges expire** after the configured TTL (default 120s, bounded 10s–10min)
 - **No passwords** — Authentication is passkey-only at the Pocket ID layer
+- **Break-glass fallback** — Uses bcrypt (cost 12), rate limiting with exponential backoff, and timing-equalized responses to prevent timing oracles that distinguish "file error" from "wrong password"
+- **HMAC-verified denial/expiry** — When a shared secret is configured, the PAM client ignores unverified status changes (denials, expirations), preventing MITM approval/denial injection
+- **Terminal output sanitization** — Server responses displayed in the terminal are stripped of ANSI escapes, C1 control characters, bidirectional overrides, and zero-width characters
+- **Config file security** — The config file is read with `O_NOFOLLOW` (no symlinks), must be mode 0600, and must be owned by root
+- **Notification users file security** — The per-user notification mapping file (`PAM_POCKETID_NOTIFY_USERS_FILE`) uses the same hardening: `O_NOFOLLOW`, fd-based stat (no TOCTOU gap), mode 0600 enforced, root ownership enforced, and a 1MB size limit. The file is re-read on each notification to support hot-reloading
+- **Grace period is per-username** — Approving sudo on one host grants the grace period on all hosts querying the same server (not scoped per-host)
+
+### Disaster recovery
+
+- **Server down** — Break-glass fallback activates automatically on network-level failures if a break-glass hash file exists on the host. Users are prompted for the break-glass password.
+- **OIDC provider down** — Challenges can be created but not approved (the OIDC flow will fail). If the server itself becomes unreachable as a result, break-glass activates.
+- **Server restart** — In-memory challenges are lost. Any in-flight sudo sessions that were polling will time out and fail. Users simply re-run their sudo command.
+- **Break-glass password lost** — Re-run `pam-pocketid rotate-breakglass --force` on the affected host to generate a new password.
 
 ## Building from source
 

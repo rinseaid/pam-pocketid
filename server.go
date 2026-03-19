@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -17,6 +18,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -27,12 +29,17 @@ import (
 
 // Pre-parsed templates — avoids re-parsing on every request.
 var (
-	approvalPageTmpl    = template.Must(template.New("approve").Parse(approvalPageHTML))
-	approvalAlreadyTmpl = template.Must(template.New("already").Parse(approvalAlreadyHTML))
+	approvalPageTmpl     = template.Must(template.New("approve").Parse(approvalPageHTML))
+	approvalAlreadyTmpl  = template.Must(template.New("already").Parse(approvalAlreadyHTML))
+	approvalMismatchTmpl = template.Must(template.New("mismatch").Parse(approvalMismatchHTML))
 )
 
 // escrowTimeout limits how long we wait for the escrow command to complete.
 const escrowTimeout = 30 * time.Second
+
+// escrowMaxOutput caps the amount of stdout/stderr we read from the escrow
+// command to prevent memory exhaustion from a verbose or malicious command.
+const escrowMaxOutput = 1 << 20 // 1 MB
 
 // escrowSemaphore limits concurrent escrow command executions to prevent
 // resource exhaustion from an attacker flooding the endpoint.
@@ -45,6 +52,7 @@ type Server struct {
 	oidcConfig oauth2.Config
 	verifier   *oidc.IDTokenVerifier
 	mux        *http.ServeMux
+	notifyWg   sync.WaitGroup // tracks in-flight notification goroutines for graceful shutdown
 }
 
 // validUsername restricts usernames to safe characters, preventing log injection
@@ -265,12 +273,25 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 
 	approvalURL := fmt.Sprintf("%s/approve/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode)
 
+	// Fire push notification asynchronously (no-op if not configured).
+	s.sendNotification(challenge, approvalURL)
+
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{
 		"challenge_id":     challenge.ID,
 		"user_code":        challenge.UserCode,
 		"verification_url": approvalURL,
 		"expires_in":       int(s.cfg.ChallengeTTL.Seconds()),
+	}
+	if s.cfg.NotifyCommand != "" {
+		// Only indicate notification_sent if the notification is likely to
+		// reach someone: either no per-user file is configured (global command),
+		// or the user has a mapping (including wildcard).
+		if s.cfg.NotifyUsersFile == "" {
+			resp["notification_sent"] = true
+		} else if urls := lookupUserURLs(loadNotifyUsers(s.cfg.NotifyUsersFile), req.Username); urls != "" {
+			resp["notification_sent"] = true
+		}
 	}
 	if challenge.BreakglassRotateBefore != "" {
 		resp["rotate_breakglass_before"] = challenge.BreakglassRotateBefore
@@ -363,8 +384,12 @@ func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
 
 	if challenge.Status != StatusPending {
 		w.Header().Set("Content-Type", "text/html")
+		status := string(challenge.Status)
+		if len(status) > 0 {
+			status = strings.ToUpper(status[:1]) + status[1:]
+		}
 		if err := approvalAlreadyTmpl.Execute(w, map[string]string{
-			"Status": string(challenge.Status),
+			"Status": status,
 		}); err != nil {
 			log.Printf("ERROR: template execution: %v", err)
 		}
@@ -374,6 +399,7 @@ func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	if err := approvalPageTmpl.Execute(w, map[string]string{
 		"Username": challenge.Username,
+		"Hostname": challenge.Hostname,
 		"Code":     challenge.UserCode,
 		"LoginURL": fmt.Sprintf("%s/login/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode),
 	}); err != nil {
@@ -607,7 +633,12 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		log.Printf("DENIED: OIDC token has no preferred_username for challenge %s from %s", challengeID[:8], remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, approvalMismatchHTML)
+		if err := approvalMismatchTmpl.Execute(w, map[string]string{
+			"AuthenticatedUser": "(unknown)",
+			"ExpectedUser":      challenge.Username,
+		}); err != nil {
+			log.Printf("ERROR: template execution: %v", err)
+		}
 		return
 	}
 	// Validate the IdP-provided username format to prevent log injection
@@ -619,7 +650,12 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		log.Printf("DENIED: OIDC preferred_username %q fails validation for challenge %s from %s", authenticatedUser, challengeID[:8], remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, approvalMismatchHTML)
+		if err := approvalMismatchTmpl.Execute(w, map[string]string{
+			"AuthenticatedUser": "(invalid)",
+			"ExpectedUser":      challenge.Username,
+		}); err != nil {
+			log.Printf("ERROR: template execution: %v", err)
+		}
 		return
 	}
 
@@ -630,7 +666,12 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		log.Printf("DENIED: user %q authenticated but challenge %s is for %q (host %q) from %s", authenticatedUser, challengeID[:8], challenge.Username, challenge.Hostname, remoteAddr(r))
 		s.store.Deny(challengeID)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, approvalMismatchHTML)
+		if err := approvalMismatchTmpl.Execute(w, map[string]string{
+			"AuthenticatedUser": authenticatedUser,
+			"ExpectedUser":      challenge.Username,
+		}); err != nil {
+			log.Printf("ERROR: template execution: %v", err)
+		}
 		return
 	}
 
@@ -775,7 +816,7 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 			for _, prefix := range s.cfg.EscrowEnvPassthrough {
-				if strings.HasPrefix(env, prefix) {
+				if prefix != "" && strings.HasPrefix(env, prefix) {
 					cmdEnv = append(cmdEnv, env)
 					break
 				}
@@ -784,10 +825,16 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 	}
 	cmd.Env = cmdEnv
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	// Use separate capped buffers instead of CombinedOutput() to prevent
+	// memory exhaustion from a verbose or malicious escrow command.
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &limitedWriter{w: &stdoutBuf, n: escrowMaxOutput}
+	cmd.Stderr = &limitedWriter{w: &stderrBuf, n: escrowMaxOutput}
+
+	if err := cmd.Run(); err != nil {
 		breakglassEscrowTotal.WithLabelValues("failure").Inc()
-		log.Printf("BREAKGLASS: escrow command failed for host %q: %v (output: %s)", req.Hostname, err, strings.TrimSpace(string(output)))
+		combined := truncateOutput(stdoutBuf.String() + stderrBuf.String())
+		log.Printf("BREAKGLASS: escrow command failed for host %q: %v (output: %s)", req.Hostname, err, combined)
 		http.Error(w, "escrow command failed", http.StatusInternalServerError)
 		return
 	}
@@ -819,76 +866,352 @@ func isHex(s string) bool {
 
 // HTML templates
 // All user-controlled values are rendered via html/template (auto-escaped).
+// Templates share a common CSS design system with dark mode support via
+// CSS custom properties and @media (prefers-color-scheme: dark).
+
+// sharedCSS is the common design system embedded in every template.
+// Uses CSS custom properties for dark mode, Inter/system font stack,
+// and professional styling inspired by Pocket ID / Tinyauth.
+const sharedCSS = `
+    :root {
+      --bg: #f3f4f6;
+      --card-bg: #ffffff;
+      --text: #111827;
+      --text-secondary: #6b7280;
+      --border: #e5e7eb;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --primary-text: #ffffff;
+      --success: #059669;
+      --success-bg: #ecfdf5;
+      --success-border: #a7f3d0;
+      --danger: #dc2626;
+      --danger-bg: #fef2f2;
+      --danger-border: #fecaca;
+      --warning: #d97706;
+      --warning-bg: #fffbeb;
+      --warning-border: #fde68a;
+      --info-bg: #eff6ff;
+      --info-border: #bfdbfe;
+      --code-bg: #f9fafb;
+      --code-border: #d1d5db;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 24px rgba(0,0,0,0.05);
+      --focus-ring: 0 0 0 3px rgba(59,130,246,0.4);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --card-bg: #1e293b;
+        --text: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border: #334155;
+        --primary: #60a5fa;
+        --primary-hover: #3b82f6;
+        --primary-text: #0f172a;
+        --success: #34d399;
+        --success-bg: #064e3b;
+        --success-border: #065f46;
+        --danger: #f87171;
+        --danger-bg: #450a0a;
+        --danger-border: #7f1d1d;
+        --warning: #fbbf24;
+        --warning-bg: #451a03;
+        --warning-border: #78350f;
+        --info-bg: #1e3a5f;
+        --info-border: #1e40af;
+        --code-bg: #0f172a;
+        --code-border: #475569;
+        --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 24px rgba(0,0,0,0.2);
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+      max-width: 440px;
+      margin: 0 auto;
+      padding: 48px 20px;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 40px 32px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      width: 100%;
+      text-align: center;
+    }
+    h2 {
+      font-size: 1.375rem;
+      font-weight: 700;
+      margin: 12px 0 8px;
+      letter-spacing: -0.01em;
+    }
+    p { margin: 8px 0; color: var(--text-secondary); font-size: 0.938rem; }
+    .icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 8px;
+      font-size: 1.5rem;
+    }
+    strong { color: var(--text); font-weight: 600; }
+`
 
 const approvalPageHTML = `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Sudo Approval</title>
+  <title>Sudo approval</title>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: -apple-system, system-ui, sans-serif; max-width: 480px; margin: 60px auto; padding: 0 20px; text-align: center; background: #f5f5f5; }
-    .card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .code { font-size: 2em; font-weight: bold; letter-spacing: 0.15em; color: #333; margin: 20px 0; font-family: monospace; }
-    .user { color: #d63031; font-weight: bold; }
-    .btn { display: inline-block; background: #0984e3; color: white; padding: 14px 40px; border-radius: 8px; text-decoration: none; font-size: 1.1em; margin-top: 20px; }
-    .btn:hover { background: #0874c9; }
-    .warn { color: #636e72; font-size: 0.9em; margin-top: 20px; }
+  <style>` + sharedCSS + `
+    .shield {
+      background: var(--info-bg);
+      border: 2px solid var(--info-border);
+      color: var(--primary);
+      position: relative;
+    }
+    .lock-icon {
+      display: inline-block;
+      width: 18px;
+      height: 14px;
+      border: 3px solid var(--primary);
+      border-radius: 3px;
+      position: relative;
+      top: 3px;
+    }
+    .lock-icon::before {
+      content: '';
+      display: block;
+      width: 10px;
+      height: 9px;
+      border: 3px solid var(--primary);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      position: absolute;
+      top: -11px;
+      left: 1px;
+    }
+    .request-info { margin: 20px 0 4px; }
+    .request-info p { color: var(--text); font-size: 0.938rem; }
+    .user { color: var(--primary); font-weight: 700; }
+    .host { color: var(--text); font-weight: 600; }
+    .code-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin: 20px 0 8px;
+    }
+    .code {
+      display: inline-block;
+      font-size: clamp(1.125rem, 5vw, 1.75rem);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--text);
+      font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+      background: var(--code-bg);
+      border: 2px solid var(--code-border);
+      border-radius: 12px;
+      padding: 12px 20px;
+      margin: 0 0 4px;
+      max-width: 100%;
+      word-break: break-all;
+    }
+    .code-hint {
+      font-size: 0.813rem;
+      color: var(--text-secondary);
+      margin: 8px 0 20px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--primary);
+      color: var(--primary-text);
+      padding: 12px 32px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 0.938rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+      width: 100%;
+      max-width: 320px;
+    }
+    .btn:hover { background: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+    .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+    .btn:active { transform: translateY(0); }
+    .warn {
+      color: var(--text-secondary);
+      font-size: 0.813rem;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Sudo Elevation Request</h2>
-    <p>User <span class="user">{{.Username}}</span> is requesting sudo access.</p>
-    <div class="code">{{.Code}}</div>
-    <p>If this was you, sign in to approve:</p>
-    <a href="{{.LoginURL}}" class="btn">Authenticate with Pocket ID</a>
+    <div class="icon shield" aria-hidden="true"><div class="lock-icon"></div></div>
+    <h2>Sudo elevation request</h2>
+    <div class="request-info">
+      <p>User <strong class="user">{{.Username}}</strong>{{if .Hostname}} on <strong class="host">{{.Hostname}}</strong>{{end}} is requesting sudo access.</p>
+    </div>
+    <div class="code-label">Verification code</div>
+    <div class="code" aria-label="Verification code: {{.Code}}">{{.Code}}</div>
+    <p class="code-hint">Verify this code matches your terminal</p>
+    <a href="{{.LoginURL}}" class="btn" role="button" aria-label="Authenticate with Pocket ID to approve this sudo request">Authenticate with Pocket ID</a>
     <p class="warn">If you did not request this, close this page.</p>
   </div>
 </body>
 </html>`
 
 const approvalSuccessHTML = `<!DOCTYPE html>
-<html>
-<head><title>Approved</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;padding:0 20px;text-align:center;background:#f5f5f5}.card{background:white;border-radius:12px;padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.ok{font-size:3em;margin-bottom:10px}</style>
+<html lang="en">
+<head>
+  <title>Sudo approved</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>` + sharedCSS + `
+    .icon-success {
+      background: var(--success-bg);
+      border: 2px solid var(--success-border);
+      color: var(--success);
+    }
+    h2 { color: var(--success); }
+  </style>
 </head>
-<body><div class="card"><div class="ok">&#10003;</div><h2>Sudo Approved</h2><p>You can close this window. Your terminal session will continue.</p></div></body>
+<body>
+  <div class="card">
+    <div class="icon icon-success" aria-hidden="true">&#x2713;</div>
+    <h2>Sudo approved</h2>
+    <p>You're all set. Your terminal session will continue.</p>
+  </div>
+</body>
 </html>`
 
 const approvalDeniedHTML = `<!DOCTYPE html>
-<html>
-<head><title>Denied</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;padding:0 20px;text-align:center;background:#f5f5f5}.card{background:white;border-radius:12px;padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.err{font-size:3em;margin-bottom:10px;color:#d63031}</style>
+<html lang="en">
+<head>
+  <title>Request denied</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>` + sharedCSS + `
+    .icon-danger {
+      background: var(--danger-bg);
+      border: 2px solid var(--danger-border);
+      color: var(--danger);
+    }
+    h2 { color: var(--danger); }
+  </style>
 </head>
-<body><div class="card"><div class="err">&#10007;</div><h2>Authentication Failed</h2><p>The sudo request was denied.</p></div></body>
+<body>
+  <div class="card">
+    <div class="icon icon-danger" aria-hidden="true">&#x2717;</div>
+    <h2>Request denied</h2>
+    <p>The authentication was not completed. You may need to run your sudo command again.</p>
+  </div>
+</body>
 </html>`
 
+// approvalMismatchHTML uses html/template syntax so user-controlled values are safely escaped.
 const approvalMismatchHTML = `<!DOCTYPE html>
-<html>
-<head><title>Identity Mismatch</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;padding:0 20px;text-align:center;background:#f5f5f5}.card{background:white;border-radius:12px;padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.err{font-size:3em;margin-bottom:10px;color:#d63031}</style>
+<html lang="en">
+<head>
+  <title>Identity mismatch</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>` + sharedCSS + `
+    .icon-danger {
+      background: var(--danger-bg);
+      border: 2px solid var(--danger-border);
+      color: var(--danger);
+    }
+    h2 { color: var(--danger); }
+    .detail {
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin: 16px 0;
+      text-align: left;
+      font-size: 0.875rem;
+      color: var(--text);
+      line-height: 1.7;
+    }
+  </style>
 </head>
-<body><div class="card"><div class="err">&#10007;</div><h2>Identity Mismatch</h2><p>The authenticated identity does not match the user requesting sudo. You must authenticate as the same user.</p></div></body>
+<body>
+  <div class="card">
+    <div class="icon icon-danger" aria-hidden="true">&#x2717;</div>
+    <h2>Identity mismatch</h2>
+    <div class="detail">
+      <p>You authenticated as <strong>{{.AuthenticatedUser}}</strong>, but the sudo request is for <strong>{{.ExpectedUser}}</strong>.</p>
+    </div>
+    <p>Sign out of Pocket ID and authenticate as the correct user, then run your sudo command again.</p>
+  </div>
+</body>
 </html>`
 
 const approvalExpiredHTML = `<!DOCTYPE html>
-<html>
-<head><title>Expired</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;padding:0 20px;text-align:center;background:#f5f5f5}.card{background:white;border-radius:12px;padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}</style>
+<html lang="en">
+<head>
+  <title>Request expired</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>` + sharedCSS + `
+    .icon-warning {
+      background: var(--warning-bg);
+      border: 2px solid var(--warning-border);
+      color: var(--warning);
+    }
+    h2 { color: var(--warning); }
+  </style>
 </head>
-<body><div class="card"><h2>Challenge Expired</h2><p>This sudo approval request has expired or does not exist. Run your sudo command again.</p></div></body>
+<body>
+  <div class="card">
+    <div class="icon icon-warning" aria-hidden="true">&#x23f0;</div>
+    <h2>Request expired</h2>
+    <p>This approval request has expired or was not found.</p>
+    <p>Run your sudo command again to create a new request.</p>
+  </div>
+</body>
 </html>`
 
 // approvalAlreadyHTML uses html/template syntax so the status is safely escaped.
 const approvalAlreadyHTML = `<!DOCTYPE html>
-<html>
-<head><title>Already Resolved</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;padding:0 20px;text-align:center;background:#f5f5f5}.card{background:white;border-radius:12px;padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}</style>
+<html lang="en">
+<head>
+  <title>Already resolved</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>` + sharedCSS + `
+    .icon-info {
+      background: var(--info-bg);
+      border: 2px solid var(--info-border);
+      color: var(--primary);
+    }
+  </style>
 </head>
-<body><div class="card"><h2>Already Resolved</h2><p>This sudo request has already been {{.Status}}.</p></div></body>
+<body>
+  <div class="card">
+    <div class="icon icon-info" aria-hidden="true">&#x2139;</div>
+    <h2>Already resolved</h2>
+    <p>This sudo request has already been <strong>{{.Status}}</strong>.</p>
+  </div>
+</body>
 </html>`
