@@ -55,6 +55,12 @@ type Config struct {
 	EscrowCommand          string    // Shell command to escrow break-glass passwords
 	EscrowEnvPassthrough   []string  // Additional env var prefixes to pass to escrow command (e.g., AWS_,VAULT_)
 	BreakglassRotateBefore time.Time // Tell clients to rotate if their hash file is older than this
+
+	// Token cache settings (client mode)
+	TokenCacheEnabled  bool   // Whether token caching is enabled (default true)
+	TokenCacheDir      string // Directory for cached tokens (default /run/pocketid)
+	TokenCacheIssuer   string // OIDC issuer URL for local JWT validation
+	TokenCacheClientID string // OIDC client ID for aud verification
 }
 
 // LoadServerConfig loads server configuration from environment variables.
@@ -292,6 +298,23 @@ func LoadClientConfig() (*Config, error) {
 		// valid
 	default:
 		return nil, fmt.Errorf("PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE must be one of: random, passphrase, alphanumeric")
+	}
+
+	// Token cache settings
+	cfg.TokenCacheEnabled = configValueBool("PAM_POCKETID_TOKEN_CACHE", fileVars, true)
+	cfg.TokenCacheDir = configValue("PAM_POCKETID_TOKEN_CACHE_DIR", fileVars)
+	if cfg.TokenCacheDir == "" {
+		cfg.TokenCacheDir = "/run/pocketid"
+	}
+	if !strings.HasPrefix(cfg.TokenCacheDir, "/") {
+		return nil, fmt.Errorf("PAM_POCKETID_TOKEN_CACHE_DIR must be an absolute path (got %q)", cfg.TokenCacheDir)
+	}
+	cfg.TokenCacheIssuer = configValue("PAM_POCKETID_ISSUER_URL", fileVars)
+	cfg.TokenCacheClientID = configValue("PAM_POCKETID_CLIENT_ID", fileVars)
+
+	// Graceful degradation: disable cache if issuer/clientID are missing
+	if cfg.TokenCacheEnabled && (cfg.TokenCacheIssuer == "" || cfg.TokenCacheClientID == "") {
+		cfg.TokenCacheEnabled = false
 	}
 
 	return cfg, nil

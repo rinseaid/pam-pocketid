@@ -255,10 +255,11 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 
 			w.Header().Set("Content-Type", "application/json")
 			resp := map[string]interface{}{
-				"challenge_id": challenge.ID,
-				"user_code":    challenge.UserCode,
-				"expires_in":   int(s.cfg.ChallengeTTL.Seconds()),
-				"status":       "approved",
+				"challenge_id":    challenge.ID,
+				"user_code":       challenge.UserCode,
+				"expires_in":      int(s.cfg.ChallengeTTL.Seconds()),
+				"status":          "approved",
+				"grace_remaining": int(s.store.GraceRemaining(req.Username).Seconds()),
 			}
 			if s.cfg.SharedSecret != "" {
 				resp["approval_token"] = s.computeStatusHMAC(challenge.ID, req.Username, "approved", challenge.BreakglassRotateBefore)
@@ -344,6 +345,11 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 		switch challenge.Status {
 		case StatusApproved:
 			resp["approval_token"] = s.computeStatusHMAC(id, challenge.Username, "approved", challenge.BreakglassRotateBefore)
+			// Forward the raw ID token so the PAM client can cache it locally
+			// for subsequent authentication without a full device flow.
+			if challenge.RawIDToken != "" {
+				resp["id_token"] = challenge.RawIDToken
+			}
 		case StatusDenied:
 			resp["denial_token"] = s.computeStatusHMAC(id, challenge.Username, "denied", challenge.BreakglassRotateBefore)
 		}
@@ -681,6 +687,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to approve", http.StatusInternalServerError)
 		return
 	}
+
+	// Store the raw ID token on the challenge for forwarding to the PAM client cache.
+	s.store.SetIDToken(challengeID, rawIDToken)
 
 	challengesApproved.Inc()
 	activeChallenges.Dec()

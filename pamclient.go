@@ -26,8 +26,9 @@ var validChallengeID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // PAMClient is the helper that runs under pam_exec, creates a challenge,
 // displays the approval URL, and polls until approved/denied/expired.
 type PAMClient struct {
-	cfg    *Config
-	client *http.Client
+	cfg        *Config
+	client     *http.Client
+	tokenCache *TokenCache
 }
 
 // maxResponseSize limits how much of a server response we will read (64KB).
@@ -47,9 +48,10 @@ func (e *serverHTTPError) Error() string {
 }
 
 // NewPAMClient creates a new PAM helper client.
-func NewPAMClient(cfg *Config) *PAMClient {
+func NewPAMClient(cfg *Config, tokenCache *TokenCache) *PAMClient {
 	return &PAMClient{
-		cfg: cfg,
+		cfg:        cfg,
+		tokenCache: tokenCache,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
@@ -82,6 +84,7 @@ type challengeResponse struct {
 	ApprovalToken          string `json:"approval_token,omitempty"`
 	RotateBreakglassBefore string `json:"rotate_breakglass_before,omitempty"`
 	NotificationSent       bool   `json:"notification_sent,omitempty"`
+	GraceRemaining         int    `json:"grace_remaining,omitempty"`
 }
 
 // pollResponse is the response from GET /api/challenge/{id}.
@@ -90,6 +93,7 @@ type pollResponse struct {
 	ExpiresIn     int    `json:"expires_in"`
 	ApprovalToken string `json:"approval_token,omitempty"`
 	DenialToken   string `json:"denial_token,omitempty"`
+	IDToken       string `json:"id_token,omitempty"`
 
 	// serverExpired is set locally when the server returns 404 (not from JSON).
 	// Used to distinguish server-reported expiry from HMAC-verified status.
@@ -107,12 +111,24 @@ func (p *PAMClient) Authenticate(username string) error {
 	go func() {
 		select {
 		case <-sigCh:
-			fmt.Fprintf(messageWriter, "\n  Cancelled.\n\n")
+			fmt.Fprintf(messageWriter, "\n  Cancelled.\n")
 			os.Exit(1)
 		case <-ctx.Done():
 		}
 	}()
 	defer signal.Stop(sigCh)
+
+	// 0. Check token cache — if a cached id_token is valid, grant immediately (no network call)
+	if p.tokenCache != nil {
+		if remaining, err := p.tokenCache.Check(username); err == nil {
+			fmt.Fprintf(messageWriter, "  Sudo approved (session expires in %s)\n", formatDuration(remaining))
+			// Still run break-glass age-based rotation check (no server signal
+			// available since we didn't contact the server, so rotateBefore is zero).
+			maybeRotateBreakglass(p.cfg, time.Time{})
+			return nil
+		}
+		// Cache miss or invalid — fall through to device flow
+	}
 
 	// 1. Create challenge
 	challenge, err := p.createChallenge(username)
@@ -142,7 +158,11 @@ func (p *PAMClient) Authenticate(username string) error {
 				return fmt.Errorf("auto-approval token verification failed (possible MITM attack)")
 			}
 		}
-		fmt.Fprintf(messageWriter, "\n  Sudo approved (recent authentication).\n\n")
+		if challenge.GraceRemaining > 0 {
+			fmt.Fprintf(messageWriter, "  Sudo approved (next auth in %s)\n", formatDuration(time.Duration(challenge.GraceRemaining)*time.Second))
+		} else {
+			fmt.Fprintf(messageWriter, "  Sudo approved\n")
+		}
 		maybeRotateBreakglass(p.cfg, rotateBefore)
 		return nil
 	}
@@ -150,17 +170,16 @@ func (p *PAMClient) Authenticate(username string) error {
 	// 3. Display approval info to user.
 	// Sanitize all server-provided values before terminal display to prevent
 	// ANSI escape injection from a compromised server.
-	fmt.Fprintf(messageWriter, "\n")
 	fmt.Fprintf(messageWriter, "  Sudo requires Pocket ID approval.\n")
 	if challenge.VerificationURL != "" {
 		fmt.Fprintf(messageWriter, "  Approve at: %s\n", sanitizeForTerminal(challenge.VerificationURL))
 	}
-	fmt.Fprintf(messageWriter, "  Code: %s\n", sanitizeForTerminal(challenge.UserCode))
+	fmt.Fprintf(messageWriter, "  Code: %s", sanitizeForTerminal(challenge.UserCode))
 	if challenge.NotificationSent {
-		fmt.Fprintf(messageWriter, "  (A notification has also been sent.)\n")
+		fmt.Fprintf(messageWriter, " (notification sent)")
 	}
 	fmt.Fprintf(messageWriter, "\n")
-	fmt.Fprintf(messageWriter, "  Waiting for approval (expires in %ds)...", challenge.ExpiresIn)
+	fmt.Fprintf(messageWriter, "  Waiting for approval...")
 
 	// 4. Poll until resolved
 	if p.cfg.SharedSecret == "" {
@@ -187,7 +206,7 @@ func (p *PAMClient) Authenticate(username string) error {
 			// Break-glass fallback: if server becomes unreachable during polling
 			if consecutiveErrors > 5 && isServerUnreachable(err) &&
 				p.cfg.BreakglassEnabled && breakglassFileExists(p.cfg.BreakglassFile) {
-				fmt.Fprintf(messageWriter, "\n  Server became unreachable during approval.\n\n")
+				fmt.Fprintf(messageWriter, "\n  Server became unreachable during approval.\n")
 				return authenticateBreakglass(username, p.cfg.BreakglassFile)
 			}
 			if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
@@ -205,7 +224,13 @@ func (p *PAMClient) Authenticate(username string) error {
 					return fmt.Errorf("approval token verification failed (possible MITM attack)")
 				}
 			}
-			fmt.Fprintf(messageWriter, "\n  Approved!\n\n")
+			// Cache the id_token for future authentication without device flow
+			if p.tokenCache != nil && status.IDToken != "" {
+				if err := p.tokenCache.Write(username, status.IDToken); err != nil {
+					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: failed to cache token: %v\n", err)
+				}
+			}
+			fmt.Fprintf(messageWriter, " Approved!\n")
 			maybeRotateBreakglass(p.cfg, rotateBefore)
 			return nil
 		case StatusDenied:
@@ -222,7 +247,7 @@ func (p *PAMClient) Authenticate(username string) error {
 					continue
 				}
 			}
-			fmt.Fprintf(messageWriter, "\n  Request denied.\n\n")
+			fmt.Fprintf(messageWriter, " Denied.\n")
 			return fmt.Errorf("sudo request denied")
 		case StatusExpired:
 			// When HMAC is configured, don't trust ANY unverified expiry.
@@ -236,7 +261,7 @@ func (p *PAMClient) Authenticate(username string) error {
 				}
 				continue
 			}
-			fmt.Fprintf(messageWriter, "\n  Request expired.\n\n")
+			fmt.Fprintf(messageWriter, " Expired.\n")
 			return fmt.Errorf("sudo request expired")
 		case StatusPending:
 			// Poll again after interval
@@ -253,7 +278,7 @@ func (p *PAMClient) Authenticate(username string) error {
 		}
 	}
 
-	fmt.Fprintf(messageWriter, "\n  Request expired.\n\n")
+	fmt.Fprintf(messageWriter, " Expired.\n")
 	return fmt.Errorf("timed out waiting for approval")
 }
 
@@ -362,6 +387,25 @@ func (p *PAMClient) pollChallenge(challengeID string) (*pollResponse, error) {
 		return nil, err
 	}
 	return &pr, nil
+}
+
+// formatDuration formats a duration as a human-readable string like "3h 12m" or "47m".
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 && m > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	if h > 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%ds", int(d.Seconds()))
 }
 
 // sanitizeForTerminal removes control characters (ANSI escapes, null bytes, etc.)

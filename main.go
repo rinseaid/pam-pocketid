@@ -20,6 +20,9 @@ import (
 // the user's terminal. We default to os.Stdout but allow override for testing.
 var messageWriter io.Writer = os.Stdout
 
+// version is set at build time via -ldflags "-X main.version=v0.6.1".
+var version = "dev"
+
 // safeUsername validates the PAM_USER value to prevent injection attacks.
 // PAM usernames should be short, alphanumeric with limited special chars.
 var safeUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
@@ -27,14 +30,18 @@ var safeUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Println(version)
+			os.Exit(0)
 		case "--help", "-h", "help":
-			fmt.Print(`pam-pocketid — browser-based sudo authentication via Pocket ID
-
+			fmt.Printf("pam-pocketid %s — browser-based sudo authentication via Pocket ID\n", version)
+			fmt.Print(`
 Usage:
   pam-pocketid                   PAM helper (called by pam_exec)
   pam-pocketid serve             Run the authentication server
   pam-pocketid rotate-breakglass Rotate the break-glass password
   pam-pocketid verify-breakglass Verify a break-glass password
+  pam-pocketid --version         Show version
   pam-pocketid --help            Show this help message
 `)
 			os.Exit(0)
@@ -289,7 +296,12 @@ func runPAMHelper() {
 		os.Exit(1)
 	}
 
-	client := NewPAMClient(cfg)
+	var cache *TokenCache
+	if cfg.TokenCacheEnabled {
+		cache = NewTokenCache(cfg.TokenCacheDir, cfg.TokenCacheIssuer, cfg.TokenCacheClientID)
+	}
+
+	client := NewPAMClient(cfg, cache)
 	if err := client.Authenticate(username); err != nil {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: %v\n", err)
 		os.Exit(1)

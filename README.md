@@ -67,10 +67,15 @@ services:
 
 ### 3. Install the PAM helper on Linux hosts
 
-Copy the `pam-pocketid` binary to each managed host:
+**Quick install** (downloads latest binary, installs systemd rotation timer):
 
 ```bash
-# Download from releases
+curl -fsSL https://raw.githubusercontent.com/rinseaid/pam-pocketid/main/install.sh | sudo bash
+```
+
+**Or install manually:**
+
+```bash
 curl -L -o /usr/local/bin/pam-pocketid \
   https://github.com/rinseaid/pam-pocketid/releases/latest/download/pam-pocketid-linux-amd64
 chmod +x /usr/local/bin/pam-pocketid
@@ -112,18 +117,45 @@ If you previously set `POCKETID_SUDO_NO_AUTHENTICATE=true`, remove it or set it 
 
 ## What the user sees
 
+**Terminal (normal approval):**
 ```
 $ sudo apt update
 
   Sudo requires Pocket ID approval.
   Approve at: https://sudo.example.com/approve/ABCDEF-123456
   Code: ABCDEF-123456
+  (A notification has also been sent.)
 
-  Waiting for approval (expires in 120s)...
+  Waiting for approval (expires in 120s).....
   Approved!
 
 [sudo] runs the command
 ```
+
+**Terminal (break-glass fallback when server is down):**
+```
+$ sudo whoami
+
+  *** BREAK-GLASS AUTHENTICATION ***
+  The Pocket ID server is unreachable.
+  Enter the break-glass password to proceed.
+
+Break-glass password: ********
+  Break-glass authentication successful.
+
+root
+```
+
+**Terminal (grace period auto-approval):**
+```
+$ sudo systemctl restart nginx
+
+  Sudo approved (recent authentication).
+
+[sudo] runs the command
+```
+
+Visual mockups of all terminal, browser, and mobile notification UIs are available at [**rinseaid.github.io/pam-pocketid**](https://rinseaid.github.io/pam-pocketid/all-pages.html) (supports light/dark mode).
 
 ## Configuration
 
@@ -198,6 +230,73 @@ APPRISE_URLS="gotify://gotify.example.com/token"
 # Multiple services at once
 APPRISE_URLS="tgram://bot/chat ntfy://ntfy.sh/sudo-alerts"
 ```
+
+### Using Apprise API (stateless notifications via HTTP)
+
+If you run [Apprise API](https://github.com/caronc/apprise/wiki/API_Details) as a separate service (e.g., [linuxserver/apprise-api](https://github.com/linuxserver/docker-apprise-api)), pam-pocketid can send notifications via HTTP instead of invoking the Apprise CLI directly. This keeps notification credentials (bot tokens, chat IDs) centralized in the Apprise API service and out of the pam-pocketid container.
+
+Connect pam-pocketid to the Apprise API service's Docker network, then use a small Python script as the notify command. This avoids shell quoting issues with inline JSON and lets you use markdown formatting:
+
+```python
+# notify.py — mount into the container at /app/notify.py
+#!/usr/bin/env python3
+"""Send sudo approval notification via apprise-api."""
+import json, os, urllib.request
+
+username = os.environ["NOTIFY_USERNAME"]
+hostname = os.environ["NOTIFY_HOSTNAME"]
+user_code = os.environ["NOTIFY_USER_CODE"]
+approval_url = os.environ["NOTIFY_APPROVAL_URL"]
+expires_in = os.environ["NOTIFY_EXPIRES_IN"]
+
+data = json.dumps({
+    "title": "Sudo approval needed",
+    "body": (
+        f"**User:** {username}\n"
+        f"**Host:** {hostname}\n"
+        f"**Code:** `{user_code}`\n"
+        f"**Expires:** {expires_in}s\n\n"
+        f"[Approve]({approval_url})"
+    ),
+    "format": "markdown",
+}).encode()
+
+req = urllib.request.Request(
+    "http://apprise-api:8000/notify/sudo",
+    data,
+    {"Content-Type": "application/json"},
+)
+urllib.request.urlopen(req)
+```
+
+```yaml
+# docker-compose.yml
+services:
+  pam-pocketid:
+    environment:
+      PAM_POCKETID_NOTIFY_COMMAND: "python3 /app/notify.py"
+    volumes:
+      - ./notify.py:/app/notify.py:ro
+    networks:
+      - notify  # shared network with apprise-api
+
+networks:
+  notify:
+    external: true
+```
+
+The `/notify/sudo` path corresponds to a named tag in Apprise API. Configure the tag in Apprise API to point at your desired notification service (Telegram, ntfy, Slack, etc.). This approach requires no secrets in the pam-pocketid container — the Apprise API service handles all credential management.
+
+For per-user routing with Apprise API, create separate tags per user (e.g., `sudo-rinseaid`, `sudo-jordan`) and change the URL in the script to include the username:
+
+```python
+req = urllib.request.Request(
+    f"http://apprise-api:8000/notify/sudo-{username}",
+    ...
+)
+```
+
+If the tag doesn't exist for a user, Apprise API returns an error and pam-pocketid logs it — the sudo challenge is never blocked.
 
 ### Using a custom command
 
@@ -308,7 +407,25 @@ Set via `PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE` in `/etc/pam-pocketid.conf`.
 
 ### Rotation
 
-Passwords are automatically rotated based on `PAM_POCKETID_BREAKGLASS_ROTATION_DAYS` (default 90 days). Rotation happens opportunistically during sudo sessions when the hash file's age exceeds the configured interval.
+Passwords are rotated automatically through two complementary mechanisms:
+
+1. **Systemd timer** (recommended) — a weekly timer runs `rotate-breakglass`, ensuring all hosts rotate within the configured interval regardless of sudo activity. The install script sets this up automatically.
+
+2. **Opportunistic** — every successful sudo checks the hash file age against `PAM_POCKETID_BREAKGLASS_ROTATION_DAYS` (default 90 days) and rotates if due.
+
+Both mechanisms use file locking to prevent races. If the timer rotated at 3 AM and a sudo happens at 9 AM, the age check skips (password is fresh).
+
+To install the timer manually (if not using the install script):
+
+```bash
+# Copy from the repo's systemd/ directory, or download:
+curl -fsSL -o /etc/systemd/system/pam-pocketid-rotate.service \
+  https://raw.githubusercontent.com/rinseaid/pam-pocketid/main/systemd/pam-pocketid-rotate.service
+curl -fsSL -o /etc/systemd/system/pam-pocketid-rotate.timer \
+  https://raw.githubusercontent.com/rinseaid/pam-pocketid/main/systemd/pam-pocketid-rotate.timer
+systemctl daemon-reload
+systemctl enable --now pam-pocketid-rotate.timer
+```
 
 To force an immediate rotation:
 
@@ -316,7 +433,7 @@ To force an immediate rotation:
 pam-pocketid rotate-breakglass --force
 ```
 
-The server can also signal all clients to rotate by setting `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` to an RFC3339 timestamp. Clients with hash files older than this timestamp will rotate after their next successful authentication.
+The server can also signal all clients to rotate by setting `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` to an RFC3339 timestamp. Clients with hash files older than this timestamp will rotate on the next sudo or timer run.
 
 ### Rate limiting
 
@@ -324,7 +441,32 @@ After 3 consecutive failed break-glass attempts, exponential backoff kicks in: 1
 
 ### Escrow
 
-The server can escrow break-glass passwords to external systems (1Password, HashiCorp Vault, etc.) by configuring `PAM_POCKETID_ESCROW_COMMAND`. When a client rotates its password, the plaintext is sent to the server's `/api/breakglass/escrow` endpoint, which pipes it to the escrow command via stdin. The hostname is available as `BREAKGLASS_HOSTNAME`.
+The server can escrow break-glass passwords to any external system by configuring `PAM_POCKETID_ESCROW_COMMAND`. The command receives the plaintext password on **stdin** and the hostname via `BREAKGLASS_HOSTNAME`. The escrow mechanism is not tied to any specific secrets manager — any shell command works:
+
+```bash
+# 1Password (via SDK — Python script included in Docker image)
+PAM_POCKETID_ESCROW_COMMAND: "python3 /app/breakglass-escrow.py"
+
+# HashiCorp Vault
+PAM_POCKETID_ESCROW_COMMAND: "vault kv put secret/breakglass/$BREAKGLASS_HOSTNAME password=-"
+
+# AWS Secrets Manager
+PAM_POCKETID_ESCROW_COMMAND: >-
+  aws secretsmanager put-secret-value
+  --secret-id breakglass-$BREAKGLASS_HOSTNAME
+  --secret-string $(cat)
+
+# Bitwarden (via CLI)
+PAM_POCKETID_ESCROW_COMMAND: >-
+  bw get item breakglass-$BREAKGLASS_HOSTNAME 2>/dev/null
+  && bw edit item-password breakglass-$BREAKGLASS_HOSTNAME $(cat)
+  || bw create item --name breakglass-$BREAKGLASS_HOSTNAME --password $(cat)
+
+# Write to a local file (simple, no external dependencies)
+PAM_POCKETID_ESCROW_COMMAND: "cat > /secure/breakglass/$BREAKGLASS_HOSTNAME.txt"
+```
+
+Use `PAM_POCKETID_ESCROW_ENV` to pass through environment variable prefixes needed by your secrets manager (e.g., `AWS_,VAULT_,OP_`).
 
 Each host can only escrow for its own hostname (verified via an HMAC-based per-host token).
 
@@ -652,7 +794,7 @@ When a user runs `sudo`, they see a URL and approval code. They open the URL in 
 
 ### Disaster recovery
 
-- **Server down** — Break-glass fallback activates automatically on network-level failures if a break-glass hash file exists on the host. Users are prompted for the break-glass password.
+- **Server down** — Break-glass fallback activates automatically on network-level failures (dial errors, DNS failures) and reverse proxy gateway errors (404, 502, 503, 504) if a break-glass hash file exists on the host. Users are prompted for the break-glass password with masked input.
 - **OIDC provider down** — Challenges can be created but not approved (the OIDC flow will fail). If the server itself becomes unreachable as a result, break-glass activates.
 - **Server restart** — In-memory challenges are lost. Any in-flight sudo sessions that were polling will time out and fail. Users simply re-run their sudo command.
 - **Break-glass password lost** — Re-run `pam-pocketid rotate-breakglass --force` on the affected host to generate a new password.
@@ -671,3 +813,6 @@ make docker   # build container image
 |---|---|
 | [`docker-compose.example.yml`](docker-compose.example.yml) | Docker Compose stack |
 | [`pam.d/sudo-pocketid`](pam.d/sudo-pocketid) | Example PAM configuration |
+| [`systemd/`](systemd/) | Systemd service and timer for break-glass rotation |
+| [`install.sh`](install.sh) | Installer script (binary + systemd timer) |
+| [`docs/all-pages.html`](https://rinseaid.github.io/pam-pocketid/all-pages.html) | Visual UI mockups |

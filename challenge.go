@@ -61,6 +61,10 @@ type Challenge struct {
 	// Set after OIDC callback confirms identity
 	ApprovedBy string    `json:"-"`
 	ApprovedAt time.Time `json:"-"`
+
+	// RawIDToken stores the OIDC id_token after approval, for forwarding to
+	// the PAM client's token cache. Not serialized to JSON.
+	RawIDToken string `json:"-"`
 }
 
 // ChallengeStore manages in-memory sudo challenges with TTL expiration.
@@ -221,6 +225,18 @@ func (s *ChallengeStore) Approve(id string, approvedBy string) error {
 	return nil
 }
 
+// SetIDToken stores the raw OIDC id_token on an approved challenge.
+// Called after approval so the PAM client can cache the token locally.
+func (s *ChallengeStore) SetIDToken(id string, rawIDToken string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.challenges[id]
+	if !ok {
+		return
+	}
+	c.RawIDToken = rawIDToken
+}
+
 // Deny marks a challenge as denied.
 func (s *ChallengeStore) Deny(id string) error {
 	s.mu.Lock()
@@ -252,6 +268,24 @@ func (s *ChallengeStore) WithinGracePeriod(username string) bool {
 		return false
 	}
 	return time.Since(t) < s.gracePeriod
+}
+
+// GraceRemaining returns how much of the grace period remains for a user.
+func (s *ChallengeStore) GraceRemaining(username string) time.Duration {
+	if s.gracePeriod <= 0 {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.lastApproval[username]
+	if !ok {
+		return 0
+	}
+	remaining := s.gracePeriod - time.Since(t)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // AutoApprove immediately approves a challenge (used for grace period bypass).

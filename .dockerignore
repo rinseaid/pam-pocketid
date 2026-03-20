@@ -2,7 +2,7 @@
 .gitignore
 *.md
 *_test.go
-mockups/
+docs/
 bin/
 .env
 *.pem

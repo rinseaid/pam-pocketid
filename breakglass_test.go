@@ -333,6 +333,31 @@ func TestIsServerUnreachable(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "HTTP 404 Not Found (reverse proxy, no backend route)",
+			err:      &serverHTTPError{StatusCode: 404, Body: "404 page not found"},
+			expected: true,
+		},
+		{
+			name:     "HTTP 502 Bad Gateway (reverse proxy, backend down)",
+			err:      &serverHTTPError{StatusCode: 502, Body: "Bad Gateway"},
+			expected: true,
+		},
+		{
+			name:     "HTTP 503 Service Unavailable (reverse proxy, backend down)",
+			err:      &serverHTTPError{StatusCode: 503, Body: "Service Unavailable"},
+			expected: true,
+		},
+		{
+			name:     "HTTP 504 Gateway Timeout (reverse proxy, backend unresponsive)",
+			err:      &serverHTTPError{StatusCode: 504, Body: "Gateway Timeout"},
+			expected: true,
+		},
+		{
+			name:     "wrapped HTTP 502 error",
+			err:      fmt.Errorf("creating challenge: %w", &serverHTTPError{StatusCode: 502, Body: "Bad Gateway"}),
+			expected: true,
+		},
+		{
 			name:     "generic error",
 			err:      fmt.Errorf("some other error"),
 			expected: false,
@@ -401,7 +426,7 @@ func TestAuthenticateBreakglassFallback(t *testing.T) {
 		BreakglassFile:    hashFile,
 	}
 
-	client := NewPAMClient(cfg)
+	client := NewPAMClient(cfg, nil)
 	err = client.Authenticate("testuser")
 	if err != nil {
 		t.Fatalf("expected break-glass success, got: %v", err)
@@ -438,7 +463,7 @@ func TestBreakglassNotTriggeredOnHTTPError(t *testing.T) {
 		BreakglassFile:    hashFile,
 	}
 
-	client := NewPAMClient(cfg)
+	client := NewPAMClient(cfg, nil)
 	err := client.Authenticate("testuser")
 	if err == nil {
 		t.Fatal("expected error when server returns 500")
@@ -972,7 +997,7 @@ func TestBreakglassNotTriggeredWhenDisabled(t *testing.T) {
 		BreakglassFile:    hashFile,
 	}
 
-	client := NewPAMClient(cfg)
+	client := NewPAMClient(cfg, nil)
 	err := client.Authenticate("testuser")
 	if err == nil {
 		t.Fatal("expected error when break-glass is disabled")
@@ -1057,7 +1082,7 @@ func TestHMACWithRotateBreakglassBefore(t *testing.T) {
 	rotateBefore := "2025-06-01T00:00:00Z"
 
 	srv := &Server{cfg: &Config{SharedSecret: secret}}
-	client := NewPAMClient(&Config{SharedSecret: secret})
+	client := NewPAMClient(&Config{SharedSecret: secret}, nil)
 
 	// HMAC with rotateBefore
 	token := srv.computeStatusHMAC(challengeID, username, "approved", rotateBefore)

@@ -39,16 +39,79 @@ func (e *escrowHTTPError) Error() string {
 // interactive break-glass authentication.
 const bcryptCost = 12
 
-// openTTY is a function variable for opening /dev/tty, allowing test injection.
-// pam_exec does not connect stdin, so we must open the terminal directly.
+// openTTY is a function variable for opening a terminal for password input.
+// Tries multiple approaches since pam_exec connects stdin to /dev/null and
+// the child process may not have a controlling terminal:
+//  1. /dev/tty — the controlling terminal (works in most interactive sessions)
+//  2. PAM_TTY — pam_exec sets this to the user's actual terminal device
+//     (e.g., /dev/pts/0), which can be opened directly
+//  3. stdin — if it happens to be a terminal (some PAM configs preserve it)
 var openTTY = func() (*os.File, error) {
-	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	// Try /dev/tty — the controlling terminal
+	if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+		return f, nil
+	}
+	// Try PAM_TTY — pam_exec provides the user's terminal device path
+	if pamTTY := os.Getenv("PAM_TTY"); pamTTY != "" {
+		if f, err := os.OpenFile(pamTTY, os.O_RDWR, 0); err == nil {
+			if term.IsTerminal(int(f.Fd())) {
+				return f, nil
+			}
+			f.Close()
+		}
+	}
+	// Fall back to stdin if it is a terminal
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		fd, err := syscall.Dup(int(os.Stdin.Fd()))
+		if err != nil {
+			return nil, fmt.Errorf("cannot dup stdin: %w", err)
+		}
+		return os.NewFile(uintptr(fd), "/dev/stdin"), nil
+	}
+	return nil, fmt.Errorf("no terminal available (/dev/tty and PAM_TTY not accessible, stdin is not a terminal)")
 }
 
-// readPasswordFn is a function variable for reading a password with echo disabled.
-// Defaults to term.ReadPassword but can be overridden for testing.
+// readPasswordFn is a function variable for reading a password with masked
+// echo (prints * for each character). Can be overridden for testing.
 var readPasswordFn = func(fd int) ([]byte, error) {
-	return term.ReadPassword(fd)
+	return readPasswordMasked(fd)
+}
+
+// readPasswordMasked reads a password from a terminal fd, printing '*' for
+// each character typed. Handles backspace to delete characters.
+func readPasswordMasked(fd int) ([]byte, error) {
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	defer term.Restore(fd, oldState)
+
+	f := os.NewFile(uintptr(fd), "tty")
+	var password []byte
+	var buf [1]byte
+
+	for {
+		n, err := f.Read(buf[:])
+		if err != nil || n == 0 {
+			return password, err
+		}
+		switch buf[0] {
+		case '\n', '\r': // Enter
+			return password, nil
+		case 3: // Ctrl+C
+			return nil, fmt.Errorf("interrupted")
+		case 127, 8: // Backspace, Ctrl+H
+			if len(password) > 0 {
+				password = password[:len(password)-1]
+				f.Write([]byte("\b \b")) // erase the last *
+			}
+		default:
+			if buf[0] >= 32 { // printable characters only
+				password = append(password, buf[0])
+				f.Write([]byte("*"))
+			}
+		}
+	}
 }
 
 // generateBreakglassPassword generates a password of the specified type.
@@ -311,8 +374,13 @@ func clearBreakglassFailures() {
 }
 
 // authenticateBreakglass prompts for a break-glass password and verifies it
-// against the stored bcrypt hash. Opens /dev/tty for password input since
-// pam_exec does not connect stdin.
+// against the stored bcrypt hash.
+//
+// All output (banner + prompt) is written directly to the TTY rather than
+// through messageWriter (stdout). pam_exec's stdout pipe uses the PAM
+// conversation function which is buffered — writing the banner to stdout
+// and the prompt to the TTY causes the prompt to appear before the banner.
+// Writing everything to the TTY ensures correct display ordering.
 func authenticateBreakglass(username, hashFilePath string) error {
 	// Rate limit: check for too many consecutive failures
 	if err := checkBreakglassRateLimit(); err != nil {
@@ -320,22 +388,24 @@ func authenticateBreakglass(username, hashFilePath string) error {
 		return err
 	}
 
-	// Print warning banner
-	fmt.Fprintf(messageWriter, "\n")
-	fmt.Fprintf(messageWriter, "  *** BREAK-GLASS AUTHENTICATION ***\n")
-	fmt.Fprintf(messageWriter, "  The Pocket ID server is unreachable.\n")
-	fmt.Fprintf(messageWriter, "  Enter the break-glass password to proceed.\n")
-	fmt.Fprintf(messageWriter, "\n")
-
-	// Open /dev/tty for reading (pam_exec doesn't connect stdin)
+	// Open terminal first — if we can't get a terminal, fail before
+	// printing the banner (avoids showing a banner the user can't act on).
 	tty, err := openTTY()
 	if err != nil {
 		return fmt.Errorf("cannot open terminal: %w", err)
 	}
 	defer tty.Close()
 
-	// Prompt with echo disabled
+	// Print warning banner and prompt directly to the TTY for correct
+	// display ordering (messageWriter/stdout is buffered via PAM conversation).
+	fmt.Fprintf(tty, "\n")
+	fmt.Fprintf(tty, "  *** BREAK-GLASS AUTHENTICATION ***\n")
+	fmt.Fprintf(tty, "  The Pocket ID server is unreachable.\n")
+	fmt.Fprintf(tty, "  Enter the break-glass password to proceed.\n")
+	fmt.Fprintf(tty, "\n")
 	fmt.Fprintf(tty, "Break-glass password: ")
+
+	// Read password with echo disabled
 	password, err := readPasswordFn(int(tty.Fd()))
 	fmt.Fprintf(tty, "\n")
 	if err != nil {
@@ -350,6 +420,7 @@ func authenticateBreakglass(username, hashFilePath string) error {
 		// preventing a timing oracle that distinguishes "file error" from "wrong password".
 		bcrypt.CompareHashAndPassword([]byte("$2a$12$00000000000000000000000000000000000000000000000000000"), password)
 		recordBreakglassFailure()
+		fmt.Fprintf(tty, "  Authentication failed.\n\n")
 		return fmt.Errorf("break-glass authentication failed")
 	}
 
@@ -357,11 +428,12 @@ func authenticateBreakglass(username, hashFilePath string) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), password); err != nil {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: BREAKGLASS: authentication FAILED for user %q\n", username)
 		recordBreakglassFailure()
+		fmt.Fprintf(tty, "  Authentication failed.\n\n")
 		return fmt.Errorf("break-glass authentication failed")
 	}
 
 	fmt.Fprintf(os.Stderr, "pam-pocketid: BREAKGLASS: authentication SUCCESS for user %q\n", username)
-	fmt.Fprintf(messageWriter, "  Break-glass authentication successful.\n\n")
+	fmt.Fprintf(tty, "  Break-glass authentication successful.\n\n")
 	clearBreakglassFailures()
 	return nil
 }
@@ -374,12 +446,19 @@ func isServerUnreachable(err error) bool {
 		return false
 	}
 
-	// Check for serverHTTPError — server responded with an HTTP status,
-	// meaning it's reachable. No fallback. Uses errors.As to handle
-	// wrapped errors (e.g., fmt.Errorf("...: %w", httpErr)).
+	// Check for serverHTTPError — server responded with an HTTP status.
+	// Most HTTP errors mean the server is reachable (no fallback).
+	// Exception: 502/503/504 are reverse proxy gateway errors indicating
+	// the backend (pam-pocketid) is down even though the proxy (Traefik,
+	// nginx, etc.) is still responding. Treat these as unreachable.
 	var httpErr *serverHTTPError
 	if errors.As(err, &httpErr) {
-		return false
+		switch httpErr.StatusCode {
+		case 404, 502, 503, 504:
+			return true // proxy/gateway error = backend down or not routed
+		default:
+			return false // server responded, it's reachable
+		}
 	}
 
 	// Check for typed network errors in the error chain.
@@ -566,26 +645,55 @@ func breakglassFileMtime(path string) (time.Time, error) {
 	return info.ModTime(), nil
 }
 
-// maybeRotateBreakglass checks if the server requested a rotation and performs it if needed.
-// Called after successful authentication when the server signals rotation is needed.
+// maybeRotateBreakglass ensures a break-glass hash file exists and handles
+// server-requested rotations. Called after every successful sudo authentication.
+//
+// If no hash file exists yet, creates one (initial provisioning). This means
+// break-glass is automatically set up on the first successful sudo — no manual
+// `rotate-breakglass` command needed.
+//
+// If the hash file exists and the server requested rotation (via rotateBefore),
+// rotates if the file is older than the requested timestamp.
 func maybeRotateBreakglass(cfg *Config, rotateBefore time.Time) {
-	if rotateBefore.IsZero() {
+	if !cfg.BreakglassEnabled {
 		return
 	}
+
 	if !breakglassFileExists(cfg.BreakglassFile) {
+		// Initial provisioning: create the break-glass hash file automatically.
+		fmt.Fprintf(os.Stderr, "pam-pocketid: no break-glass hash file found — generating initial password\n")
+		if _, err := rotateBreakglass(cfg, true); err != nil {
+			fmt.Fprintf(os.Stderr, "pam-pocketid: initial break-glass setup failed: %v\n", err)
+		}
 		return
 	}
-	mtime, err := breakglassFileMtime(cfg.BreakglassFile)
+
+	// Check if rotation is due — either by age (BreakglassRotationDays)
+	// or by server request (rotateBefore timestamp).
+	age, err := breakglassFileAge(cfg.BreakglassFile)
 	if err != nil {
 		return
 	}
-	if mtime.Before(rotateBefore) {
+
+	rotationDue := age >= time.Duration(cfg.BreakglassRotationDays)*24*time.Hour
+	serverRequested := !rotateBefore.IsZero() && func() bool {
+		mtime, err := breakglassFileMtime(cfg.BreakglassFile)
+		return err == nil && mtime.Before(rotateBefore)
+	}()
+
+	if rotationDue {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: break-glass password is %d days old (rotation every %d days) — rotating now\n",
+			int(age.Hours()/24), cfg.BreakglassRotationDays)
+	} else if serverRequested {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: server requested break-glass rotation — rotating now\n")
-		// Discard the returned password — in the PAM path we must NOT print it
-		// to stdout (which goes to the user's terminal via pam_exec).
-		if _, err := rotateBreakglass(cfg, true); err != nil {
-			fmt.Fprintf(os.Stderr, "pam-pocketid: break-glass rotation failed: %v\n", err)
-		}
+	} else {
+		return
+	}
+
+	// Discard the returned password — in the PAM path we must NOT print it
+	// to stdout (which goes to the user's terminal via pam_exec).
+	if _, err := rotateBreakglass(cfg, true); err != nil {
+		fmt.Fprintf(os.Stderr, "pam-pocketid: break-glass rotation failed: %v\n", err)
 	}
 }
 
