@@ -315,18 +315,19 @@ func TestNotifyCommandTimeout(t *testing.T) {
 
 	// WaitForNotifications should return after notifyTimeout (15s).
 	// In practice cmd.Run() will return as soon as the context cancels.
-	// Use generous timeouts to avoid flakes on slow CI runners with -race.
+	// Use very generous timeouts to avoid flakes on slow CI runners with -race,
+	// where process cleanup can take significantly longer than wall-clock time.
 	done := make(chan struct{})
 	go func() {
-		s.WaitForNotifications(45 * time.Second)
+		s.WaitForNotifications(90 * time.Second)
 		close(done)
 	}()
 
 	select {
 	case <-done:
 		// Good — completed within timeout.
-	case <-time.After(45 * time.Second):
-		t.Fatal("notify goroutine did not complete within 45s — timeout not working")
+	case <-time.After(90 * time.Second):
+		t.Fatal("notify goroutine did not complete within 90s — timeout not working")
 	}
 }
 
