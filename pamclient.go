@@ -179,7 +179,6 @@ func (p *PAMClient) Authenticate(username string) error {
 		fmt.Fprintf(messageWriter, " (notification sent)")
 	}
 	fmt.Fprintf(messageWriter, "\n")
-	fmt.Fprintf(messageWriter, "  Waiting for approval...")
 
 	// 4. Poll until resolved
 	if p.cfg.SharedSecret == "" {
@@ -187,7 +186,6 @@ func (p *PAMClient) Authenticate(username string) error {
 	}
 
 	var consecutiveErrors int
-	var pollCount int
 	deadline := time.Now().Add(p.cfg.Timeout)
 	// Initial delay before first poll — the challenge was just created,
 	// give the user a moment to start the approval flow.
@@ -230,7 +228,7 @@ func (p *PAMClient) Authenticate(username string) error {
 					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: failed to cache token: %v\n", err)
 				}
 			}
-			fmt.Fprintf(messageWriter, " Approved!\n")
+			fmt.Fprintf(messageWriter, "  Approved!\n")
 			maybeRotateBreakglass(p.cfg, rotateBefore)
 			return nil
 		case StatusDenied:
@@ -247,7 +245,7 @@ func (p *PAMClient) Authenticate(username string) error {
 					continue
 				}
 			}
-			fmt.Fprintf(messageWriter, " Denied.\n")
+			fmt.Fprintf(messageWriter, "  Denied.\n")
 			return fmt.Errorf("sudo request denied")
 		case StatusExpired:
 			// When HMAC is configured, don't trust ANY unverified expiry.
@@ -261,7 +259,7 @@ func (p *PAMClient) Authenticate(username string) error {
 				}
 				continue
 			}
-			fmt.Fprintf(messageWriter, " Expired.\n")
+			fmt.Fprintf(messageWriter, "  Expired.\n")
 			return fmt.Errorf("sudo request expired")
 		case StatusPending:
 			// Poll again after interval
@@ -269,16 +267,12 @@ func (p *PAMClient) Authenticate(username string) error {
 			return fmt.Errorf("unexpected status: %s", sanitizeForTerminal(status.Status))
 		}
 
-		pollCount++
-		if pollCount%5 == 0 {
-			fmt.Fprintf(messageWriter, ".")
-		}
 		if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
 			return err
 		}
 	}
 
-	fmt.Fprintf(messageWriter, " Expired.\n")
+	fmt.Fprintf(messageWriter, "  Expired.\n")
 	return fmt.Errorf("timed out waiting for approval")
 }
 
