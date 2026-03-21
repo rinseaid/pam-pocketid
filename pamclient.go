@@ -74,17 +74,26 @@ func NewPAMClient(cfg *Config, tokenCache *TokenCache) *PAMClient {
 	}
 }
 
+// clientConfigResponse is the server-side client config override.
+type clientConfigResponse struct {
+	BreakglassPasswordType string `json:"breakglass_password_type,omitempty"`
+	BreakglassRotationDays int    `json:"breakglass_rotation_days,omitempty"`
+	TokenCacheEnabled      *bool  `json:"token_cache_enabled,omitempty"`
+}
+
 // challengeResponse is the response from POST /api/challenge.
 type challengeResponse struct {
-	ChallengeID            string `json:"challenge_id"`
-	UserCode               string `json:"user_code"`
-	VerificationURL        string `json:"verification_url"`
-	ExpiresIn              int    `json:"expires_in"`
-	Status                 string `json:"status,omitempty"`
-	ApprovalToken          string `json:"approval_token,omitempty"`
-	RotateBreakglassBefore string `json:"rotate_breakglass_before,omitempty"`
-	NotificationSent       bool   `json:"notification_sent,omitempty"`
-	GraceRemaining         int    `json:"grace_remaining,omitempty"`
+	ChallengeID            string                `json:"challenge_id"`
+	UserCode               string                `json:"user_code"`
+	VerificationURL        string                `json:"verification_url"`
+	ExpiresIn              int                   `json:"expires_in"`
+	Status                 string                `json:"status,omitempty"`
+	ApprovalToken          string                `json:"approval_token,omitempty"`
+	RotateBreakglassBefore string                `json:"rotate_breakglass_before,omitempty"`
+	RevokeTokensBefore     string                `json:"revoke_tokens_before,omitempty"`
+	NotificationSent       bool                  `json:"notification_sent,omitempty"`
+	GraceRemaining         int                   `json:"grace_remaining,omitempty"`
+	ClientConfig           *clientConfigResponse  `json:"client_config,omitempty"`
 }
 
 // pollResponse is the response from GET /api/challenge/{id}.
@@ -119,10 +128,16 @@ func (p *PAMClient) Authenticate(username string) error {
 	}()
 	defer signal.Stop(sigCh)
 
-	// 0. Check token cache — if a cached id_token is valid, grant immediately (no network call)
+	// 0. Check token cache — if a cached id_token is valid, grant immediately
 	if p.tokenCache != nil {
-		if remaining, err := p.tokenCache.Check(username); err == nil {
-			fmt.Fprintf(messageWriter, "  Sudo approved (session expires in %s)\n", formatDuration(remaining))
+		if tokenRemaining, err := p.tokenCache.Check(username); err == nil {
+			// Auth decision is made — show the effective remaining time.
+			// Opportunistically check the server for accurate grace period time.
+			effective := tokenRemaining
+			if graceRemaining := p.queryGraceStatus(username); graceRemaining > effective {
+				effective = graceRemaining
+			}
+			fmt.Fprintf(messageWriter, "  Sudo approved (session expires in %s)\n", formatDuration(effective))
 			// Still run break-glass age-based rotation check (no server signal
 			// available since we didn't contact the server, so rotateBefore is zero).
 			maybeRotateBreakglass(p.cfg, time.Time{})
@@ -155,10 +170,19 @@ func (p *PAMClient) Authenticate(username string) error {
 	// 2. Check if auto-approved via grace period
 	if challenge.Status == string(StatusApproved) {
 		if p.cfg.SharedSecret != "" {
-			if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", challenge.ApprovalToken, challenge.RotateBreakglassBefore) {
+			if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", challenge.ApprovalToken, challenge.RotateBreakglassBefore, challenge.RevokeTokensBefore) {
 				return fmt.Errorf("auto-approval token verification failed (possible MITM attack)")
 			}
 		}
+
+		// Apply server-side client config overrides AFTER HMAC verification.
+		// client_config is not HMAC-protected, so a MITM could inject it —
+		// but only after the approval token is verified, limiting the window
+		// to authenticated (non-forged) responses.
+		applyClientConfig(p, challenge)
+
+		// Handle cache invalidation signal after HMAC verification
+		handleCacheInvalidation(p, challenge, username)
 		if challenge.GraceRemaining > 0 {
 			fmt.Fprintf(messageWriter, "  Sudo approved (next auth in %s)\n", formatDuration(time.Duration(challenge.GraceRemaining)*time.Second))
 		} else {
@@ -219,21 +243,13 @@ func (p *PAMClient) Authenticate(username string) error {
 		case StatusApproved:
 			// Verify HMAC approval token to prevent MITM forgery
 			if p.cfg.SharedSecret != "" {
-				if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", status.ApprovalToken, challenge.RotateBreakglassBefore) {
+				if !p.verifyStatusToken(challenge.ChallengeID, username, "approved", status.ApprovalToken, challenge.RotateBreakglassBefore, challenge.RevokeTokensBefore) {
 					return fmt.Errorf("approval token verification failed (possible MITM attack)")
 				}
 			}
 			// Cache the id_token for future authentication without device flow
 			if p.tokenCache != nil && status.IDToken != "" {
-				graceDur := time.Duration(status.GraceRemaining) * time.Second
-				// Cap grace_remaining to 24h — this field is not HMAC-protected,
-				// so a MITM could inject an inflated value. The server already caps
-				// its own grace period to 24h (config.go), so any larger value is bogus.
-				const maxGrace = 24 * time.Hour
-				if graceDur > maxGrace {
-					graceDur = maxGrace
-				}
-				if err := p.tokenCache.Write(username, status.IDToken, graceDur); err != nil {
+				if err := p.tokenCache.Write(username, status.IDToken); err != nil {
 					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: failed to cache token: %v\n", err)
 				}
 			}
@@ -246,7 +262,7 @@ func (p *PAMClient) Authenticate(username string) error {
 			// We never accept unverified denials — a MITM should not be able to
 			// deny sudo requests by injecting fake denial responses.
 			if p.cfg.SharedSecret != "" {
-				if !p.verifyStatusToken(challenge.ChallengeID, username, "denied", status.DenialToken, challenge.RotateBreakglassBefore) {
+				if !p.verifyStatusToken(challenge.ChallengeID, username, "denied", status.DenialToken, challenge.RotateBreakglassBefore, challenge.RevokeTokensBefore) {
 					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: denial token verification failed — ignoring possible forged denial\n")
 					if err := sleepWithContext(ctx, p.cfg.PollInterval); err != nil {
 						return err
@@ -295,12 +311,82 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// queryGraceStatus makes a quick, non-blocking call to the server to get the
+// grace period remaining for this user@host. Returns 0 on any failure (server
+// unreachable, timeout, error). This does not affect the auth decision — it
+// only improves the accuracy of the displayed remaining time on cache hits.
+func (p *PAMClient) queryGraceStatus(username string) time.Duration {
+	if p.cfg.ServerURL == "" {
+		return 0
+	}
+	hostname, _ := os.Hostname()
+	url := fmt.Sprintf("%s/api/grace-status?username=%s&hostname=%s", p.cfg.ServerURL, username, hostname)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return 0
+	}
+	if p.cfg.SharedSecret != "" {
+		req.Header.Set("X-Shared-Secret", p.cfg.SharedSecret)
+	}
+	// Short timeout — this is best-effort for display only
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0
+	}
+	var result struct {
+		GraceRemaining int `json:"grace_remaining"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 256)).Decode(&result); err != nil {
+		return 0
+	}
+	return time.Duration(result.GraceRemaining) * time.Second
+}
+
+// applyClientConfig applies server-side config overrides to the PAM client.
+// Called AFTER HMAC verification to prevent MITM injection of config values.
+func applyClientConfig(p *PAMClient, challenge *challengeResponse) {
+	if challenge.ClientConfig == nil {
+		return
+	}
+	if challenge.ClientConfig.BreakglassPasswordType != "" {
+		p.cfg.BreakglassPasswordType = challenge.ClientConfig.BreakglassPasswordType
+	}
+	if challenge.ClientConfig.BreakglassRotationDays > 0 {
+		p.cfg.BreakglassRotationDays = challenge.ClientConfig.BreakglassRotationDays
+	}
+	if challenge.ClientConfig.TokenCacheEnabled != nil {
+		p.cfg.TokenCacheEnabled = *challenge.ClientConfig.TokenCacheEnabled
+		if !p.cfg.TokenCacheEnabled {
+			p.tokenCache = nil
+		}
+	}
+}
+
+// handleCacheInvalidation deletes the token cache if the server sent a revocation signal.
+func handleCacheInvalidation(p *PAMClient, challenge *challengeResponse, username string) {
+	if challenge.RevokeTokensBefore == "" || p.tokenCache == nil {
+		return
+	}
+	if revokeTime, err := time.Parse(time.RFC3339, challenge.RevokeTokensBefore); err == nil {
+		if mtime, err := p.tokenCache.ModTime(username); err == nil {
+			if mtime.Before(revokeTime) {
+				p.tokenCache.Delete(username)
+			}
+		}
+	}
+}
+
 // verifyStatusToken verifies an HMAC-SHA256 status token from the server.
 // The status parameter must match what the server used (e.g., "approved", "denied").
 // Uses length-prefixed fields to match the server's computeStatusHMAC format.
-// rotateBefore is included in the HMAC to prevent a MITM from injecting
-// rotate_breakglass_before without invalidating the token.
-func (p *PAMClient) verifyStatusToken(challengeID, username, status, token, rotateBefore string) bool {
+// rotateBefore and revokeTokensBefore are included in the HMAC to prevent a MITM
+// from injecting these signals without invalidating the token.
+func (p *PAMClient) verifyStatusToken(challengeID, username, status, token, rotateBefore, revokeTokensBefore string) bool {
 	if token == "" {
 		return false
 	}
@@ -308,6 +394,9 @@ func (p *PAMClient) verifyStatusToken(challengeID, username, status, token, rota
 	fmt.Fprintf(mac, "%d:%s%d:%s%d:%s", len(challengeID), challengeID, len(status), status, len(username), username)
 	if rotateBefore != "" {
 		fmt.Fprintf(mac, "%d:%s", len(rotateBefore), rotateBefore)
+	}
+	if revokeTokensBefore != "" {
+		fmt.Fprintf(mac, "r%d:%s", len(revokeTokensBefore), revokeTokensBefore)
 	}
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(token))

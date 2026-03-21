@@ -29,9 +29,8 @@ type TokenCache struct {
 
 // cachedToken is the on-disk format for a cached OIDC token.
 type cachedToken struct {
-	IDToken        string    `json:"id_token"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	GraceExpiresAt time.Time `json:"grace_expires_at,omitempty"`
+	IDToken   string    `json:"id_token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // NewTokenCache creates a new token cache.
@@ -123,23 +122,12 @@ func (tc *TokenCache) Check(username string) (time.Duration, error) {
 		return 0, fmt.Errorf("token username %q does not match expected %q", claims.PreferredUsername, username)
 	}
 
-	// Return the effective remaining time: max of token expiry and grace period.
-	// Even after the token expires, the server's grace period may still auto-approve.
-	effective := remaining
-	if !cached.GraceExpiresAt.IsZero() {
-		graceRemaining := time.Until(cached.GraceExpiresAt)
-		if graceRemaining > effective {
-			effective = graceRemaining
-		}
-	}
-
-	return effective, nil
+	return remaining, nil
 }
 
 // Write caches an id_token for the given username after a successful device flow.
-// graceRemaining is the server's grace period remaining (0 if unknown).
 // Uses atomic temp-file + rename to prevent partial reads.
-func (tc *TokenCache) Write(username, rawIDToken string, graceRemaining time.Duration) error {
+func (tc *TokenCache) Write(username, rawIDToken string) error {
 	// Parse the JWT to extract the exp claim (without verification — the server
 	// already verified it, we just need the expiry for quick cache-hit checks).
 	parts := strings.SplitN(rawIDToken, ".", 3)
@@ -179,9 +167,6 @@ func (tc *TokenCache) Write(username, rawIDToken string, graceRemaining time.Dur
 		IDToken:   rawIDToken,
 		ExpiresAt: expiresAt,
 	}
-	if graceRemaining > 0 {
-		cached.GraceExpiresAt = time.Now().Add(graceRemaining)
-	}
 	data, err := json.Marshal(cached)
 	if err != nil {
 		return fmt.Errorf("marshaling cache data: %w", err)
@@ -218,6 +203,25 @@ func (tc *TokenCache) Write(username, rawIDToken string, graceRemaining time.Dur
 	}
 
 	return nil
+}
+
+// Delete removes the cached token file for a given username.
+func (tc *TokenCache) Delete(username string) error {
+	path := filepath.Join(tc.CacheDir, username)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing cache file: %w", err)
+	}
+	return nil
+}
+
+// ModTime returns the modification time of the cached token file.
+func (tc *TokenCache) ModTime(username string) (time.Time, error) {
+	path := filepath.Join(tc.CacheDir, username)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("stating cache file: %w", err)
+	}
+	return info.ModTime(), nil
 }
 
 // getVerifier creates an OIDC verifier for local JWT validation.

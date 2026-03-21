@@ -56,6 +56,14 @@ type Config struct {
 	EscrowEnvPassthrough   []string  // Additional env var prefixes to pass to escrow command (e.g., AWS_,VAULT_)
 	BreakglassRotateBefore time.Time // Tell clients to rotate if their hash file is older than this
 
+	// Session persistence (server mode)
+	SessionStateFile string // Path to JSON file for persisting grace sessions across restarts
+
+	// Server-side client config overrides (server mode)
+	ClientBreakglassPasswordType string // Override client's breakglass password type
+	ClientBreakglassRotationDays int    // Override client's breakglass rotation days
+	ClientTokenCacheEnabled      *bool  // Override client's token cache setting (nil = unset)
+
 	// Token cache settings (client mode)
 	TokenCacheEnabled  bool   // Whether token caching is enabled (default true)
 	TokenCacheDir      string // Directory for cached tokens (default /run/pocketid)
@@ -170,6 +178,8 @@ func LoadServerConfig() (*Config, error) {
 		}
 	}
 
+	cfg.SessionStateFile = os.Getenv("PAM_POCKETID_SESSION_STATE_FILE")
+
 	cfg.EscrowCommand = os.Getenv("PAM_POCKETID_ESCROW_COMMAND")
 
 	// Additional env var prefixes to pass through to the escrow command.
@@ -191,6 +201,39 @@ func LoadServerConfig() (*Config, error) {
 			return nil, fmt.Errorf("PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE must be RFC3339 format (e.g., 2025-01-15T00:00:00Z): %w", err)
 		}
 		cfg.BreakglassRotateBefore = t
+	}
+
+	// Server-side client config overrides
+	cfg.ClientBreakglassPasswordType = os.Getenv("PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE")
+	if cfg.ClientBreakglassPasswordType != "" {
+		switch cfg.ClientBreakglassPasswordType {
+		case "random", "passphrase", "alphanumeric":
+			// valid
+		default:
+			return nil, fmt.Errorf("PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE must be one of: random, passphrase, alphanumeric")
+		}
+	}
+	if v := os.Getenv("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS"); v != "" {
+		days, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS must be an integer: %w", err)
+		}
+		if days < 1 {
+			return nil, fmt.Errorf("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS must be at least 1")
+		}
+		cfg.ClientBreakglassRotationDays = days
+	}
+	if v := os.Getenv("PAM_POCKETID_CLIENT_TOKEN_CACHE"); v != "" {
+		switch v {
+		case "true", "1":
+			b := true
+			cfg.ClientTokenCacheEnabled = &b
+		case "false", "0":
+			b := false
+			cfg.ClientTokenCacheEnabled = &b
+		default:
+			log.Printf("WARNING: PAM_POCKETID_CLIENT_TOKEN_CACHE has unrecognized value %q (expected true/false/1/0) — ignoring", v)
+		}
 	}
 
 	// Best-effort: clear secrets from environment to reduce exposure window.

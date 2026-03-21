@@ -19,7 +19,7 @@ func newNotifyTestServer(t *testing.T, cfg *Config) (*Server, *httptest.Server) 
 	t.Helper()
 	s := &Server{
 		cfg:   cfg,
-		store: NewChallengeStore(cfg.ChallengeTTL, cfg.GracePeriod),
+		store: NewChallengeStore(cfg.ChallengeTTL, cfg.GracePeriod, ""),
 		mux:   http.NewServeMux(),
 	}
 	s.mux.HandleFunc("/api/challenge", s.handleCreateChallenge)

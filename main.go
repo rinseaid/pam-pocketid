@@ -78,6 +78,9 @@ func runServer() {
 	if cfg.GracePeriod > 0 {
 		log.Printf("Grace period: %s (sudo re-auth skipped within this window)", cfg.GracePeriod)
 	}
+	if cfg.SessionStateFile != "" {
+		log.Printf("Session persistence: %s", cfg.SessionStateFile)
+	}
 	if cfg.NotifyCommand != "" {
 		log.Printf("Notify command configured (push notifications enabled)")
 		if cfg.NotifyUsersFile != "" {
@@ -120,6 +123,7 @@ func runServer() {
 			log.Printf("shutdown error: %v", err)
 		}
 		srv.WaitForNotifications(5 * time.Second)
+		srv.store.SaveState()
 		srv.Stop()
 	}()
 

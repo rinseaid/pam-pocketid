@@ -22,8 +22,9 @@ func newTestServer(t *testing.T) *Server {
 			SharedSecret: "test-secret-that-is-long-enough",
 			ChallengeTTL: 120 * time.Second,
 		},
-		store: NewChallengeStore(120*time.Second, 0),
-		mux:   http.NewServeMux(),
+		store:         NewChallengeStore(120*time.Second, 0, ""),
+		mux:           http.NewServeMux(),
+		sessionNonces: make(map[string]time.Time),
 	}
 }
 
@@ -32,8 +33,11 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 	s := newTestServer(t)
 	s.mux.HandleFunc("/api/challenge", s.handleCreateChallenge)
 	s.mux.HandleFunc("/api/challenge/", s.handlePollChallenge)
+	s.mux.HandleFunc("/api/sessions/revoke", s.handleRevokeSession)
 	s.mux.HandleFunc("/approve/", s.handleApprovalPage)
 	s.mux.HandleFunc("/login/", s.handleLogin)
+	s.mux.HandleFunc("/sessions", s.handleSessionsPage)
+	s.mux.HandleFunc("/sessions/login", s.handleSessionsLogin)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
 	ts := httptest.NewServer(s)
 	t.Cleanup(func() {
@@ -554,7 +558,7 @@ func TestApprovalTokenInPollResponse(t *testing.T) {
 	}
 
 	// Verify the token is a correct HMAC, not just any 64-char hex string
-	expected := s.computeStatusHMAC(c.ID, "jordan", "approved", "")
+	expected := s.computeStatusHMAC(c.ID, "jordan", "approved", "", "")
 	if token != expected {
 		t.Errorf("approval_token = %q, want %q", token, expected)
 	}
@@ -587,7 +591,7 @@ func TestDenialTokenInPollResponse(t *testing.T) {
 		t.Fatal("denial_token missing from denied challenge poll response")
 	}
 
-	expected := s.computeStatusHMAC(c.ID, "jordan", "denied", "")
+	expected := s.computeStatusHMAC(c.ID, "jordan", "denied", "", "")
 	if token != expected {
 		t.Errorf("denial_token = %q, want %q", token, expected)
 	}
@@ -653,7 +657,7 @@ func TestPanicRecovery(t *testing.T) {
 			SharedSecret: "test-secret-that-is-long-enough",
 			ChallengeTTL: 120 * time.Second,
 		},
-		store: NewChallengeStore(120*time.Second, 0),
+		store: NewChallengeStore(120*time.Second, 0, ""),
 		mux:   http.NewServeMux(),
 	}
 	// Register a handler that panics
@@ -686,21 +690,21 @@ func TestVerifyStatusToken(t *testing.T) {
 
 	// Server-side computation
 	srv := &Server{cfg: &Config{SharedSecret: "test-secret-that-is-long-enough"}}
-	approvedToken := srv.computeStatusHMAC(challengeID, username, "approved", "")
-	deniedToken := srv.computeStatusHMAC(challengeID, username, "denied", "")
+	approvedToken := srv.computeStatusHMAC(challengeID, username, "approved", "", "")
+	deniedToken := srv.computeStatusHMAC(challengeID, username, "denied", "", "")
 
 	// Valid approval token
-	if !client.verifyStatusToken(challengeID, username, "approved", approvedToken, "") {
+	if !client.verifyStatusToken(challengeID, username, "approved", approvedToken, "", "") {
 		t.Error("valid approval token rejected")
 	}
 
 	// Valid denial token
-	if !client.verifyStatusToken(challengeID, username, "denied", deniedToken, "") {
+	if !client.verifyStatusToken(challengeID, username, "denied", deniedToken, "", "") {
 		t.Error("valid denial token rejected")
 	}
 
 	// Empty token
-	if client.verifyStatusToken(challengeID, username, "approved", "", "") {
+	if client.verifyStatusToken(challengeID, username, "approved", "", "", "") {
 		t.Error("empty token accepted")
 	}
 
@@ -709,22 +713,22 @@ func TestVerifyStatusToken(t *testing.T) {
 	if tampered == approvedToken {
 		tampered = approvedToken[:63] + "1"
 	}
-	if client.verifyStatusToken(challengeID, username, "approved", tampered, "") {
+	if client.verifyStatusToken(challengeID, username, "approved", tampered, "", "") {
 		t.Error("tampered token accepted")
 	}
 
 	// Wrong username
-	if client.verifyStatusToken(challengeID, "alice", "approved", approvedToken, "") {
+	if client.verifyStatusToken(challengeID, "alice", "approved", approvedToken, "", "") {
 		t.Error("token for wrong username accepted")
 	}
 
 	// Wrong challengeID
-	if client.verifyStatusToken("00000000000000000000000000000000", username, "approved", approvedToken, "") {
+	if client.verifyStatusToken("00000000000000000000000000000000", username, "approved", approvedToken, "", "") {
 		t.Error("token for wrong challengeID accepted")
 	}
 
 	// Approval token used for denial (cross-status)
-	if client.verifyStatusToken(challengeID, username, "denied", approvedToken, "") {
+	if client.verifyStatusToken(challengeID, username, "denied", approvedToken, "", "") {
 		t.Error("approval token accepted as denial token")
 	}
 }
@@ -910,7 +914,7 @@ func TestHSTSHeaderOnHTTPS(t *testing.T) {
 			SharedSecret: "test-secret-that-is-long-enough",
 			ChallengeTTL: 120 * time.Second,
 		},
-		store: NewChallengeStore(120*time.Second, 0),
+		store: NewChallengeStore(120*time.Second, 0, ""),
 		mux:   http.NewServeMux(),
 	}
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
@@ -1065,5 +1069,159 @@ func TestConfigFilePermissionEnforcement(t *testing.T) {
 	vars = loadConfigFile(secure)
 	if vars["PAM_POCKETID_SERVER_URL"] != "http://localhost:8090" {
 		t.Errorf("expected URL from properly-permissioned file, got %v", vars)
+	}
+}
+
+func TestSessionsPageRendered(t *testing.T) {
+	s, ts := setupTestServer(t)
+	_ = s
+
+	resp, err := http.Get(ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(body, []byte("Manage sessions")) {
+		t.Error("sessions page does not contain expected heading")
+	}
+	if !bytes.Contains(body, []byte("/sessions/login")) {
+		t.Error("sessions page does not contain login link")
+	}
+}
+
+func TestSessionsPageMethodRestriction(t *testing.T) {
+	_, ts := setupTestServer(t)
+
+	req, _ := http.NewRequest("POST", ts.URL+"/sessions", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 405 {
+		t.Errorf("POST to /sessions status = %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestSessionsLoginRedirects(t *testing.T) {
+	s, ts := setupTestServer(t)
+
+	// The /sessions/login should generate a nonce and redirect to OIDC
+	// Since we don't have a real OIDC config, the redirect URL will be malformed
+	// but we can verify a nonce was stored.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Get(ts.URL + "/sessions/login")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	// Should redirect (302) to the OIDC provider
+	if resp.StatusCode != 302 {
+		t.Errorf("status = %d, want 302 redirect", resp.StatusCode)
+	}
+
+	// Verify a nonce was stored
+	s.sessionNonceMu.Lock()
+	nonceCount := len(s.sessionNonces)
+	s.sessionNonceMu.Unlock()
+	if nonceCount != 1 {
+		t.Errorf("expected 1 session nonce stored, got %d", nonceCount)
+	}
+}
+
+func TestSessionsLoginMethodRestriction(t *testing.T) {
+	_, ts := setupTestServer(t)
+
+	req, _ := http.NewRequest("POST", ts.URL+"/sessions/login", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 405 {
+		t.Errorf("POST to /sessions/login status = %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestSessionsCallbackInvalidNonce(t *testing.T) {
+	s, ts := setupTestServer(t)
+	s.mux.HandleFunc("/callback", s.handleOIDCCallback)
+
+	// Try a sessions callback with an unknown nonce
+	resp, err := http.Get(ts.URL + "/callback?state=sessions:aabbccdd11223344aabbccdd11223344&code=test")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 400 {
+		t.Errorf("invalid sessions nonce: status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestSessionsCallbackMalformedState(t *testing.T) {
+	s, ts := setupTestServer(t)
+	s.mux.HandleFunc("/callback", s.handleOIDCCallback)
+
+	// sessions: prefix with bad nonce format
+	resp, err := http.Get(ts.URL + "/callback?state=sessions:tooshort&code=test")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 400 {
+		t.Errorf("malformed sessions state: status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestCleanExpiredSessionNonces(t *testing.T) {
+	s := newTestServer(t)
+	s.sessionNonces = make(map[string]time.Time)
+
+	// Add an expired nonce (6 min ago) and a fresh one
+	s.sessionNonces["expired"] = time.Now().Add(-6 * time.Minute)
+	s.sessionNonces["fresh"] = time.Now()
+
+	s.sessionNonceMu.Lock()
+	s.cleanExpiredSessionNonces()
+	s.sessionNonceMu.Unlock()
+
+	if _, ok := s.sessionNonces["expired"]; ok {
+		t.Error("expired nonce should have been cleaned up")
+	}
+	if _, ok := s.sessionNonces["fresh"]; !ok {
+		t.Error("fresh nonce should not have been cleaned up")
+	}
+}
+
+func TestSessionStateFileConfig(t *testing.T) {
+	t.Setenv("PAM_POCKETID_ISSUER_URL", "https://id.example.com")
+	t.Setenv("PAM_POCKETID_CLIENT_ID", "test")
+	t.Setenv("PAM_POCKETID_CLIENT_SECRET", "secret")
+	t.Setenv("PAM_POCKETID_EXTERNAL_URL", "https://sudo.example.com")
+	t.Setenv("PAM_POCKETID_SHARED_SECRET", "test-secret-that-is-long-enough")
+	t.Setenv("PAM_POCKETID_SESSION_STATE_FILE", "/data/sessions.json")
+
+	cfg, err := LoadServerConfig()
+	if err != nil {
+		t.Fatalf("LoadServerConfig: %v", err)
+	}
+	if cfg.SessionStateFile != "/data/sessions.json" {
+		t.Errorf("SessionStateFile = %q, want %q", cfg.SessionStateFile, "/data/sessions.json")
 	}
 }

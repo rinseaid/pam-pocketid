@@ -678,7 +678,7 @@ func TestRotateBreakglassBefore(t *testing.T) {
 		BreakglassRotateBefore: rotateBefore,
 	}
 
-	store := NewChallengeStore(cfg.ChallengeTTL, 0)
+	store := NewChallengeStore(cfg.ChallengeTTL, 0, "")
 	defer store.Stop()
 
 	s := &Server{cfg: cfg, store: store, mux: http.NewServeMux()}
@@ -1085,24 +1085,24 @@ func TestHMACWithRotateBreakglassBefore(t *testing.T) {
 	client := NewPAMClient(&Config{SharedSecret: secret}, nil)
 
 	// HMAC with rotateBefore
-	token := srv.computeStatusHMAC(challengeID, username, "approved", rotateBefore)
-	if !client.verifyStatusToken(challengeID, username, "approved", token, rotateBefore) {
+	token := srv.computeStatusHMAC(challengeID, username, "approved", rotateBefore, "")
+	if !client.verifyStatusToken(challengeID, username, "approved", token, rotateBefore, "") {
 		t.Error("valid token with rotateBefore rejected")
 	}
 
 	// Stripping rotateBefore should fail verification (MITM attack)
-	if client.verifyStatusToken(challengeID, username, "approved", token, "") {
+	if client.verifyStatusToken(challengeID, username, "approved", token, "", "") {
 		t.Error("token computed with rotateBefore should fail when verified without it")
 	}
 
 	// Injecting rotateBefore when not present should also fail
-	tokenNoRotate := srv.computeStatusHMAC(challengeID, username, "approved", "")
-	if client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, rotateBefore) {
+	tokenNoRotate := srv.computeStatusHMAC(challengeID, username, "approved", "", "")
+	if client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, rotateBefore, "") {
 		t.Error("token computed without rotateBefore should fail when verified with it")
 	}
 
 	// Token without rotateBefore should verify without it
-	if !client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, "") {
+	if !client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, "", "") {
 		t.Error("valid token without rotateBefore rejected")
 	}
 }
@@ -1235,7 +1235,7 @@ func TestEscrowHTTPError_TypedCheck(t *testing.T) {
 }
 
 func TestLastApprovalPruning(t *testing.T) {
-	store := NewChallengeStore(2*time.Second, 5*time.Second)
+	store := NewChallengeStore(2*time.Second, 5*time.Second, "")
 	defer store.Stop()
 
 	// Create and approve a challenge to populate lastApproval
@@ -1243,7 +1243,7 @@ func TestLastApprovalPruning(t *testing.T) {
 	store.Approve(c.ID, "pruneuser")
 
 	// Verify the entry exists
-	if !store.WithinGracePeriod("pruneuser") {
+	if !store.WithinGracePeriod("pruneuser", "") {
 		t.Fatal("expected user to be within grace period")
 	}
 

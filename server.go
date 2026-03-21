@@ -11,12 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +34,12 @@ var (
 	approvalPageTmpl     = template.Must(template.New("approve").Parse(approvalPageHTML))
 	approvalAlreadyTmpl  = template.Must(template.New("already").Parse(approvalAlreadyHTML))
 	approvalMismatchTmpl = template.Must(template.New("mismatch").Parse(approvalMismatchHTML))
+	approvalSuccessTmpl  = template.Must(template.New("success").Funcs(template.FuncMap{
+		"formatDuration": formatDuration,
+	}).Parse(approvalSuccessHTML))
+	sessionsListTmpl = template.Must(template.New("sessionsList").Funcs(template.FuncMap{
+		"formatDuration": formatDuration,
+	}).Parse(sessionsListHTML))
 )
 
 // escrowTimeout limits how long we wait for the escrow command to complete.
@@ -47,12 +55,14 @@ var escrowSemaphore = make(chan struct{}, 5)
 
 // Server is the companion auth server that bridges PAM challenges to Pocket ID OIDC.
 type Server struct {
-	cfg        *Config
-	store      *ChallengeStore
-	oidcConfig oauth2.Config
-	verifier   *oidc.IDTokenVerifier
-	mux        *http.ServeMux
-	notifyWg   sync.WaitGroup // tracks in-flight notification goroutines for graceful shutdown
+	cfg            *Config
+	store          *ChallengeStore
+	oidcConfig     oauth2.Config
+	verifier       *oidc.IDTokenVerifier
+	mux            *http.ServeMux
+	notifyWg       sync.WaitGroup // tracks in-flight notification goroutines for graceful shutdown
+	sessionNonces  map[string]time.Time // nonce -> creation time for /sessions OIDC flow
+	sessionNonceMu sync.Mutex
 }
 
 // validUsername restricts usernames to safe characters, preventing log injection
@@ -99,19 +109,24 @@ func NewServer(cfg *Config) (*Server, error) {
 	verifier := provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
 
 	s := &Server{
-		cfg:        cfg,
-		store:      NewChallengeStore(cfg.ChallengeTTL, cfg.GracePeriod),
-		oidcConfig: oidcConfig,
-		verifier:   verifier,
-		mux:        http.NewServeMux(),
+		cfg:           cfg,
+		store:         NewChallengeStore(cfg.ChallengeTTL, cfg.GracePeriod, cfg.SessionStateFile),
+		oidcConfig:    oidcConfig,
+		verifier:      verifier,
+		mux:           http.NewServeMux(),
+		sessionNonces: make(map[string]time.Time),
 	}
 
 	s.mux.HandleFunc("/api/challenge", s.handleCreateChallenge)
 	s.mux.HandleFunc("/api/challenge/", s.handlePollChallenge)
+	s.mux.HandleFunc("/api/grace-status", s.handleGraceStatus)
 	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
+	s.mux.HandleFunc("/api/sessions/revoke", s.handleRevokeSession)
 	s.mux.HandleFunc("/approve/", s.handleApprovalPage)
 	s.mux.HandleFunc("/login/", s.handleLogin)
 	s.mux.HandleFunc("/callback", s.handleOIDCCallback)
+	s.mux.HandleFunc("/sessions", s.handleSessionsPage)
+	s.mux.HandleFunc("/sessions/login", s.handleSessionsLogin)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
 	s.mux.Handle("/metrics", promhttp.Handler())
 
@@ -245,8 +260,11 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	activeChallenges.Inc()
 	log.Printf("CHALLENGE: created %s for user %q from %s (host %q)", challenge.ID[:8], req.Username, remoteAddr(r), req.Hostname)
 
+	// Build client_config if any server-side client overrides are set
+	clientCfg := s.buildClientConfig()
+
 	// Auto-approve if within grace period
-	if s.store.WithinGracePeriod(req.Username) {
+	if s.store.WithinGracePeriod(req.Username, req.Hostname) {
 		if err := s.store.AutoApprove(challenge.ID); err == nil {
 			challengesAutoApproved.Inc()
 			activeChallenges.Dec()
@@ -259,13 +277,19 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 				"user_code":       challenge.UserCode,
 				"expires_in":      int(s.cfg.ChallengeTTL.Seconds()),
 				"status":          "approved",
-				"grace_remaining": int(s.store.GraceRemaining(req.Username).Seconds()),
+				"grace_remaining": int(s.store.GraceRemaining(req.Username, req.Hostname).Seconds()),
 			}
 			if s.cfg.SharedSecret != "" {
-				resp["approval_token"] = s.computeStatusHMAC(challenge.ID, req.Username, "approved", challenge.BreakglassRotateBefore)
+				resp["approval_token"] = s.computeStatusHMAC(challenge.ID, req.Username, "approved", challenge.BreakglassRotateBefore, challenge.RevokeTokensBefore)
 			}
 			if challenge.BreakglassRotateBefore != "" {
 				resp["rotate_breakglass_before"] = challenge.BreakglassRotateBefore
+			}
+			if challenge.RevokeTokensBefore != "" {
+				resp["revoke_tokens_before"] = challenge.RevokeTokensBefore
+			}
+			if clientCfg != nil {
+				resp["client_config"] = clientCfg
 			}
 			json.NewEncoder(w).Encode(resp)
 			return
@@ -296,6 +320,12 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	if challenge.BreakglassRotateBefore != "" {
 		resp["rotate_breakglass_before"] = challenge.BreakglassRotateBefore
+	}
+	if challenge.RevokeTokensBefore != "" {
+		resp["revoke_tokens_before"] = challenge.RevokeTokensBefore
+	}
+	if clientCfg != nil {
+		resp["client_config"] = clientCfg
 	}
 	json.NewEncoder(w).Encode(resp)
 }
@@ -344,7 +374,7 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.SharedSecret != "" {
 		switch challenge.Status {
 		case StatusApproved:
-			resp["approval_token"] = s.computeStatusHMAC(id, challenge.Username, "approved", challenge.BreakglassRotateBefore)
+			resp["approval_token"] = s.computeStatusHMAC(id, challenge.Username, "approved", challenge.BreakglassRotateBefore, challenge.RevokeTokensBefore)
 			// Forward the raw ID token so the PAM client can cache it locally
 			// for subsequent authentication without a full device flow.
 			if challenge.RawIDToken != "" {
@@ -352,15 +382,40 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 			}
 			// Include grace period remaining so the client can show the
 			// effective re-auth window (max of token expiry and grace period).
-			if gr := s.store.GraceRemaining(challenge.Username); gr > 0 {
+			if gr := s.store.GraceRemaining(challenge.Username, challenge.Hostname); gr > 0 {
 				resp["grace_remaining"] = int(gr.Seconds())
 			}
 		case StatusDenied:
-			resp["denial_token"] = s.computeStatusHMAC(id, challenge.Username, "denied", challenge.BreakglassRotateBefore)
+			resp["denial_token"] = s.computeStatusHMAC(id, challenge.Username, "denied", challenge.BreakglassRotateBefore, challenge.RevokeTokensBefore)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// handleGraceStatus returns the grace period remaining for a user@host.
+// GET /api/grace-status?username=X&hostname=Y
+// Used by the PAM client to get the accurate grace time on cache hits.
+func (s *Server) handleGraceStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.verifySharedSecret(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	username := r.URL.Query().Get("username")
+	hostname := r.URL.Query().Get("hostname")
+	if username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+	remaining := s.store.GraceRemaining(username, hostname)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{
+		"grace_remaining": int(remaining.Seconds()),
+	})
 }
 
 // handleApprovalPage shows the user a page to confirm the sudo request.
@@ -407,12 +462,50 @@ func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build duration options for the approval page.
+	// Show preset options that fit within the server's max grace period.
+	// If no presets fit (grace < 1h), show just the server's max as the only option.
+	type durOption struct {
+		Label   string
+		Seconds int
+		Active  bool
+	}
+	allDurations := []durOption{
+		{"1h", 3600, false},
+		{"4h", 14400, false},
+		{"8h", 28800, false},
+		{"1d", 86400, false},
+	}
+	var durations []durOption
+	maxSec := int(s.cfg.GracePeriod.Seconds())
+	for _, d := range allDurations {
+		if d.Seconds <= maxSec {
+			durations = append(durations, d)
+		}
+	}
+	// If no preset fits (grace < 1h), add the server's actual max as the only option
+	if len(durations) == 0 && maxSec > 0 {
+		label := fmt.Sprintf("%dm", maxSec/60)
+		if maxSec < 60 {
+			label = fmt.Sprintf("%ds", maxSec)
+		}
+		durations = append(durations, durOption{label, maxSec, true})
+	}
+	// Mark the default as active (the largest available option)
+	if len(durations) > 0 && !durations[len(durations)-1].Active {
+		durations[len(durations)-1].Active = true
+	}
+
+	loginURL := fmt.Sprintf("%s/login/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode)
+
 	w.Header().Set("Content-Type", "text/html")
-	if err := approvalPageTmpl.Execute(w, map[string]string{
-		"Username": challenge.Username,
-		"Hostname": challenge.Hostname,
-		"Code":     challenge.UserCode,
-		"LoginURL": fmt.Sprintf("%s/login/%s", strings.TrimRight(s.cfg.ExternalURL, "/"), challenge.UserCode),
+	if err := approvalPageTmpl.Execute(w, map[string]interface{}{
+		"Username":      challenge.Username,
+		"Hostname":      challenge.Hostname,
+		"Code":          challenge.UserCode,
+		"LoginURL":      loginURL,
+		"Durations":     durations,
+		"HasGrace":      s.cfg.GracePeriod > 0,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
@@ -455,6 +548,28 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if time.Now().After(challenge.ExpiresAt) {
 		http.Error(w, "challenge expired", http.StatusNotFound)
 		return
+	}
+
+	// Parse optional duration parameter (seconds) from approval page buttons.
+	// Clamp to [min(1h, GracePeriod), GracePeriod] — the floor must never
+	// exceed the server's configured max.
+	if durStr := r.URL.Query().Get("duration"); durStr != "" {
+		if durSec, err := strconv.Atoi(durStr); err == nil {
+			dur := time.Duration(durSec) * time.Second
+			if s.cfg.GracePeriod > 0 {
+				floor := 1 * time.Hour
+				if floor > s.cfg.GracePeriod {
+					floor = s.cfg.GracePeriod
+				}
+				if dur < floor {
+					dur = floor
+				}
+				if dur > s.cfg.GracePeriod {
+					dur = s.cfg.GracePeriod
+				}
+				s.store.SetRequestedGrace(challenge.ID, dur)
+			}
+		}
 	}
 
 	// Generate a cryptographic nonce that:
@@ -501,8 +616,17 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse state = challengeID:nonce
+	// Parse state parameter. Two formats:
+	// 1. "sessions:<nonce>" — callback for /sessions page OIDC flow
+	// 2. "<challengeID>:<nonce>" — callback for approval OIDC flow
 	state := r.URL.Query().Get("state")
+
+	// Handle sessions callback
+	if strings.HasPrefix(state, "sessions:") {
+		s.handleSessionsCallback(w, r)
+		return
+	}
+
 	parts := strings.SplitN(state, ":", 2)
 	if len(parts) != 2 {
 		log.Printf("SECURITY: invalid state parameter (no colon) from %s", remoteAddr(r))
@@ -700,16 +824,45 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	activeChallenges.Dec()
 	challengeDuration.Observe(time.Since(challenge.CreatedAt).Seconds())
 	log.Printf("APPROVED: sudo for user %q on host %q (challenge %s) from %s", challenge.Username, challenge.Hostname, challengeID[:8], remoteAddr(r))
+
+	// Build session list and CSRF tokens for the success page
+	sessions := s.store.ActiveSessions(challenge.Username)
+	type sessionView struct {
+		Hostname  string
+		Remaining string
+		CSRFToken string
+		CSRFTs    string
+	}
+	var sessionViews []sessionView
+	now := time.Now()
+	csrfTs := fmt.Sprintf("%d", now.Unix())
+	for _, sess := range sessions {
+		csrfToken := computeCSRFToken(s.cfg.SharedSecret, challenge.Username, csrfTs)
+		sessionViews = append(sessionViews, sessionView{
+			Hostname:  sess.Hostname,
+			Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+			CSRFToken: csrfToken,
+			CSRFTs:    csrfTs,
+		})
+	}
+
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, approvalSuccessHTML)
+	if err := approvalSuccessTmpl.Execute(w, map[string]interface{}{
+		"Username": challenge.Username,
+		"Sessions": sessionViews,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
 }
 
 // computeStatusHMAC creates an HMAC-SHA256 token binding a challenge status to the
-// specific challengeID, username, status, and rotateBefore. Uses length-prefixed fields
-// to prevent field injection. The rotateBefore parameter is the per-challenge snapshot
-// of BreakglassRotateBefore stored at challenge creation, ensuring HMAC consistency
-// even if the server config changes between creation and poll.
-func (s *Server) computeStatusHMAC(challengeID, username, status, rotateBefore string) string {
+// specific challengeID, username, status, rotateBefore, and revokeTokensBefore.
+// Uses length-prefixed fields to prevent field injection.
+// The rotateBefore and revokeTokensBefore parameters are the per-challenge snapshots
+// stored at challenge creation, ensuring HMAC consistency even if the server config
+// changes between creation and poll. Empty optional fields are omitted for
+// backward compatibility.
+func (s *Server) computeStatusHMAC(challengeID, username, status, rotateBefore, revokeTokensBefore string) string {
 	mac := hmac.New(sha256.New, []byte(s.cfg.SharedSecret))
 	fmt.Fprintf(mac, "%d:%s%d:%s%d:%s", len(challengeID), challengeID, len(status), status, len(username), username)
 	// Include rotate_breakglass_before in the HMAC so a MITM cannot inject
@@ -717,7 +870,363 @@ func (s *Server) computeStatusHMAC(challengeID, username, status, rotateBefore s
 	if rotateBefore != "" {
 		fmt.Fprintf(mac, "%d:%s", len(rotateBefore), rotateBefore)
 	}
+	// Include revoke_tokens_before in the HMAC so a MITM cannot inject
+	// a revocation signal without invalidating the token.
+	if revokeTokensBefore != "" {
+		fmt.Fprintf(mac, "r%d:%s", len(revokeTokensBefore), revokeTokensBefore)
+	}
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// computeCSRFToken creates an HMAC-SHA256 CSRF token for session revocation forms.
+// Format: HMAC(shared_secret, username + ":" + timestamp)
+func computeCSRFToken(sharedSecret, username, timestamp string) string {
+	if sharedSecret == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(sharedSecret))
+	mac.Write([]byte(username + ":" + timestamp))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// revokeErrorPage renders a styled error page for revoke failures.
+func revokeErrorPage(w http.ResponseWriter, status int, title, message string) {
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(status)
+	io.WriteString(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>`+template.HTMLEscapeString(title)+`</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>`+sharedCSS+`
+    .icon-warning { background: var(--warning-bg); border: 2px solid var(--warning-border); color: var(--warning); }
+    h2 { color: var(--warning); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon icon-warning" aria-hidden="true">&#x26a0;</div>
+    <h2>`+template.HTMLEscapeString(title)+`</h2>
+    <p>`+template.HTMLEscapeString(message)+`</p>
+  </div>
+</body>
+</html>`)
+}
+
+// handleRevokeSession processes session revocation from the success page.
+// POST /api/sessions/revoke
+func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		revokeErrorPage(w, http.StatusBadRequest, "Invalid request", "The form submission was invalid.")
+		return
+	}
+
+	hostname := r.FormValue("hostname")
+	csrfToken := r.FormValue("csrf_token")
+	csrfTs := r.FormValue("csrf_ts")
+	username := r.FormValue("username")
+
+	if hostname == "" || csrfToken == "" || csrfTs == "" || username == "" {
+		revokeErrorPage(w, http.StatusBadRequest, "Invalid request", "Required fields are missing.")
+		return
+	}
+
+	// Validate username and hostname formats
+	if !validUsername.MatchString(username) || !validHostname.MatchString(hostname) {
+		revokeErrorPage(w, http.StatusBadRequest, "Invalid request", "The username or hostname format is invalid.")
+		return
+	}
+
+	// Verify CSRF timestamp is within 5 minutes
+	tsInt, err := strconv.ParseInt(csrfTs, 10, 64)
+	if err != nil {
+		revokeErrorPage(w, http.StatusBadRequest, "Invalid request", "The request timestamp is invalid.")
+		return
+	}
+	tsTime := time.Unix(tsInt, 0)
+	if time.Since(tsTime).Abs() > 5*time.Minute {
+		revokeErrorPage(w, http.StatusForbidden, "Session expired", "This page has expired. Please approve a new sudo request to manage your sessions.")
+		return
+	}
+
+	// Verify CSRF token
+	expected := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(csrfToken)) != 1 {
+		revokeErrorPage(w, http.StatusForbidden, "Invalid request", "The security token is invalid. Please approve a new sudo request to manage your sessions.")
+		return
+	}
+
+	s.store.RevokeSession(username, hostname)
+	log.Printf("SESSION_REVOKED: user %q host %q from %s", username, hostname, remoteAddr(r))
+
+	// Render a simple confirmation page
+	w.Header().Set("Content-Type", "text/html")
+	io.WriteString(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Session revoked</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>`+sharedCSS+`
+    .icon-success {
+      background: var(--success-bg);
+      border: 2px solid var(--success-border);
+      color: var(--success);
+    }
+    h2 { color: var(--success); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon icon-success" aria-hidden="true">&#x2713;</div>
+    <h2>Session revoked</h2>
+    <p>The session for <strong>`+template.HTMLEscapeString(username)+`</strong> on <strong>`+template.HTMLEscapeString(hostname)+`</strong> has been revoked.</p>
+  </div>
+</body>
+</html>`)
+}
+
+// cleanExpiredSessionNonces removes expired nonces (>5 min) from the map.
+// Must be called under sessionNonceMu lock.
+func (s *Server) cleanExpiredSessionNonces() {
+	cutoff := time.Now().Add(-5 * time.Minute)
+	for nonce, created := range s.sessionNonces {
+		if created.Before(cutoff) {
+			delete(s.sessionNonces, nonce)
+		}
+	}
+}
+
+// handleSessionsPage renders a landing page with a sign-in button.
+// GET /sessions
+func (s *Server) handleSessionsPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	loginURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/sessions/login"
+	w.Header().Set("Content-Type", "text/html")
+	io.WriteString(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Manage sessions</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>`+sharedCSS+`
+    .icon-info {
+      background: var(--info-bg);
+      border: 2px solid var(--info-border);
+      color: var(--primary);
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--primary);
+      color: var(--primary-text);
+      padding: 12px 32px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 0.938rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+      width: 100%;
+      max-width: 320px;
+      margin-top: 16px;
+    }
+    .btn:hover { background: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+    .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+    .btn:active { transform: translateY(0); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon icon-info" aria-hidden="true">&#x1f511;</div>
+    <h2>Manage sessions</h2>
+    <p>Sign in with Pocket ID to view and revoke your active sudo sessions.</p>
+    <a href="`+template.HTMLEscapeString(loginURL)+`" class="btn" role="button">Sign in to manage sessions</a>
+  </div>
+</body>
+</html>`)
+}
+
+// handleSessionsLogin initiates an OIDC flow for the sessions management page.
+// GET /sessions/login
+func (s *Server) handleSessionsLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	nonce, err := randomHex(16)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	s.sessionNonceMu.Lock()
+	s.cleanExpiredSessionNonces()
+	s.sessionNonces[nonce] = time.Now()
+	s.sessionNonceMu.Unlock()
+
+	state := "sessions:" + nonce
+	url := s.oidcConfig.AuthCodeURL(state, oidc.Nonce(nonce))
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+// handleSessionsCallback processes the OIDC callback for the sessions management page.
+// Called from handleOIDCCallback when state starts with "sessions:".
+func (s *Server) handleSessionsCallback(w http.ResponseWriter, r *http.Request) {
+	state := r.URL.Query().Get("state")
+	stateNonce := strings.TrimPrefix(state, "sessions:")
+
+	// Validate nonce format
+	if len(stateNonce) != 32 || !isHex(stateNonce) {
+		log.Printf("SECURITY: malformed sessions state from %s", remoteAddr(r))
+		http.Error(w, "invalid state format", http.StatusBadRequest)
+		return
+	}
+
+	// Verify and consume the nonce
+	s.sessionNonceMu.Lock()
+	s.cleanExpiredSessionNonces()
+	_, nonceValid := s.sessionNonces[stateNonce]
+	if nonceValid {
+		delete(s.sessionNonces, stateNonce)
+	}
+	s.sessionNonceMu.Unlock()
+
+	if !nonceValid {
+		log.Printf("SECURITY: unknown or expired sessions nonce from %s", remoteAddr(r))
+		http.Error(w, "invalid or expired session — please try again", http.StatusBadRequest)
+		return
+	}
+
+	// Check for IdP error
+	if errParam := r.URL.Query().Get("error"); errParam != "" {
+		log.Printf("OIDC error during sessions login from %s: %s", remoteAddr(r), sanitizeForTerminal(errParam))
+		http.Error(w, "authentication failed", http.StatusForbidden)
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "missing authorization code", http.StatusBadRequest)
+		return
+	}
+
+	// Exchange code for token
+	exchangeCtx, cancel := context.WithTimeout(r.Context(), oidcExchangeTimeout)
+	defer cancel()
+	exchangeClient := &http.Client{
+		Timeout: oidcExchangeTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	exchangeCtx = context.WithValue(exchangeCtx, oauth2.HTTPClient, exchangeClient)
+
+	token, err := s.oidcConfig.Exchange(exchangeCtx, code)
+	if err != nil {
+		log.Printf("ERROR: sessions callback token exchange failed from %s", remoteAddr(r))
+		http.Error(w, "authentication failed", http.StatusInternalServerError)
+		return
+	}
+
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok {
+		log.Printf("ERROR: sessions callback no id_token from %s", remoteAddr(r))
+		http.Error(w, "no id_token in response", http.StatusInternalServerError)
+		return
+	}
+
+	idToken, err := s.verifier.Verify(exchangeCtx, rawIDToken)
+	if err != nil {
+		log.Printf("ERROR: sessions callback token verification failed from %s", remoteAddr(r))
+		http.Error(w, "token verification failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify OIDC nonce
+	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(stateNonce)) != 1 {
+		log.Printf("SECURITY: sessions callback nonce mismatch from %s", remoteAddr(r))
+		http.Error(w, "token nonce mismatch", http.StatusBadRequest)
+		return
+	}
+
+	var claims struct {
+		PreferredUsername string `json:"preferred_username"`
+	}
+	if err := idToken.Claims(&claims); err != nil {
+		log.Printf("ERROR: sessions callback claims parsing failed from %s", remoteAddr(r))
+		http.Error(w, "failed to parse identity", http.StatusInternalServerError)
+		return
+	}
+
+	username := claims.PreferredUsername
+	if username == "" || !validUsername.MatchString(username) {
+		log.Printf("SECURITY: sessions callback invalid username from %s", remoteAddr(r))
+		http.Error(w, "invalid username", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("SESSIONS: user %q viewed sessions from %s", username, remoteAddr(r))
+
+	// Render session list (reusing same pattern as approval success page)
+	sessions := s.store.ActiveSessions(username)
+	type sessionView struct {
+		Hostname  string
+		Remaining string
+		CSRFToken string
+		CSRFTs    string
+	}
+	var sessionViews []sessionView
+	now := time.Now()
+	csrfTs := fmt.Sprintf("%d", now.Unix())
+	for _, sess := range sessions {
+		csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
+		sessionViews = append(sessionViews, sessionView{
+			Hostname:  sess.Hostname,
+			Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+			CSRFToken: csrfToken,
+			CSRFTs:    csrfTs,
+		})
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := sessionsListTmpl.Execute(w, map[string]interface{}{
+		"Username": username,
+		"Sessions": sessionViews,
+	}); err != nil {
+		log.Printf("ERROR: sessions template execution: %v", err)
+	}
+}
+
+// buildClientConfig returns a client config override map if any fields are set,
+// or nil if no overrides are configured.
+func (s *Server) buildClientConfig() map[string]interface{} {
+	cfg := make(map[string]interface{})
+	if s.cfg.ClientBreakglassPasswordType != "" {
+		cfg["breakglass_password_type"] = s.cfg.ClientBreakglassPasswordType
+	}
+	if s.cfg.ClientBreakglassRotationDays > 0 {
+		cfg["breakglass_rotation_days"] = s.cfg.ClientBreakglassRotationDays
+	}
+	if s.cfg.ClientTokenCacheEnabled != nil {
+		cfg["token_cache_enabled"] = *s.cfg.ClientTokenCacheEnabled
+	}
+	if len(cfg) == 0 {
+		return nil
+	}
+	return cfg
 }
 
 // handleBreakglassEscrow receives a break-glass password from a client and
@@ -1048,6 +1557,14 @@ const approvalPageHTML = `<!DOCTYPE html>
       color: var(--text-secondary);
       margin: 8px 0 20px;
     }
+    .duration-group { display: flex; flex-wrap: wrap; gap: 0; margin: 20px 0; justify-content: center; }
+    .duration-btn { padding: 12px 20px; border: 2px solid var(--border); text-decoration: none; color: var(--text); font-weight: 600; font-size: 0.938rem; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+    .duration-btn:first-child { border-radius: 10px 0 0 10px; }
+    .duration-btn:last-child { border-radius: 0 10px 10px 0; }
+    .duration-btn + .duration-btn { border-left: none; }
+    .duration-btn.active { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+    .duration-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); z-index: 1; position: relative; }
+    .duration-btn:hover { background: var(--info-bg); }
     .btn {
       display: inline-flex;
       align-items: center;
@@ -1076,6 +1593,14 @@ const approvalPageHTML = `<!DOCTYPE html>
       padding-top: 16px;
       border-top: 1px solid var(--border);
     }
+    .duration-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin: 16px 0 4px;
+    }
   </style>
 </head>
 <body>
@@ -1088,7 +1613,11 @@ const approvalPageHTML = `<!DOCTYPE html>
     <div class="code-label">Verification code</div>
     <div class="code" aria-label="Verification code: {{.Code}}">{{.Code}}</div>
     <p class="code-hint">Verify this code matches your terminal</p>
+    {{if .Durations}}<div class="duration-label">Session duration</div>
+    <div class="duration-group" role="group" aria-label="Session duration">{{range .Durations}}<a href="{{$.LoginURL}}?duration={{.Seconds}}" class="duration-btn{{if .Active}} active{{end}}" role="button"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}</div>
+    {{else}}
     <a href="{{.LoginURL}}" class="btn" role="button" aria-label="Authenticate with Pocket ID to approve this sudo request">Authenticate with Pocket ID</a>
+    {{end}}
     <p class="warn">If you did not request this, close this page.</p>
   </div>
 </body>
@@ -1107,6 +1636,23 @@ const approvalSuccessHTML = `<!DOCTYPE html>
       color: var(--success);
     }
     h2 { color: var(--success); }
+    .session-list { text-align: left; margin: 20px 0; }
+    .session-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+    .session-info { min-width: 0; flex: 1; }
+    .session-host { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-time { color: var(--text-secondary); font-size: 0.813rem; display: block; }
+    .revoke-btn { background: none; border: 1px solid var(--danger); color: var(--danger); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 36px; white-space: nowrap; flex-shrink: 0; }
+    .revoke-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(220,38,38,0.4); }
+    .revoke-btn:hover { background: var(--danger-bg); }
+    .session-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin: 24px 0 8px;
+      text-align: left;
+    }
   </style>
 </head>
 <body>
@@ -1114,6 +1660,26 @@ const approvalSuccessHTML = `<!DOCTYPE html>
     <div class="icon icon-success" aria-hidden="true">&#x2713;</div>
     <h2>Sudo approved</h2>
     <p>You're all set. Your terminal session will continue.</p>
+    {{if .Sessions}}
+    <div class="session-label">Your active sessions</div>
+    <div class="session-list" role="list" aria-label="Active sessions">
+      {{range .Sessions}}
+      <div class="session-row" role="listitem">
+        <div class="session-info">
+          <span class="session-host">{{.Hostname}}</span>
+          <span class="session-time">{{.Remaining}} remaining</span>
+        </div>
+        <form method="POST" action="/api/sessions/revoke">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+          <button type="submit" class="revoke-btn" aria-label="Revoke session on {{.Hostname}}">Revoke</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
   </div>
 </body>
 </html>`
@@ -1226,6 +1792,69 @@ const approvalAlreadyHTML = `<!DOCTYPE html>
     <div class="icon icon-info" aria-hidden="true">&#x2139;</div>
     <h2>Already resolved</h2>
     <p>This sudo request has already been <strong>{{.Status}}</strong>.</p>
+  </div>
+</body>
+</html>`
+
+const sessionsListHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Your active sessions</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>` + sharedCSS + `
+    .icon-info {
+      background: var(--info-bg);
+      border: 2px solid var(--info-border);
+      color: var(--primary);
+    }
+    .session-list { text-align: left; margin: 20px 0; }
+    .session-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+    .session-info { min-width: 0; flex: 1; }
+    .session-host { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-time { color: var(--text-secondary); font-size: 0.813rem; display: block; }
+    .revoke-btn { background: none; border: 1px solid var(--danger); color: var(--danger); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 36px; white-space: nowrap; flex-shrink: 0; }
+    .revoke-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(220,38,38,0.4); }
+    .revoke-btn:hover { background: var(--danger-bg); }
+    .session-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin: 24px 0 8px;
+      text-align: left;
+    }
+    .empty-state { color: var(--text-secondary); margin: 24px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon icon-info" aria-hidden="true">&#x1f511;</div>
+    <h2>Your active sessions</h2>
+    <p>Signed in as <strong>{{.Username}}</strong></p>
+    {{if .Sessions}}
+    <div class="session-label">Active grace periods</div>
+    <div class="session-list" role="list" aria-label="Active sessions">
+      {{range .Sessions}}
+      <div class="session-row" role="listitem">
+        <div class="session-info">
+          <span class="session-host">{{.Hostname}}</span>
+          <span class="session-time">{{.Remaining}} remaining</span>
+        </div>
+        <form method="POST" action="/api/sessions/revoke">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+          <button type="submit" class="revoke-btn" aria-label="Revoke session on {{.Hostname}}">Revoke</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="empty-state">You have no active sudo sessions.</p>
+    {{end}}
   </div>
 </body>
 </html>`
