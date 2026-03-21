@@ -350,6 +350,11 @@ func (s *Server) handlePollChallenge(w http.ResponseWriter, r *http.Request) {
 			if challenge.RawIDToken != "" {
 				resp["id_token"] = challenge.RawIDToken
 			}
+			// Include grace period remaining so the client can show the
+			// effective re-auth window (max of token expiry and grace period).
+			if gr := s.store.GraceRemaining(challenge.Username); gr > 0 {
+				resp["grace_remaining"] = int(gr.Seconds())
+			}
 		case StatusDenied:
 			resp["denial_token"] = s.computeStatusHMAC(id, challenge.Username, "denied", challenge.BreakglassRotateBefore)
 		}

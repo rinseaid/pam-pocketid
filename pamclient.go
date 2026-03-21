@@ -89,11 +89,12 @@ type challengeResponse struct {
 
 // pollResponse is the response from GET /api/challenge/{id}.
 type pollResponse struct {
-	Status        string `json:"status"`
-	ExpiresIn     int    `json:"expires_in"`
-	ApprovalToken string `json:"approval_token,omitempty"`
-	DenialToken   string `json:"denial_token,omitempty"`
-	IDToken       string `json:"id_token,omitempty"`
+	Status         string `json:"status"`
+	ExpiresIn      int    `json:"expires_in"`
+	ApprovalToken  string `json:"approval_token,omitempty"`
+	DenialToken    string `json:"denial_token,omitempty"`
+	IDToken        string `json:"id_token,omitempty"`
+	GraceRemaining int    `json:"grace_remaining,omitempty"`
 
 	// serverExpired is set locally when the server returns 404 (not from JSON).
 	// Used to distinguish server-reported expiry from HMAC-verified status.
@@ -224,7 +225,8 @@ func (p *PAMClient) Authenticate(username string) error {
 			}
 			// Cache the id_token for future authentication without device flow
 			if p.tokenCache != nil && status.IDToken != "" {
-				if err := p.tokenCache.Write(username, status.IDToken); err != nil {
+				graceDur := time.Duration(status.GraceRemaining) * time.Second
+				if err := p.tokenCache.Write(username, status.IDToken, graceDur); err != nil {
 					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: failed to cache token: %v\n", err)
 				}
 			}

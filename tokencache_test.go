@@ -103,7 +103,7 @@ func TestTokenCacheWriteAndCheck(t *testing.T) {
 	token := signTestJWT(t, key, oidcServer.URL, clientID, "testuser", time.Now().Add(1*time.Hour))
 
 	// Write to cache
-	if err := tc.Write("testuser", token); err != nil {
+	if err := tc.Write("testuser", token, 0); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestTokenCacheExpired(t *testing.T) {
 	// Sign a token that expired 1 hour ago
 	token := signTestJWT(t, key, oidcServer.URL, clientID, "testuser", time.Now().Add(-1*time.Hour))
 
-	if err := tc.Write("testuser", token); err != nil {
+	if err := tc.Write("testuser", token, 0); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestTokenCacheWrongUsername(t *testing.T) {
 	// Sign a token for "alice" but cache it under "bob"
 	token := signTestJWT(t, key, oidcServer.URL, clientID, "alice", time.Now().Add(1*time.Hour))
 
-	if err := tc.Write("bob", token); err != nil {
+	if err := tc.Write("bob", token, 0); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -216,7 +216,7 @@ func TestTokenCacheWrongAudience(t *testing.T) {
 
 	token := signTestJWT(t, key, oidcServer.URL, "wrong-client-id", "testuser", time.Now().Add(1*time.Hour))
 
-	if err := tc.Write("testuser", token); err != nil {
+	if err := tc.Write("testuser", token, 0); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -240,7 +240,7 @@ func TestTokenCacheDirectoryCreation(t *testing.T) {
 
 	token := signTestJWT(t, key, oidcServer.URL, clientID, "testuser", time.Now().Add(1*time.Hour))
 
-	if err := tc.Write("testuser", token); err != nil {
+	if err := tc.Write("testuser", token, 0); err != nil {
 		t.Fatalf("Write should create nested directories: %v", err)
 	}
 
@@ -261,7 +261,7 @@ func TestTokenCacheWriteMalformedJWT(t *testing.T) {
 	cacheDir := t.TempDir()
 	tc := NewTokenCache(cacheDir, "http://localhost", "client-id")
 
-	if err := tc.Write("testuser", "not-a-jwt"); err == nil {
+	if err := tc.Write("testuser", "not-a-jwt", 0); err == nil {
 		t.Error("Write should fail for malformed JWT")
 	}
 }
@@ -299,7 +299,7 @@ func TestTokenCacheWriteNoExpClaim(t *testing.T) {
 	cacheDir := t.TempDir()
 	tc := NewTokenCache(cacheDir, oidcServer.URL, clientID)
 
-	if err := tc.Write("testuser", token); err == nil {
+	if err := tc.Write("testuser", token, 0); err == nil {
 		t.Error("Write should fail for JWT without exp claim")
 	}
 }
