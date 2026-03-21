@@ -226,6 +226,13 @@ func (p *PAMClient) Authenticate(username string) error {
 			// Cache the id_token for future authentication without device flow
 			if p.tokenCache != nil && status.IDToken != "" {
 				graceDur := time.Duration(status.GraceRemaining) * time.Second
+				// Cap grace_remaining to 24h — this field is not HMAC-protected,
+				// so a MITM could inject an inflated value. The server already caps
+				// its own grace period to 24h (config.go), so any larger value is bogus.
+				const maxGrace = 24 * time.Hour
+				if graceDur > maxGrace {
+					graceDur = maxGrace
+				}
 				if err := p.tokenCache.Write(username, status.IDToken, graceDur); err != nil {
 					fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: failed to cache token: %v\n", err)
 				}

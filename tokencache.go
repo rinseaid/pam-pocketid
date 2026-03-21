@@ -165,9 +165,14 @@ func (tc *TokenCache) Write(username, rawIDToken string, graceRemaining time.Dur
 
 	expiresAt := time.Unix(claims.Exp, 0)
 
-	// Ensure cache directory exists with tight permissions
+	// Ensure cache directory exists with tight permissions.
+	// MkdirAll does not fix permissions on existing directories, so
+	// Chmod afterwards to enforce 0700 even if pre-created with looser perms.
 	if err := os.MkdirAll(tc.CacheDir, 0700); err != nil {
 		return fmt.Errorf("creating cache directory: %w", err)
+	}
+	if err := os.Chmod(tc.CacheDir, 0700); err != nil {
+		return fmt.Errorf("enforcing cache directory permissions: %w", err)
 	}
 
 	cached := cachedToken{
