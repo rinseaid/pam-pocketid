@@ -3,10 +3,13 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +40,12 @@ const (
 	maxTotalChallenges = 10000
 )
 
+// GraceSession represents an active grace period session for a specific host.
+type GraceSession struct {
+	Hostname  string
+	ExpiresAt time.Time
+}
+
 // Challenge represents a sudo elevation request awaiting user approval.
 type Challenge struct {
 	ID        string          `json:"id"`
@@ -58,34 +67,61 @@ type Challenge struct {
 	// between challenge creation and poll-time approval.
 	BreakglassRotateBefore string `json:"-"`
 
+	// RequestedGrace is the per-challenge grace duration selected by the user
+	// on the approval page. Zero means use the server's default grace period.
+	RequestedGrace time.Duration `json:"-"`
+
+	// RevokeTokensBefore is the server's revocation signal at challenge creation time.
+	// Stored per-challenge so the HMAC is consistent even if revocations happen
+	// between challenge creation and poll-time approval.
+	RevokeTokensBefore string `json:"-"`
+
 	// Set after OIDC callback confirms identity
 	ApprovedBy string    `json:"-"`
 	ApprovedAt time.Time `json:"-"`
+
+	// RawIDToken stores the OIDC id_token after approval, for forwarding to
+	// the PAM client's token cache. Not serialized to JSON.
+	RawIDToken string `json:"-"`
 }
 
 // ChallengeStore manages in-memory sudo challenges with TTL expiration.
 type ChallengeStore struct {
-	mu            sync.RWMutex
-	challenges    map[string]*Challenge // keyed by ID
-	byCode        map[string]string     // user_code -> ID
-	pendingByUser map[string]int        // username -> count of pending non-expired challenges
-	lastApproval  map[string]time.Time  // username -> last approval time (for grace period)
-	ttl           time.Duration
-	gracePeriod   time.Duration
-	stopCh        chan struct{} // signals reapLoop to stop
-	stopOnce      sync.Once    // ensures Stop is safe to call concurrently
+	mu                 sync.RWMutex
+	challenges         map[string]*Challenge // keyed by ID
+	byCode             map[string]string     // user_code -> ID
+	pendingByUser      map[string]int        // username -> count of pending non-expired challenges
+	lastApproval       map[string]time.Time  // graceKey -> expiry time (for grace period)
+	revokeTokensBefore map[string]time.Time  // username -> revocation timestamp
+	ttl                time.Duration
+	gracePeriod        time.Duration
+	persistPath        string        // file path for persisted state (empty = no persistence)
+	stopCh             chan struct{} // signals reapLoop to stop
+	stopOnce           sync.Once    // ensures Stop is safe to call concurrently
 }
 
-// NewChallengeStore creates a new store with the given challenge TTL and grace period.
-func NewChallengeStore(ttl, gracePeriod time.Duration) *ChallengeStore {
+// persistedState is the JSON-serializable snapshot of grace sessions and revocation timestamps.
+type persistedState struct {
+	GraceSessions      map[string]time.Time `json:"grace_sessions"`
+	RevokeTokensBefore map[string]time.Time `json:"revoke_tokens_before"`
+}
+
+// NewChallengeStore creates a new store with the given challenge TTL, grace period,
+// and optional persistence file path. If persistPath is empty, no state is persisted.
+func NewChallengeStore(ttl, gracePeriod time.Duration, persistPath string) *ChallengeStore {
 	s := &ChallengeStore{
-		challenges:    make(map[string]*Challenge),
-		byCode:        make(map[string]string),
-		pendingByUser: make(map[string]int),
-		lastApproval:  make(map[string]time.Time),
-		ttl:           ttl,
-		gracePeriod:   gracePeriod,
-		stopCh:        make(chan struct{}),
+		challenges:         make(map[string]*Challenge),
+		byCode:             make(map[string]string),
+		pendingByUser:      make(map[string]int),
+		lastApproval:       make(map[string]time.Time),
+		revokeTokensBefore: make(map[string]time.Time),
+		ttl:                ttl,
+		gracePeriod:        gracePeriod,
+		persistPath:        persistPath,
+		stopCh:             make(chan struct{}),
+	}
+	if persistPath != "" {
+		s.loadState()
 	}
 	go s.reapLoop()
 	return s
@@ -96,6 +132,15 @@ func (s *ChallengeStore) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
 	})
+}
+
+// graceKey returns the key used for per-host grace period tracking.
+// Format: "username@hostname" or just "username" if hostname is empty.
+func graceKey(username, hostname string) string {
+	if hostname == "" {
+		return username
+	}
+	return username + "@" + hostname
 }
 
 // Create generates a new challenge for the given username, optional hostname,
@@ -112,12 +157,22 @@ func (s *ChallengeStore) Create(username, hostname, breakglassRotateBefore strin
 	}
 
 	now := time.Now()
+
+	// Snapshot revokeTokensBefore for this challenge
+	s.mu.RLock()
+	var revokeTokensBefore string
+	if t, ok := s.revokeTokensBefore[username]; ok {
+		revokeTokensBefore = t.Format(time.RFC3339)
+	}
+	s.mu.RUnlock()
+
 	c := &Challenge{
 		ID:                     id,
 		UserCode:               code,
 		Username:               username,
 		Hostname:               hostname,
 		BreakglassRotateBefore: breakglassRotateBefore,
+		RevokeTokensBefore:     revokeTokensBefore,
 		Status:                 StatusPending,
 		CreatedAt:              now,
 		ExpiresAt:              now.Add(s.ttl),
@@ -197,6 +252,15 @@ func (s *ChallengeStore) SetNonce(id string, nonce string) error {
 	return nil
 }
 
+// SetRequestedGrace sets the per-challenge grace duration selected on the approval page.
+func (s *ChallengeStore) SetRequestedGrace(id string, d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c, ok := s.challenges[id]; ok {
+		c.RequestedGrace = d
+	}
+}
+
 // Approve marks a challenge as approved by the given identity.
 func (s *ChallengeStore) Approve(id string, approvedBy string) error {
 	s.mu.Lock()
@@ -215,10 +279,28 @@ func (s *ChallengeStore) Approve(id string, approvedBy string) error {
 	c.ApprovedBy = approvedBy
 	c.ApprovedAt = time.Now()
 	if s.gracePeriod > 0 {
-		s.lastApproval[c.Username] = c.ApprovedAt
+		key := graceKey(c.Username, c.Hostname)
+		graceDur := c.RequestedGrace
+		if graceDur == 0 {
+			graceDur = s.gracePeriod
+		}
+		s.lastApproval[key] = time.Now().Add(graceDur)
 	}
 	s.decPending(c.Username)
+	s.saveStateLocked()
 	return nil
+}
+
+// SetIDToken stores the raw OIDC id_token on an approved challenge.
+// Called after approval so the PAM client can cache the token locally.
+func (s *ChallengeStore) SetIDToken(id string, rawIDToken string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.challenges[id]
+	if !ok {
+		return
+	}
+	c.RawIDToken = rawIDToken
 }
 
 // Deny marks a challenge as denied.
@@ -240,21 +322,43 @@ func (s *ChallengeStore) Deny(id string) error {
 	return nil
 }
 
-// WithinGracePeriod returns true if the user has a recent approval within the grace period.
-func (s *ChallengeStore) WithinGracePeriod(username string) bool {
+// WithinGracePeriod returns true if the user has a recent approval within the grace period
+// for the given hostname.
+func (s *ChallengeStore) WithinGracePeriod(username, hostname string) bool {
 	if s.gracePeriod <= 0 {
 		return false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	t, ok := s.lastApproval[username]
+	key := graceKey(username, hostname)
+	expiry, ok := s.lastApproval[key]
 	if !ok {
 		return false
 	}
-	return time.Since(t) < s.gracePeriod
+	return time.Now().Before(expiry)
+}
+
+// GraceRemaining returns how much of the grace period remains for a user on a host.
+func (s *ChallengeStore) GraceRemaining(username, hostname string) time.Duration {
+	if s.gracePeriod <= 0 {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key := graceKey(username, hostname)
+	expiry, ok := s.lastApproval[key]
+	if !ok {
+		return 0
+	}
+	remaining := time.Until(expiry)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // AutoApprove immediately approves a challenge (used for grace period bypass).
+// Does NOT update lastApproval — the existing grace session continues unchanged.
 func (s *ChallengeStore) AutoApprove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -268,11 +372,50 @@ func (s *ChallengeStore) AutoApprove(id string) error {
 	c.Status = StatusApproved
 	c.ApprovedBy = c.Username
 	c.ApprovedAt = time.Now()
-	if s.gracePeriod > 0 {
-		s.lastApproval[c.Username] = c.ApprovedAt
-	}
+	// AutoApprove does NOT update lastApproval — the existing grace session
+	// continues with its original expiry.
 	s.decPending(c.Username)
 	return nil
+}
+
+// ActiveSessions returns all active grace sessions for a given username.
+func (s *ChallengeStore) ActiveSessions(username string) []GraceSession {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	prefix := username + "@"
+	var sessions []GraceSession
+	now := time.Now()
+	for key, expiry := range s.lastApproval {
+		if !now.Before(expiry) {
+			continue // expired
+		}
+		if key == username {
+			// Entry without hostname
+			sessions = append(sessions, GraceSession{Hostname: "(unknown)", ExpiresAt: expiry})
+		} else if strings.HasPrefix(key, prefix) {
+			hostname := key[len(prefix):]
+			sessions = append(sessions, GraceSession{Hostname: hostname, ExpiresAt: expiry})
+		}
+	}
+	return sessions
+}
+
+// RevokeSession removes a grace session for a user on a specific hostname
+// and sets the revocation timestamp so that token caches are invalidated.
+func (s *ChallengeStore) RevokeSession(username, hostname string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := graceKey(username, hostname)
+	delete(s.lastApproval, key)
+	s.revokeTokensBefore[username] = time.Now()
+	s.saveStateLocked()
+}
+
+// RevokeTokensBefore returns the revocation timestamp for a user, if any.
+func (s *ChallengeStore) RevokeTokensBefore(username string) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.revokeTokensBefore[username]
 }
 
 // decPending decrements the pending counter for a username. Must be called under write lock.
@@ -323,16 +466,118 @@ func (s *ChallengeStore) reap() {
 			delete(s.challenges, id)
 		}
 	}
-	// Prune stale grace period entries to prevent unbounded memory growth.
-	// Entries older than gracePeriod will never return true from
-	// WithinGracePeriod(), so they serve no purpose.
-	if s.gracePeriod > 0 {
-		for username, t := range s.lastApproval {
-			if now.Sub(t) > s.gracePeriod {
-				delete(s.lastApproval, username)
-			}
+	// Prune stale grace period entries where expiry has passed.
+	pruned := false
+	for key, expiry := range s.lastApproval {
+		if now.After(expiry) {
+			delete(s.lastApproval, key)
+			pruned = true
 		}
 	}
+	if pruned {
+		s.saveStateLocked()
+	}
+}
+
+// loadState reads persisted grace sessions and revocation timestamps from the JSON file.
+// Handles missing file (first run) and corrupt JSON gracefully — starts fresh.
+func (s *ChallengeStore) loadState() {
+	if s.persistPath == "" {
+		return
+	}
+	data, err := os.ReadFile(s.persistPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("WARNING: cannot read session state file %s: %v — starting fresh", s.persistPath, err)
+		}
+		return
+	}
+	var state persistedState
+	if err := json.Unmarshal(data, &state); err != nil {
+		log.Printf("WARNING: corrupt session state file %s: %v — starting fresh", s.persistPath, err)
+		return
+	}
+	now := time.Now()
+	for key, expiry := range state.GraceSessions {
+		if now.Before(expiry) {
+			s.lastApproval[key] = expiry
+		}
+	}
+	for user, ts := range state.RevokeTokensBefore {
+		s.revokeTokensBefore[user] = ts
+	}
+	log.Printf("Loaded %d grace sessions and %d revocation entries from %s", len(s.lastApproval), len(s.revokeTokensBefore), s.persistPath)
+}
+
+// saveStateLocked writes the current grace sessions and revocation timestamps to the
+// persist file using atomic temp+rename. Must be called while holding the write lock
+// (or from a context where the data is consistent). No-op if persistPath is empty.
+func (s *ChallengeStore) saveStateLocked() {
+	if s.persistPath == "" {
+		return
+	}
+	// Build state from current in-memory maps, pruning expired entries.
+	now := time.Now()
+	state := persistedState{
+		GraceSessions:      make(map[string]time.Time),
+		RevokeTokensBefore: make(map[string]time.Time),
+	}
+	for key, expiry := range s.lastApproval {
+		if now.Before(expiry) {
+			state.GraceSessions[key] = expiry
+		}
+	}
+	for user, ts := range s.revokeTokensBefore {
+		state.RevokeTokensBefore[user] = ts
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		log.Printf("ERROR: marshaling session state: %v", err)
+		return
+	}
+	// Atomic write: temp file + rename (same pattern as writeBreakglassFile).
+	dir := s.persistPath[:strings.LastIndex(s.persistPath, "/")+1]
+	if dir == "" {
+		dir = "."
+	}
+	tmp, err := os.CreateTemp(dir, ".sessions-tmp-*")
+	if err != nil {
+		log.Printf("ERROR: creating temp session state file: %v", err)
+		return
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		log.Printf("ERROR: writing session state: %v", err)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		log.Printf("ERROR: closing session state temp file: %v", err)
+		return
+	}
+	if err := os.Chmod(tmpName, 0600); err != nil {
+		os.Remove(tmpName)
+		log.Printf("ERROR: setting session state permissions: %v", err)
+		return
+	}
+	if err := os.Rename(tmpName, s.persistPath); err != nil {
+		os.Remove(tmpName)
+		log.Printf("ERROR: renaming session state file: %v", err)
+		return
+	}
+}
+
+// SaveState persists the current grace sessions and revocation timestamps.
+// Intended for graceful shutdown — acquires the lock before saving.
+func (s *ChallengeStore) SaveState() {
+	if s.persistPath == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.saveStateLocked()
 }
 
 // generateUserCode creates a human-friendly code like "ABCDEF-123456".

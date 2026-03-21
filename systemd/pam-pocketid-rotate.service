@@ -1,0 +1,12 @@
+[Unit]
+Description=Rotate pam-pocketid break-glass password
+Documentation=https://github.com/rinseaid/pam-pocketid
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pam-pocketid rotate-breakglass
+# Hardening
+ProtectSystem=strict
+ReadWritePaths=/etc/pam-pocketid-breakglass /etc/pam-pocketid-breakglass.lock
+PrivateTmp=true
+NoNewPrivileges=false

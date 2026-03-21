@@ -67,10 +67,15 @@ services:
 
 ### 3. Install the PAM helper on Linux hosts
 
-Copy the `pam-pocketid` binary to each managed host:
+**Quick install** (downloads latest binary, installs systemd rotation timer):
 
 ```bash
-# Download from releases
+curl -fsSL https://raw.githubusercontent.com/rinseaid/pam-pocketid/main/install.sh | sudo bash
+```
+
+**Or install manually:**
+
+```bash
 curl -L -o /usr/local/bin/pam-pocketid \
   https://github.com/rinseaid/pam-pocketid/releases/latest/download/pam-pocketid-linux-amd64
 chmod +x /usr/local/bin/pam-pocketid
@@ -87,6 +92,8 @@ chmod 600 /etc/pam-pocketid.conf
 ```
 
 > pam-pocketid reads this config file directly — no wrapper scripts or environment variable tricks needed. Environment variables, if set, take precedence over config file values.
+>
+> The config file must be owned by root and have mode 0600. Files with group/other permissions or non-root ownership are silently ignored.
 
 ### 4. Configure PAM
 
@@ -112,18 +119,45 @@ If you previously set `POCKETID_SUDO_NO_AUTHENTICATE=true`, remove it or set it 
 
 ## What the user sees
 
+**Terminal (normal approval):**
 ```
 $ sudo apt update
 
   Sudo requires Pocket ID approval.
   Approve at: https://sudo.example.com/approve/ABCDEF-123456
   Code: ABCDEF-123456
+  (A notification has also been sent.)
 
-  Waiting for approval (expires in 120s)...
+  Waiting for approval (expires in 120s).....
   Approved!
 
 [sudo] runs the command
 ```
+
+**Terminal (break-glass fallback when server is down):**
+```
+$ sudo whoami
+
+  *** BREAK-GLASS AUTHENTICATION ***
+  The Pocket ID server is unreachable.
+  Enter the break-glass password to proceed.
+
+Break-glass password: ********
+  Break-glass authentication successful.
+
+root
+```
+
+**Terminal (grace period auto-approval):**
+```
+$ sudo systemctl restart nginx
+
+  Sudo approved (recent authentication).
+
+[sudo] runs the command
+```
+
+Visual mockups of all terminal, browser, and mobile notification UIs are available at [**rinseaid.github.io/pam-pocketid**](https://rinseaid.github.io/pam-pocketid/all-pages.html) (supports light/dark mode).
 
 ## Configuration
 
@@ -138,13 +172,17 @@ $ sudo apt update
 | `PAM_POCKETID_LISTEN` | `:8090` | Listen address |
 | `PAM_POCKETID_CHALLENGE_TTL` | `120` | Challenge lifetime in seconds |
 | `PAM_POCKETID_SHARED_SECRET` | *(empty)* | Shared secret for PAM helper auth |
-| `PAM_POCKETID_GRACE_PERIOD` | `0` | Skip re-auth if user approved within this many seconds (0 = disabled) |
+| `PAM_POCKETID_GRACE_PERIOD` | `0` | Skip re-auth if user approved within this many seconds, per-host (0 = disabled) |
 | `PAM_POCKETID_NOTIFY_COMMAND` | *(empty)* | Shell command for push notifications on new challenges |
 | `PAM_POCKETID_NOTIFY_ENV` | *(empty)* | Comma-separated env var prefixes to pass to notify command |
 | `PAM_POCKETID_NOTIFY_USERS_FILE` | *(empty)* | Path to JSON file mapping usernames to per-user notification URLs |
 | `PAM_POCKETID_ESCROW_COMMAND` | *(empty)* | Shell command to escrow break-glass passwords |
 | `PAM_POCKETID_ESCROW_ENV` | *(empty)* | Comma-separated env var prefixes to pass to escrow command |
 | `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` | *(empty)* | RFC3339 timestamp; signal clients to rotate if older |
+| `PAM_POCKETID_SESSION_STATE_FILE` | *(none)* | Path to JSON file for persisting grace sessions across restarts |
+| `PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE` | *(none)* | Override client breakglass password type (random/passphrase/alphanumeric) |
+| `PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS` | *(none)* | Override client breakglass rotation interval |
+| `PAM_POCKETID_CLIENT_TOKEN_CACHE` | *(none)* | Override client token cache setting (true/false) |
 | `PAM_POCKETID_INSECURE` | `false` | Allow unauthenticated API (not recommended) |
 
 ### PAM helper environment variables
@@ -159,6 +197,10 @@ $ sudo apt update
 | `PAM_POCKETID_BREAKGLASS_FILE` | `/etc/pam-pocketid-breakglass` | Path to break-glass bcrypt hash file |
 | `PAM_POCKETID_BREAKGLASS_ROTATION_DAYS` | `90` | Automatic rotation interval in days |
 | `PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE` | `random` | Password type: random, passphrase, or alphanumeric |
+| `PAM_POCKETID_TOKEN_CACHE` | `true` | Enable/disable OIDC token caching |
+| `PAM_POCKETID_TOKEN_CACHE_DIR` | `/run/pocketid` | Directory for cached tokens |
+| `PAM_POCKETID_ISSUER_URL` | *(none)* | OIDC issuer URL for local JWT validation (enables token cache) |
+| `PAM_POCKETID_CLIENT_ID` | *(none)* | OIDC client ID for audience verification (enables token cache) |
 
 ## Push notifications
 
@@ -198,6 +240,73 @@ APPRISE_URLS="gotify://gotify.example.com/token"
 # Multiple services at once
 APPRISE_URLS="tgram://bot/chat ntfy://ntfy.sh/sudo-alerts"
 ```
+
+### Using Apprise API (stateless notifications via HTTP)
+
+If you run [Apprise API](https://github.com/caronc/apprise/wiki/API_Details) as a separate service (e.g., [linuxserver/apprise-api](https://github.com/linuxserver/docker-apprise-api)), pam-pocketid can send notifications via HTTP instead of invoking the Apprise CLI directly. This keeps notification credentials (bot tokens, chat IDs) centralized in the Apprise API service and out of the pam-pocketid container.
+
+Connect pam-pocketid to the Apprise API service's Docker network, then use a small Python script as the notify command. This avoids shell quoting issues with inline JSON and lets you use markdown formatting:
+
+```python
+# notify.py — mount into the container at /app/notify.py
+#!/usr/bin/env python3
+"""Send sudo approval notification via apprise-api."""
+import json, os, urllib.request
+
+username = os.environ["NOTIFY_USERNAME"]
+hostname = os.environ["NOTIFY_HOSTNAME"]
+user_code = os.environ["NOTIFY_USER_CODE"]
+approval_url = os.environ["NOTIFY_APPROVAL_URL"]
+expires_in = os.environ["NOTIFY_EXPIRES_IN"]
+
+data = json.dumps({
+    "title": "Sudo approval needed",
+    "body": (
+        f"**User:** {username}\n"
+        f"**Host:** {hostname}\n"
+        f"**Code:** `{user_code}`\n"
+        f"**Expires:** {expires_in}s\n\n"
+        f"[Approve]({approval_url})"
+    ),
+    "format": "markdown",
+}).encode()
+
+req = urllib.request.Request(
+    "http://apprise-api:8000/notify/sudo",
+    data,
+    {"Content-Type": "application/json"},
+)
+urllib.request.urlopen(req)
+```
+
+```yaml
+# docker-compose.yml
+services:
+  pam-pocketid:
+    environment:
+      PAM_POCKETID_NOTIFY_COMMAND: "python3 /app/notify.py"
+    volumes:
+      - ./notify.py:/app/notify.py:ro
+    networks:
+      - notify  # shared network with apprise-api
+
+networks:
+  notify:
+    external: true
+```
+
+The `/notify/sudo` path corresponds to a named tag in Apprise API. Configure the tag in Apprise API to point at your desired notification service (Telegram, ntfy, Slack, etc.). This approach requires no secrets in the pam-pocketid container — the Apprise API service handles all credential management.
+
+For per-user routing with Apprise API, create separate tags per user (e.g., `sudo-rinseaid`, `sudo-jordan`) and change the URL in the script to include the username:
+
+```python
+req = urllib.request.Request(
+    f"http://apprise-api:8000/notify/sudo-{username}",
+    ...
+)
+```
+
+If the tag doesn't exist for a user, Apprise API returns an error and pam-pocketid logs it — the sudo challenge is never blocked.
 
 ### Using a custom command
 
@@ -278,6 +387,33 @@ The per-user URL(s) are passed as `NOTIFY_USER_URLS`. Do not quote `$NOTIFY_USER
 - Failures are logged but never block the sudo challenge flow.
 - If the user has multiple devices, all devices receiving the notification service will get the alert (routing is handled by the notification service, not pam-pocketid).
 
+## Token cache
+
+The PAM helper can cache OIDC ID tokens locally to allow subsequent sudo invocations without a full device flow. When a cached token is valid, sudo is approved instantly with no browser interaction.
+
+To enable the token cache, set `PAM_POCKETID_ISSUER_URL` and `PAM_POCKETID_CLIENT_ID` on the PAM helper (client side). These are used for local JWT signature and audience verification. Tokens are stored in `PAM_POCKETID_TOKEN_CACHE_DIR` (default `/run/pocketid`), one file per username.
+
+The server can also push a token cache setting to all clients via `PAM_POCKETID_CLIENT_TOKEN_CACHE` (set to `true` or `false`). The server-pushed setting overrides the client-side setting after HMAC verification.
+
+## Session management
+
+The pam-pocketid server provides a `/sessions` page where users can view and revoke their active grace period sessions. Users authenticate via Pocket ID OIDC to access their session list.
+
+Grace sessions can also be viewed on the approval success page after approving a sudo request. Each session shows the hostname and remaining time, with a revoke button to end the session early. Revoking a session also invalidates any cached tokens for that user.
+
+To persist grace sessions across server restarts, set `PAM_POCKETID_SESSION_STATE_FILE` to a file path (e.g., `/var/lib/pam-pocketid/sessions.json`). Without this, all grace sessions are lost on restart.
+
+## Server-side client config
+
+The server can push configuration overrides to PAM helper clients. These overrides are delivered in the challenge response after HMAC verification, so a MITM cannot inject them without invalidating the approval token.
+
+Available overrides:
+- `PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE` — Override the client's break-glass password type (random/passphrase/alphanumeric)
+- `PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS` — Override the client's break-glass rotation interval
+- `PAM_POCKETID_CLIENT_TOKEN_CACHE` — Enable or disable the client's token cache (true/false)
+
+These are set as server environment variables and take effect on the next challenge creation. Client-side settings are used as defaults when no server override is configured.
+
 ## Break-glass authentication
 
 Break-glass is a fallback authentication mechanism that activates when the pam-pocketid server is unreachable. It allows sudo to proceed using a locally stored password, ensuring you are never locked out of your hosts.
@@ -308,7 +444,25 @@ Set via `PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE` in `/etc/pam-pocketid.conf`.
 
 ### Rotation
 
-Passwords are automatically rotated based on `PAM_POCKETID_BREAKGLASS_ROTATION_DAYS` (default 90 days). Rotation happens opportunistically during sudo sessions when the hash file's age exceeds the configured interval.
+Passwords are rotated automatically through two complementary mechanisms:
+
+1. **Systemd timer** (recommended) — a weekly timer runs `rotate-breakglass`, ensuring all hosts rotate within the configured interval regardless of sudo activity. The install script sets this up automatically.
+
+2. **Opportunistic** — every successful sudo checks the hash file age against `PAM_POCKETID_BREAKGLASS_ROTATION_DAYS` (default 90 days) and rotates if due.
+
+Both mechanisms use file locking to prevent races. If the timer rotated at 3 AM and a sudo happens at 9 AM, the age check skips (password is fresh).
+
+To install the timer manually (if not using the install script):
+
+```bash
+# Copy from the repo's systemd/ directory, or download:
+curl -fsSL -o /etc/systemd/system/pam-pocketid-rotate.service \
+  https://raw.githubusercontent.com/rinseaid/pam-pocketid/main/systemd/pam-pocketid-rotate.service
+curl -fsSL -o /etc/systemd/system/pam-pocketid-rotate.timer \
+  https://raw.githubusercontent.com/rinseaid/pam-pocketid/main/systemd/pam-pocketid-rotate.timer
+systemctl daemon-reload
+systemctl enable --now pam-pocketid-rotate.timer
+```
 
 To force an immediate rotation:
 
@@ -316,7 +470,7 @@ To force an immediate rotation:
 pam-pocketid rotate-breakglass --force
 ```
 
-The server can also signal all clients to rotate by setting `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` to an RFC3339 timestamp. Clients with hash files older than this timestamp will rotate after their next successful authentication.
+The server can also signal all clients to rotate by setting `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` to an RFC3339 timestamp. Clients with hash files older than this timestamp will rotate on the next sudo or timer run.
 
 ### Rate limiting
 
@@ -324,7 +478,32 @@ After 3 consecutive failed break-glass attempts, exponential backoff kicks in: 1
 
 ### Escrow
 
-The server can escrow break-glass passwords to external systems (1Password, HashiCorp Vault, etc.) by configuring `PAM_POCKETID_ESCROW_COMMAND`. When a client rotates its password, the plaintext is sent to the server's `/api/breakglass/escrow` endpoint, which pipes it to the escrow command via stdin. The hostname is available as `BREAKGLASS_HOSTNAME`.
+The server can escrow break-glass passwords to any external system by configuring `PAM_POCKETID_ESCROW_COMMAND`. The command receives the plaintext password on **stdin** and the hostname via `BREAKGLASS_HOSTNAME`. The escrow mechanism is not tied to any specific secrets manager — any shell command works:
+
+```bash
+# 1Password (via SDK — Python script included in Docker image)
+PAM_POCKETID_ESCROW_COMMAND: "python3 /app/breakglass-escrow.py"
+
+# HashiCorp Vault
+PAM_POCKETID_ESCROW_COMMAND: "vault kv put secret/breakglass/$BREAKGLASS_HOSTNAME password=-"
+
+# AWS Secrets Manager
+PAM_POCKETID_ESCROW_COMMAND: >-
+  aws secretsmanager put-secret-value
+  --secret-id breakglass-$BREAKGLASS_HOSTNAME
+  --secret-string $(cat)
+
+# Bitwarden (via CLI)
+PAM_POCKETID_ESCROW_COMMAND: >-
+  bw get item breakglass-$BREAKGLASS_HOSTNAME 2>/dev/null
+  && bw edit item-password breakglass-$BREAKGLASS_HOSTNAME $(cat)
+  || bw create item --name breakglass-$BREAKGLASS_HOSTNAME --password $(cat)
+
+# Write to a local file (simple, no external dependencies)
+PAM_POCKETID_ESCROW_COMMAND: "cat > /secure/breakglass/$BREAKGLASS_HOSTNAME.txt"
+```
+
+Use `PAM_POCKETID_ESCROW_ENV` to pass through environment variable prefixes needed by your secrets manager (e.g., `AWS_,VAULT_,OP_`).
 
 Each host can only escrow for its own hostname (verified via an HMAC-based per-host token).
 
@@ -648,11 +827,11 @@ When a user runs `sudo`, they see a URL and approval code. They open the URL in 
 - **Terminal output sanitization** — Server responses displayed in the terminal are stripped of ANSI escapes, C1 control characters, bidirectional overrides, and zero-width characters
 - **Config file security** — The config file is read with `O_NOFOLLOW` (no symlinks), must be mode 0600, and must be owned by root
 - **Notification users file security** — The per-user notification mapping file (`PAM_POCKETID_NOTIFY_USERS_FILE`) uses the same hardening: `O_NOFOLLOW`, fd-based stat (no TOCTOU gap), mode 0600 enforced, root ownership enforced, and a 1MB size limit. The file is re-read on each notification to support hot-reloading
-- **Grace period is per-username** — Approving sudo on one host grants the grace period on all hosts querying the same server (not scoped per-host)
+- **Grace period is per-host** — Grace periods are scoped to the username@hostname pair, so approving sudo on one host does not grant a grace period on other hosts
 
 ### Disaster recovery
 
-- **Server down** — Break-glass fallback activates automatically on network-level failures if a break-glass hash file exists on the host. Users are prompted for the break-glass password.
+- **Server down** — Break-glass fallback activates automatically on network-level failures (dial errors, DNS failures) and reverse proxy gateway errors (404, 502, 503, 504) if a break-glass hash file exists on the host. Users are prompted for the break-glass password with masked input.
 - **OIDC provider down** — Challenges can be created but not approved (the OIDC flow will fail). If the server itself becomes unreachable as a result, break-glass activates.
 - **Server restart** — In-memory challenges are lost. Any in-flight sudo sessions that were polling will time out and fail. Users simply re-run their sudo command.
 - **Break-glass password lost** — Re-run `pam-pocketid rotate-breakglass --force` on the affected host to generate a new password.
@@ -671,3 +850,6 @@ make docker   # build container image
 |---|---|
 | [`docker-compose.example.yml`](docker-compose.example.yml) | Docker Compose stack |
 | [`pam.d/sudo-pocketid`](pam.d/sudo-pocketid) | Example PAM configuration |
+| [`systemd/`](systemd/) | Systemd service and timer for break-glass rotation |
+| [`install.sh`](install.sh) | Installer script (binary + systemd timer) |
+| [`docs/all-pages.html`](https://rinseaid.github.io/pam-pocketid/all-pages.html) | Visual UI mockups |

@@ -1,13 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 )
 
 func TestChallengeCreate(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, err := store.Create("jordan", "", "")
@@ -35,7 +37,7 @@ func TestChallengeCreate(t *testing.T) {
 }
 
 func TestChallengeGetByID(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("alice", "", "")
@@ -49,7 +51,7 @@ func TestChallengeGetByID(t *testing.T) {
 }
 
 func TestChallengeGetByCode(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("bob", "", "")
@@ -63,7 +65,7 @@ func TestChallengeGetByCode(t *testing.T) {
 }
 
 func TestChallengeApprove(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -84,7 +86,7 @@ func TestChallengeApprove(t *testing.T) {
 }
 
 func TestChallengeDeny(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -102,7 +104,7 @@ func TestChallengeDeny(t *testing.T) {
 }
 
 func TestChallengeExpiry(t *testing.T) {
-	store := NewChallengeStore(1*time.Millisecond, 0)
+	store := NewChallengeStore(1*time.Millisecond, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -115,7 +117,7 @@ func TestChallengeExpiry(t *testing.T) {
 }
 
 func TestChallengeDoubleApprove(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -128,7 +130,7 @@ func TestChallengeDoubleApprove(t *testing.T) {
 }
 
 func TestChallengeApproveExpired(t *testing.T) {
-	store := NewChallengeStore(1*time.Millisecond, 0)
+	store := NewChallengeStore(1*time.Millisecond, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -141,7 +143,7 @@ func TestChallengeApproveExpired(t *testing.T) {
 }
 
 func TestChallengeNotFound(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	_, ok := store.Get("nonexistent")
@@ -185,7 +187,7 @@ func TestUserCodeFormat(t *testing.T) {
 }
 
 func TestUniqueIDs(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 	ids := make(map[string]bool)
 
@@ -202,7 +204,7 @@ func TestUniqueIDs(t *testing.T) {
 }
 
 func TestRateLimitPerUser(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	// Create maxChallengesPerUser challenges for one user
@@ -227,7 +229,7 @@ func TestRateLimitPerUser(t *testing.T) {
 }
 
 func TestSetNonce(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -253,7 +255,7 @@ func TestSetNonce(t *testing.T) {
 }
 
 func TestSetNonceNotFound(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	if err := store.SetNonce("nonexistent", "nonce"); err == nil {
@@ -262,14 +264,14 @@ func TestSetNonceNotFound(t *testing.T) {
 }
 
 func TestStoreStop(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	// Should not panic on double stop
 	store.Stop()
 	store.Stop()
 }
 
 func TestDenyExpiredChallenge(t *testing.T) {
-	store := NewChallengeStore(1*time.Millisecond, 0)
+	store := NewChallengeStore(1*time.Millisecond, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -282,7 +284,7 @@ func TestDenyExpiredChallenge(t *testing.T) {
 }
 
 func TestDenyAfterApprove(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -295,23 +297,23 @@ func TestDenyAfterApprove(t *testing.T) {
 }
 
 func TestGracePeriodDisabledByDefault(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 0)
+	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
 	store.Approve(c.ID, "jordan")
 
-	if store.WithinGracePeriod("jordan") {
+	if store.WithinGracePeriod("jordan", "") {
 		t.Error("grace period should be disabled when set to 0")
 	}
 }
 
 func TestGracePeriodApproval(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 1*time.Hour)
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
 	defer store.Stop()
 
 	// No approval yet
-	if store.WithinGracePeriod("jordan") {
+	if store.WithinGracePeriod("jordan", "") {
 		t.Error("should not be within grace period before any approval")
 	}
 
@@ -320,18 +322,18 @@ func TestGracePeriodApproval(t *testing.T) {
 	store.Approve(c.ID, "jordan")
 
 	// Should be within grace period now
-	if !store.WithinGracePeriod("jordan") {
+	if !store.WithinGracePeriod("jordan", "") {
 		t.Error("should be within grace period after approval")
 	}
 
 	// Different user should not be affected
-	if store.WithinGracePeriod("alice") {
+	if store.WithinGracePeriod("alice", "") {
 		t.Error("grace period should be per-user")
 	}
 }
 
 func TestGracePeriodExpiry(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 1*time.Millisecond)
+	store := NewChallengeStore(60*time.Second, 1*time.Millisecond, "")
 	defer store.Stop()
 
 	c, _ := store.Create("jordan", "", "")
@@ -339,13 +341,13 @@ func TestGracePeriodExpiry(t *testing.T) {
 
 	time.Sleep(5 * time.Millisecond)
 
-	if store.WithinGracePeriod("jordan") {
+	if store.WithinGracePeriod("jordan", "") {
 		t.Error("grace period should have expired")
 	}
 }
 
 func TestAutoApprove(t *testing.T) {
-	store := NewChallengeStore(60*time.Second, 1*time.Hour)
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
 	defer store.Stop()
 
 	// First challenge approved normally
@@ -353,7 +355,7 @@ func TestAutoApprove(t *testing.T) {
 	store.Approve(c1.ID, "jordan")
 
 	// Second challenge auto-approved
-	c2, _ := store.Create("jordan", "host2", "")
+	c2, _ := store.Create("jordan", "", "")
 	err := store.AutoApprove(c2.ID)
 	if err != nil {
 		t.Fatalf("auto-approve failed: %v", err)
@@ -365,5 +367,248 @@ func TestAutoApprove(t *testing.T) {
 	}
 	if got.Status != StatusApproved {
 		t.Errorf("expected approved, got %s", got.Status)
+	}
+}
+
+func TestGracePeriodPerHost(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
+	defer store.Stop()
+
+	// Approve for host1
+	c1, _ := store.Create("jordan", "host1", "")
+	store.Approve(c1.ID, "jordan")
+
+	// Should be within grace for host1
+	if !store.WithinGracePeriod("jordan", "host1") {
+		t.Error("should be within grace period for host1")
+	}
+
+	// Should NOT be within grace for host2
+	if store.WithinGracePeriod("jordan", "host2") {
+		t.Error("should not be within grace period for host2")
+	}
+}
+
+func TestGraceRemaining(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "myhost", "")
+	store.Approve(c.ID, "jordan")
+
+	rem := store.GraceRemaining("jordan", "myhost")
+	if rem <= 0 || rem > 1*time.Hour {
+		t.Errorf("GraceRemaining = %v, want >0 and <=1h", rem)
+	}
+
+	// Different host should have 0 remaining
+	rem2 := store.GraceRemaining("jordan", "otherhost")
+	if rem2 != 0 {
+		t.Errorf("GraceRemaining for otherhost = %v, want 0", rem2)
+	}
+}
+
+func TestRequestedGrace(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 8*time.Hour, "")
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "host1", "")
+	store.SetRequestedGrace(c.ID, 1*time.Hour)
+	store.Approve(c.ID, "jordan")
+
+	// Grace remaining should be about 1 hour, not 8 hours
+	rem := store.GraceRemaining("jordan", "host1")
+	if rem > 1*time.Hour+time.Second || rem < 59*time.Minute {
+		t.Errorf("GraceRemaining = %v, want ~1h (requested), not ~8h (default)", rem)
+	}
+}
+
+func TestActiveSessions(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
+	defer store.Stop()
+
+	c1, _ := store.Create("jordan", "host1", "")
+	store.Approve(c1.ID, "jordan")
+
+	c2, _ := store.Create("jordan", "host2", "")
+	store.Approve(c2.ID, "jordan")
+
+	sessions := store.ActiveSessions("jordan")
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 active sessions, got %d", len(sessions))
+	}
+
+	// Different user should have no sessions
+	sessions2 := store.ActiveSessions("alice")
+	if len(sessions2) != 0 {
+		t.Errorf("expected 0 sessions for alice, got %d", len(sessions2))
+	}
+}
+
+func TestRevokeSession(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "host1", "")
+	store.Approve(c.ID, "jordan")
+
+	if !store.WithinGracePeriod("jordan", "host1") {
+		t.Fatal("expected grace period to be active before revoke")
+	}
+
+	store.RevokeSession("jordan", "host1")
+
+	if store.WithinGracePeriod("jordan", "host1") {
+		t.Error("grace period should be revoked")
+	}
+
+	// Check revokeTokensBefore was set
+	rt := store.RevokeTokensBefore("jordan")
+	if rt.IsZero() {
+		t.Error("RevokeTokensBefore should be set after revoke")
+	}
+}
+
+func TestRevokeTokensBeforeSnapshot(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
+	defer store.Stop()
+
+	// Revoke, then create a challenge — it should snapshot the revocation time
+	c1, _ := store.Create("jordan", "host1", "")
+	store.Approve(c1.ID, "jordan")
+	store.RevokeSession("jordan", "host1")
+
+	c2, err := store.Create("jordan", "host1", "")
+	if err != nil {
+		t.Fatalf("Create after revoke: %v", err)
+	}
+	if c2.RevokeTokensBefore == "" {
+		t.Error("expected RevokeTokensBefore to be snapshotted on new challenge")
+	}
+}
+
+func TestGraceKey(t *testing.T) {
+	if graceKey("jordan", "host1") != "jordan@host1" {
+		t.Error("expected jordan@host1")
+	}
+	if graceKey("jordan", "") != "jordan" {
+		t.Error("expected jordan (no host)")
+	}
+}
+
+func TestPersistenceRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/sessions.json"
+
+	// Create store with persistence, approve a challenge to create a grace session
+	store1 := NewChallengeStore(60*time.Second, 1*time.Hour, path)
+	c, _ := store1.Create("jordan", "host1", "")
+	store1.Approve(c.ID, "jordan")
+
+	// Verify file was written
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("persist file not created: %v", err)
+	}
+
+	// Stop store1 and create a new store from the same file
+	store1.Stop()
+
+	store2 := NewChallengeStore(60*time.Second, 1*time.Hour, path)
+	defer store2.Stop()
+
+	// Grace session should survive
+	if !store2.WithinGracePeriod("jordan", "host1") {
+		t.Error("grace period should survive persistence round-trip")
+	}
+
+	// Different user/host should not be affected
+	if store2.WithinGracePeriod("alice", "host1") {
+		t.Error("alice should not have grace period")
+	}
+}
+
+func TestPersistenceRevocation(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/sessions.json"
+
+	store1 := NewChallengeStore(60*time.Second, 1*time.Hour, path)
+	c, _ := store1.Create("jordan", "host1", "")
+	store1.Approve(c.ID, "jordan")
+	store1.RevokeSession("jordan", "host1")
+	store1.Stop()
+
+	store2 := NewChallengeStore(60*time.Second, 1*time.Hour, path)
+	defer store2.Stop()
+
+	// Grace session should be gone
+	if store2.WithinGracePeriod("jordan", "host1") {
+		t.Error("revoked session should not survive persistence")
+	}
+
+	// Revocation timestamp should survive
+	rt := store2.RevokeTokensBefore("jordan")
+	if rt.IsZero() {
+		t.Error("RevokeTokensBefore should survive persistence")
+	}
+}
+
+func TestPersistenceMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/nonexistent.json"
+
+	// Should start fresh without error
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, path)
+	defer store.Stop()
+
+	if store.WithinGracePeriod("jordan", "host1") {
+		t.Error("should have no grace period from missing file")
+	}
+}
+
+func TestPersistenceCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/sessions.json"
+
+	// Write garbage
+	os.WriteFile(path, []byte("not json at all {{{"), 0600)
+
+	// Should start fresh without error
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, path)
+	defer store.Stop()
+
+	if store.WithinGracePeriod("jordan", "host1") {
+		t.Error("should have no grace period from corrupt file")
+	}
+}
+
+func TestPersistenceNoPersistPath(t *testing.T) {
+	// Empty persistPath should not write any files
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, "")
+	defer store.Stop()
+
+	c, _ := store.Create("jordan", "host1", "")
+	store.Approve(c.ID, "jordan")
+
+	// SaveState should be a no-op
+	store.SaveState()
+}
+
+func TestPersistenceExpiredSessionsNotLoaded(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/sessions.json"
+
+	// Write a state file with an already-expired session
+	state := persistedState{
+		GraceSessions:      map[string]time.Time{"jordan@host1": time.Now().Add(-1 * time.Hour)},
+		RevokeTokensBefore: map[string]time.Time{},
+	}
+	data, _ := json.Marshal(state)
+	os.WriteFile(path, data, 0600)
+
+	store := NewChallengeStore(60*time.Second, 1*time.Hour, path)
+	defer store.Stop()
+
+	if store.WithinGracePeriod("jordan", "host1") {
+		t.Error("expired session should not be loaded from persistence")
 	}
 }

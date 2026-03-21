@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>pam-pocketid UI Mockups</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --card-bg: #ffffff;
+      --text: #111827;
+      --text-secondary: #6b7280;
+      --border: #e5e7eb;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --primary-text: #ffffff;
+      --success: #059669;
+      --success-bg: #ecfdf5;
+      --success-border: #a7f3d0;
+      --danger: #dc2626;
+      --danger-bg: #fef2f2;
+      --danger-border: #fecaca;
+      --warning: #d97706;
+      --warning-bg: #fffbeb;
+      --warning-border: #fde68a;
+      --info-bg: #eff6ff;
+      --info-border: #bfdbfe;
+      --code-bg: #f9fafb;
+      --code-border: #d1d5db;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 24px rgba(0,0,0,0.05);
+      --focus-ring: 0 0 0 3px rgba(59,130,246,0.4);
+      --tg-bg: #ffffff;
+      --tg-text: #000000;
+      --tg-secondary: #8e8e93;
+      --tg-link: #3390ec;
+      --tg-bubble: #effdde;
+      --tg-bubble-border: #d4f5c4;
+      --ntfy-bg: #ffffff;
+      --ntfy-text: #1a1a1a;
+      --ntfy-secondary: #666;
+      --ntfy-accent: #317f6e;
+      --page-bg: #e5e5e5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --card-bg: #1e293b;
+        --text: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border: #334155;
+        --primary: #60a5fa;
+        --primary-hover: #3b82f6;
+        --primary-text: #0f172a;
+        --success: #34d399;
+        --success-bg: #064e3b;
+        --success-border: #065f46;
+        --danger: #f87171;
+        --danger-bg: #450a0a;
+        --danger-border: #7f1d1d;
+        --warning: #fbbf24;
+        --warning-bg: #451a03;
+        --warning-border: #78350f;
+        --info-bg: #1e3a5f;
+        --info-border: #1e40af;
+        --code-bg: #0f172a;
+        --code-border: #475569;
+        --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 24px rgba(0,0,0,0.2);
+        --tg-bg: #17212b;
+        --tg-text: #f5f5f5;
+        --tg-secondary: #6d7f8f;
+        --tg-link: #6ab2f2;
+        --tg-bubble: #2b5278;
+        --tg-bubble-border: #1e3a52;
+        --ntfy-bg: #1a1a2e;
+        --ntfy-text: #e0e0e0;
+        --ntfy-secondary: #999;
+        --ntfy-accent: #4ecdc4;
+        --page-bg: #1a1a1a;
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+      background: var(--page-bg);
+      color: var(--text);
+      margin: 0;
+      padding: 40px 20px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page-title {
+      text-align: center;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .page-subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.938rem;
+      margin-bottom: 48px;
+    }
+    .section-label {
+      text-align: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-secondary);
+      margin: 48px 0 24px;
+    }
+    .section-label:first-of-type { margin-top: 0; }
+
+    /* Web page mockups */
+    .mockup-frame {
+      max-width: 440px;
+      margin: 0 auto 32px;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 40px 32px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      width: 100%;
+      text-align: center;
+    }
+    .card h2 {
+      font-size: 1.375rem;
+      font-weight: 700;
+      margin: 12px 0 8px;
+      letter-spacing: -0.01em;
+    }
+    .card p { margin: 8px 0; color: var(--text-secondary); font-size: 0.938rem; line-height: 1.6; }
+    .icon {
+      width: 56px; height: 56px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 8px; font-size: 1.5rem;
+    }
+    .card strong { color: var(--text); font-weight: 600; }
+
+    /* Approval page specific */
+    .shield { background: var(--info-bg); border: 2px solid var(--info-border); color: var(--primary); position: relative; }
+    .lock-icon {
+      display: inline-block; width: 18px; height: 14px;
+      border: 3px solid var(--primary); border-radius: 3px;
+      position: relative; top: 3px;
+    }
+    .lock-icon::before {
+      content: ''; display: block; width: 10px; height: 9px;
+      border: 3px solid var(--primary); border-bottom: none;
+      border-radius: 8px 8px 0 0; position: absolute; top: -11px; left: 1px;
+    }
+    .request-info { margin: 20px 0 4px; }
+    .request-info p { color: var(--text); font-size: 0.938rem; }
+    .user { color: var(--primary); font-weight: 700; }
+    .host { color: var(--text); font-weight: 600; }
+    .code-label {
+      font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--text-secondary); margin: 20px 0 8px;
+    }
+    .code {
+      display: inline-block; font-size: clamp(1.125rem, 5vw, 1.75rem); font-weight: 700;
+      letter-spacing: 0.12em; color: var(--text);
+      font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+      background: var(--code-bg); border: 2px solid var(--code-border);
+      border-radius: 12px; padding: 12px 20px; margin: 0 0 4px;
+      max-width: 100%; word-break: break-all;
+    }
+    .code-hint { font-size: 0.813rem; color: var(--text-secondary); margin: 8px 0 20px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      background: var(--primary); color: var(--primary-text);
+      padding: 12px 32px; border-radius: 10px; text-decoration: none;
+      font-size: 0.938rem; font-weight: 600; border: none; cursor: pointer;
+      transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+      width: 100%; max-width: 320px;
+    }
+    .btn:hover { background: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+    .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+    .btn:active { transform: translateY(0); }
+    .warn {
+      color: var(--text-secondary); font-size: 0.813rem; margin-top: 20px;
+      padding-top: 16px; border-top: 1px solid var(--border);
+    }
+
+    /* Status pages */
+    .icon-success { background: var(--success-bg); border: 2px solid var(--success-border); color: var(--success); }
+    .icon-danger { background: var(--danger-bg); border: 2px solid var(--danger-border); color: var(--danger); }
+    .icon-warning { background: var(--warning-bg); border: 2px solid var(--warning-border); color: var(--warning); }
+    .icon-info { background: var(--info-bg); border: 2px solid var(--info-border); color: var(--primary); }
+    .success-heading { color: var(--success); }
+    .danger-heading { color: var(--danger); }
+    .warning-heading { color: var(--warning); }
+
+    .detail {
+      background: var(--danger-bg); border: 1px solid var(--danger-border);
+      border-radius: 10px; padding: 16px 20px; margin: 16px 0;
+      text-align: left; font-size: 0.875rem; color: var(--text); line-height: 1.7;
+    }
+    .detail p { color: var(--text); }
+
+    /* Phone frame */
+    .phone-row {
+      display: flex;
+      gap: 32px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 0 auto;
+      max-width: 800px;
+    }
+    .phone-frame {
+      width: 320px;
+      background: var(--card-bg);
+      border-radius: 28px;
+      border: 3px solid var(--border);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .phone-notch {
+      width: 100px;
+      height: 24px;
+      background: var(--border);
+      border-radius: 0 0 14px 14px;
+      margin: 0 auto;
+    }
+    .phone-content {
+      padding: 16px;
+    }
+    .phone-label {
+      text-align: center;
+      font-size: 0.813rem;
+      color: var(--text-secondary);
+      margin-top: 12px;
+      margin-bottom: 0;
+    }
+
+    /* Telegram mockup */
+    .tg-chat {
+      background: var(--tg-bg);
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 0.875rem;
+    }
+    .tg-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tg-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--primary); color: var(--primary-text);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.875rem;
+    }
+    .tg-name { font-weight: 600; color: var(--tg-text); font-size: 0.938rem; }
+    .tg-badge { font-size: 0.75rem; color: var(--tg-secondary); }
+    .tg-bubble {
+      background: var(--tg-bubble);
+      border: 1px solid var(--tg-bubble-border);
+      border-radius: 4px 16px 16px 16px;
+      padding: 10px 14px;
+      max-width: 260px;
+      line-height: 1.5;
+      color: var(--tg-text);
+    }
+    .tg-title { font-weight: 700; margin-bottom: 6px; }
+    .tg-body { font-size: 0.813rem; color: var(--tg-text); }
+    .tg-body a { color: var(--tg-link); text-decoration: none; word-break: break-all; }
+    .tg-time { font-size: 0.688rem; color: var(--tg-secondary); text-align: right; margin-top: 4px; }
+
+    /* ntfy mockup */
+    .ntfy-notif {
+      background: var(--ntfy-bg);
+      border-radius: 12px;
+      padding: 14px 16px;
+      font-size: 0.875rem;
+      border-left: 4px solid var(--ntfy-accent);
+    }
+    .ntfy-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .ntfy-icon {
+      width: 28px; height: 28px; border-radius: 6px;
+      background: var(--ntfy-accent); color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700;
+    }
+    .ntfy-app { font-size: 0.75rem; color: var(--ntfy-secondary); }
+    .ntfy-title { font-weight: 700; color: var(--ntfy-text); margin-bottom: 4px; }
+    .ntfy-body { font-size: 0.813rem; color: var(--ntfy-secondary); line-height: 1.5; }
+    .ntfy-tap { font-size: 0.688rem; color: var(--ntfy-accent); margin-top: 8px; font-weight: 600; }
+
+    /* Terminal mockup */
+    .terminal {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      border-radius: 12px;
+      overflow: hidden;
+      font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.813rem;
+      line-height: 1.7;
+      max-width: 600px;
+      margin: 0 auto 32px;
+      box-shadow: var(--shadow);
+    }
+    .terminal-bar {
+      background: #313244;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .terminal-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+    }
+    .terminal-dot.r { background: #f38ba8; }
+    .terminal-dot.y { background: #f9e2af; }
+    .terminal-dot.g { background: #a6e3a1; }
+    .terminal-title {
+      color: #a6adc8;
+      font-size: 0.75rem;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .terminal-body {
+      padding: 16px 20px;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .t-prompt { color: #a6e3a1; }
+    .t-cmd { color: #cdd6f4; }
+    .t-info { color: #89b4fa; }
+    .t-url { color: #f5c2e7; }
+    .t-code { color: #f9e2af; font-weight: 700; }
+    .t-ok { color: #a6e3a1; font-weight: 700; }
+    .t-dim { color: #6c7086; }
+    .t-err { color: #f38ba8; }
+    .t-warn { color: #fab387; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<div class="page-title">pam-pocketid UI Mockups</div>
+<p class="page-subtitle">Toggle your system dark/light mode to see both themes</p>
+
+<!-- ==================== TERMINAL ==================== -->
+<div class="section-label">Terminal — Normal Approval (with push notification)</div>
+<div class="terminal">
+  <div class="terminal-bar">
+    <div class="terminal-dot r"></div>
+    <div class="terminal-dot y"></div>
+    <div class="terminal-dot g"></div>
+    <div class="terminal-title">hazely@web-prod-1 ~ </div>
+  </div>
+  <div class="terminal-body"><span class="t-prompt">hazely@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">$ sudo apt update</span>
+  <span class="t-info">Sudo requires Pocket ID approval.</span>
+  Approve at: <span class="t-url">https://sudo.example.com/approve/ABCDEF-123456</span>
+  Code: <span class="t-code">ABCDEF-123456</span> <span class="t-dim">(notification sent)</span>
+
+  <span class="t-ok">Approved!</span>
+
+<span class="t-prompt">hazely@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">$</span></div>
+</div>
+
+<div class="section-label">Terminal — Grace Period Auto-Approval</div>
+<div class="terminal">
+  <div class="terminal-bar">
+    <div class="terminal-dot r"></div>
+    <div class="terminal-dot y"></div>
+    <div class="terminal-dot g"></div>
+    <div class="terminal-title">hazely@web-prod-1 ~ </div>
+  </div>
+  <div class="terminal-body"><span class="t-prompt">hazely@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">$ sudo systemctl restart nginx</span>
+  <span class="t-ok">Sudo approved</span> <span class="t-dim">(next auth in 47m)</span>
+
+<span class="t-prompt">hazely@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">$</span></div>
+</div>
+
+<div class="section-label">Terminal — Cached Session (token cache hit)</div>
+<div class="terminal">
+  <div class="terminal-bar">
+    <div class="terminal-dot r"></div>
+    <div class="terminal-dot y"></div>
+    <div class="terminal-dot g"></div>
+    <div class="terminal-title">hazely@web-prod-1 ~ </div>
+  </div>
+  <div class="terminal-body"><span class="t-prompt">hazely@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">$ sudo -i</span>
+  <span class="t-ok">Sudo approved</span> <span class="t-dim">(session expires in 3h 12m)</span>
+
+<span class="t-prompt">root@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">#</span></div>
+</div>
+
+<div class="section-label">Terminal — Break-Glass Fallback</div>
+<div class="terminal">
+  <div class="terminal-bar">
+    <div class="terminal-dot r"></div>
+    <div class="terminal-dot y"></div>
+    <div class="terminal-dot g"></div>
+    <div class="terminal-title">hazely@web-prod-1 ~ </div>
+  </div>
+  <div class="terminal-body"><span class="t-prompt">hazely@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">$ sudo whoami</span>
+  <span class="t-warn">*** BREAK-GLASS AUTHENTICATION ***</span>
+  <span class="t-err">The Pocket ID server is unreachable.</span>
+  Enter the break-glass password to proceed.
+Break-glass password: <span class="t-dim">********************</span>
+  <span class="t-ok">Break-glass authentication successful.</span>
+root
+<span class="t-prompt">hazely@web-prod-1</span> <span class="t-dim">~</span> <span class="t-cmd">$</span></div>
+</div>
+
+<!-- ==================== WEB PAGES ==================== -->
+<div class="section-label">Web — Sudo Approval Page</div>
+<div class="mockup-frame">
+  <div class="card">
+    <div class="icon shield" aria-hidden="true"><div class="lock-icon"></div></div>
+    <h2>Sudo elevation request</h2>
+    <div class="request-info">
+      <p>User <strong class="user">hazely</strong> on <strong class="host">web-prod-1</strong> is requesting sudo access.</p>
+    </div>
+    <div class="code-label">Verification code</div>
+    <div class="code">ABCDEF-123456</div>
+    <p class="code-hint">Verify this code matches your terminal</p>
+    <a href="#" class="btn" role="button" onclick="return false">Authenticate with Pocket ID</a>
+    <p class="warn">If you did not request this, close this page.</p>
+  </div>
+</div>
+
+<div class="section-label">Web — Sudo approved</div>
+<div class="mockup-frame">
+  <div class="card">
+    <div class="icon icon-success" aria-hidden="true">&#x2713;</div>
+    <h2 class="success-heading">Sudo approved</h2>
+    <p>You're all set. Your terminal session will continue.</p>
+  </div>
+</div>
+
+<div class="section-label">Web — Request denied</div>
+<div class="mockup-frame">
+  <div class="card">
+    <div class="icon icon-danger" aria-hidden="true">&#x2717;</div>
+    <h2 class="danger-heading">Request denied</h2>
+    <p>The authentication was not completed. You may need to run your sudo command again.</p>
+  </div>
+</div>
+
+<div class="section-label">Web — Identity mismatch</div>
+<div class="mockup-frame">
+  <div class="card">
+    <div class="icon icon-danger" aria-hidden="true">&#x2717;</div>
+    <h2 class="danger-heading">Identity mismatch</h2>
+    <div class="detail">
+      <p>You authenticated as <strong>sunny</strong>, but the sudo request is for <strong>hazely</strong>.</p>
+    </div>
+    <p>Sign out of Pocket ID and authenticate as the correct user, then run your sudo command again.</p>
+  </div>
+</div>
+
+<div class="section-label">Web — Request expired</div>
+<div class="mockup-frame">
+  <div class="card">
+    <div class="icon icon-warning" aria-hidden="true">&#x23f0;</div>
+    <h2 class="warning-heading">Request expired</h2>
+    <p>This approval request has expired or was not found.</p>
+    <p>Run your sudo command again to create a new request.</p>
+  </div>
+</div>
+
+<div class="section-label">Web — Already resolved</div>
+<div class="mockup-frame">
+  <div class="card">
+    <div class="icon icon-info" aria-hidden="true">&#x2139;</div>
+    <h2>Already resolved</h2>
+    <p>This sudo request has already been <strong>Approved</strong>.</p>
+  </div>
+</div>
+
+<!-- ==================== MOBILE NOTIFICATIONS ==================== -->
+<div class="section-label">Mobile Notifications</div>
+<div class="phone-row">
+
+  <!-- Telegram -->
+  <div>
+    <div class="phone-frame">
+      <div class="phone-notch"></div>
+      <div class="phone-content">
+        <div class="tg-chat">
+          <div class="tg-header">
+            <div class="tg-avatar">S</div>
+            <div>
+              <div class="tg-name">Sudo Alerts</div>
+              <div class="tg-badge">bot</div>
+            </div>
+          </div>
+          <div class="tg-bubble">
+            <div class="tg-title">Sudo approval needed</div>
+            <div class="tg-body">
+              <strong>User:</strong> hazely<br>
+              <strong>Host:</strong> web-prod-1<br>
+              <strong>Code:</strong> <code style="background:rgba(0,0,0,0.08);padding:1px 4px;border-radius:3px;font-size:0.8rem;">ABCDEF-123456</code><br>
+              <strong>Expires:</strong> 120s<br><br>
+              <a href="#">Approve</a>
+            </div>
+            <div class="tg-time">2:34 PM</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="phone-label">Telegram</p>
+  </div>
+
+  <!-- ntfy -->
+  <div>
+    <div class="phone-frame">
+      <div class="phone-notch"></div>
+      <div class="phone-content">
+        <div class="ntfy-notif">
+          <div class="ntfy-header">
+            <div class="ntfy-icon">n</div>
+            <div>
+              <div class="ntfy-app">ntfy &middot; my-sudo-alerts &middot; now</div>
+            </div>
+          </div>
+          <div class="ntfy-title">Sudo approval needed</div>
+          <div class="ntfy-body">
+            hazely@web-prod-1<br>
+            Code: ABCDEF-123456
+          </div>
+          <div class="ntfy-tap">Tap to open approval page &rarr;</div>
+        </div>
+      </div>
+    </div>
+    <p class="phone-label">ntfy</p>
+  </div>
+
+</div>
+
+</body>
+</html>
