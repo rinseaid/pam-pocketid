@@ -27,7 +27,7 @@ func TestHostRegistryBasic(t *testing.T) {
 	}
 
 	// Add a host
-	secret, err := r.AddHost("host1.example.com", []string{"alice", "bob"})
+	secret, err := r.AddHost("host1.example.com", []string{"alice", "bob"}, "")
 	if err != nil {
 		t.Fatalf("AddHost: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestHostRegistryBasic(t *testing.T) {
 	}
 
 	// Duplicate add should fail
-	_, err = r.AddHost("host1.example.com", []string{"*"})
+	_, err = r.AddHost("host1.example.com", []string{"*"}, "")
 	if err == nil {
 		t.Error("duplicate AddHost should fail")
 	}
@@ -85,7 +85,7 @@ func TestHostRegistryBasic(t *testing.T) {
 	}
 
 	// GetHost
-	users, _, ok := r.GetHost("host1.example.com")
+	users, _, _, ok := r.GetHost("host1.example.com")
 	if !ok {
 		t.Error("GetHost should return true for registered host")
 	}
@@ -130,7 +130,7 @@ func TestHostRegistryRotateSecret(t *testing.T) {
 	path := filepath.Join(dir, "hosts.json")
 
 	r := NewHostRegistry(path)
-	oldSecret, _ := r.AddHost("host1.example.com", []string{"*"})
+	oldSecret, _ := r.AddHost("host1.example.com", []string{"*"}, "")
 
 	newSecret, err := r.RotateSecret("host1.example.com")
 	if err != nil {
@@ -160,7 +160,7 @@ func TestHostRegistryRemoveHost(t *testing.T) {
 	path := filepath.Join(dir, "hosts.json")
 
 	r := NewHostRegistry(path)
-	r.AddHost("host1.example.com", []string{"*"})
+	r.AddHost("host1.example.com", []string{"*"}, "")
 
 	err := r.RemoveHost("host1.example.com")
 	if err != nil {
@@ -199,8 +199,8 @@ func TestHostRegistryPersistenceReload(t *testing.T) {
 
 	// Create and populate
 	r1 := NewHostRegistry(path)
-	secret1, _ := r1.AddHost("host1.example.com", []string{"alice", "bob"})
-	secret2, _ := r1.AddHost("host2.example.com", []string{"*"})
+	secret1, _ := r1.AddHost("host1.example.com", []string{"alice", "bob"}, "")
+	secret2, _ := r1.AddHost("host2.example.com", []string{"*"}, "")
 
 	// Reload from disk
 	r2 := NewHostRegistry(path)
@@ -261,7 +261,7 @@ func TestHostRegistryAuthenticateChallenge(t *testing.T) {
 	path := filepath.Join(dir, "hosts.json")
 
 	registry := NewHostRegistry(path)
-	hostSecret, _ := registry.AddHost("myhost", []string{"alice"})
+	hostSecret, _ := registry.AddHost("myhost", []string{"alice"}, "")
 
 	s := &Server{
 		cfg: &Config{

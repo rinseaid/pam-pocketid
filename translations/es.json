@@ -166,5 +166,7 @@
   "export_json": "JSON",
   "admin": "Admin",
   "onetap_max_age": "Antigüedad máx. un toque",
-  "admin_groups": "Grupos admin"
+  "admin_groups": "Grupos admin",
+  "admin_approval_required": "Este host requiere aprobación de administrador.",
+  "admin_approval_hosts": "Hosts con aprobación de administrador"
 }

@@ -69,7 +69,8 @@ type Config struct {
 	HostRegistryFile string // Path to JSON file for registered hosts with per-host secrets
 
 	// Admin access (server mode)
-	AdminGroups []string // OIDC groups that grant admin access to the dashboard
+	AdminGroups        []string // OIDC groups that grant admin access to the dashboard
+	AdminApprovalHosts []string // Hostnames requiring admin approval (glob patterns supported)
 
 	// API access (server mode)
 	APIKeys []string // Bearer tokens for programmatic API access
@@ -244,6 +245,15 @@ func LoadServerConfig() (*Config, error) {
 			g = strings.TrimSpace(g)
 			if g != "" {
 				cfg.AdminGroups = append(cfg.AdminGroups, g)
+			}
+		}
+	}
+
+	if v := os.Getenv("PAM_POCKETID_ADMIN_APPROVAL_HOSTS"); v != "" {
+		for _, h := range strings.Split(v, ",") {
+			h = strings.TrimSpace(h)
+			if h != "" {
+				cfg.AdminApprovalHosts = append(cfg.AdminApprovalHosts, h)
 			}
 		}
 	}

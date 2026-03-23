@@ -41,7 +41,7 @@ Usage:
   pam-pocketid serve                  Run the authentication server
   pam-pocketid rotate-breakglass      Rotate the break-glass password
   pam-pocketid verify-breakglass      Verify a break-glass password
-  pam-pocketid add-host <hostname>    Register a host (--users user1,user2)
+  pam-pocketid add-host <hostname>    Register a host (--users user1,user2 --group groupname)
   pam-pocketid remove-host <hostname> Unregister a host
   pam-pocketid list-hosts             List registered hosts
   pam-pocketid rotate-host-secret <hostname> Rotate a host's secret
@@ -357,7 +357,7 @@ func runPAMHelper() {
 
 func runAddHost() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: pam-pocketid add-host <hostname> [--users user1,user2]")
+		fmt.Fprintln(os.Stderr, "usage: pam-pocketid add-host <hostname> [--users user1,user2] [--group groupname]")
 		os.Exit(1)
 	}
 	hostname := os.Args[2]
@@ -366,14 +366,18 @@ func runAddHost() {
 		os.Exit(1)
 	}
 
-	// Parse --users flag
+	// Parse --users and --group flags
 	users := []string{"*"} // default: all users
+	group := ""
 	for i := 3; i < len(os.Args); i++ {
 		if os.Args[i] == "--users" && i+1 < len(os.Args) {
 			users = strings.Split(os.Args[i+1], ",")
 			i++ // skip the value
+		} else if os.Args[i] == "--group" && i+1 < len(os.Args) {
+			group = os.Args[i+1]
+			i++ // skip the value
 		} else if strings.HasPrefix(os.Args[i], "-") {
-			fmt.Fprintf(os.Stderr, "unknown flag: %s\nusage: pam-pocketid add-host <hostname> [--users user1,user2]\n", os.Args[i])
+			fmt.Fprintf(os.Stderr, "unknown flag: %s\nusage: pam-pocketid add-host <hostname> [--users user1,user2] [--group groupname]\n", os.Args[i])
 			os.Exit(1)
 		}
 	}
@@ -384,7 +388,7 @@ func runAddHost() {
 	}
 
 	registry := NewHostRegistry(registryPath)
-	secret, err := registry.AddHost(hostname, users)
+	secret, err := registry.AddHost(hostname, users, group)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -392,6 +396,9 @@ func runAddHost() {
 
 	fmt.Fprintf(os.Stderr, "Host %q registered successfully.\n", hostname)
 	fmt.Fprintf(os.Stderr, "Authorized users: %s\n", strings.Join(users, ", "))
+	if group != "" {
+		fmt.Fprintf(os.Stderr, "Group: %s\n", group)
+	}
 	fmt.Fprintf(os.Stderr, "\nAdd this to /etc/pam-pocketid.conf on %s:\n", hostname)
 	fmt.Fprintf(os.Stderr, "  PAM_POCKETID_SHARED_SECRET=%s\n\n", secret)
 	// Also print just the secret to stdout for scripting
@@ -432,7 +439,7 @@ func runListHosts() {
 		return
 	}
 	for _, h := range hosts {
-		users, registeredAt, _ := registry.GetHost(h)
+		users, _, registeredAt, _ := registry.GetHost(h)
 		fmt.Fprintf(os.Stdout, "%s  users=%s  registered=%s\n", h, strings.Join(users, ","), registeredAt.Format("2006-01-02"))
 	}
 }

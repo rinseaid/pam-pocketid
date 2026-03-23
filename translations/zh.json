@@ -166,5 +166,7 @@
   "export_json": "JSON",
   "admin": "管理员",
   "onetap_max_age": "一键最大有效期",
-  "admin_groups": "管理员组"
+  "admin_groups": "管理员组",
+  "admin_approval_required": "此主机需要管理员审批。",
+  "admin_approval_hosts": "需要管理员审批的主机"
 }

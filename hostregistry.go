@@ -18,7 +18,8 @@ import (
 // RegisteredHost represents a host authorized to use pam-pocketid.
 type RegisteredHost struct {
 	Secret       string    `json:"secret"`
-	Users        []string  `json:"users"`        // authorized usernames, "*" = all users
+	Users        []string  `json:"users"`             // authorized usernames, "*" = all users
+	Group        string    `json:"group,omitempty"`   // e.g., "production", "staging", "dev"
 	RegisteredAt time.Time `json:"registered_at"`
 }
 
@@ -115,16 +116,16 @@ func (r *HostRegistry) RegisteredHosts() []string {
 }
 
 // GetHost returns info about a registered host (without exposing the secret).
-func (r *HostRegistry) GetHost(hostname string) (users []string, registeredAt time.Time, ok bool) {
+func (r *HostRegistry) GetHost(hostname string) (users []string, group string, registeredAt time.Time, ok bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	host, exists := r.hosts[hostname]
 	if !exists {
-		return nil, time.Time{}, false
+		return nil, "", time.Time{}, false
 	}
 	usersCopy := make([]string, len(host.Users))
 	copy(usersCopy, host.Users)
-	return usersCopy, host.RegisteredAt, true
+	return usersCopy, host.Group, host.RegisteredAt, true
 }
 
 // HostsForUser returns hostnames the user is authorized for, sorted alphabetically.
@@ -146,7 +147,7 @@ func (r *HostRegistry) HostsForUser(username string) []string {
 
 // AddHost registers a new host with a generated secret.
 // Returns the secret so the admin can configure the host.
-func (r *HostRegistry) AddHost(hostname string, users []string) (string, error) {
+func (r *HostRegistry) AddHost(hostname string, users []string, group string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.hosts[hostname]; exists {
@@ -159,6 +160,7 @@ func (r *HostRegistry) AddHost(hostname string, users []string) (string, error) 
 	r.hosts[hostname] = &RegisteredHost{
 		Secret:       secret,
 		Users:        users,
+		Group:        group,
 		RegisteredAt: time.Now(),
 	}
 	registeredHosts.Set(float64(len(r.hosts)))

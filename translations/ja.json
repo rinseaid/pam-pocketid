@@ -166,5 +166,7 @@
   "export_json": "JSON",
   "admin": "管理者",
   "onetap_max_age": "ワンタップ最大有効期間",
-  "admin_groups": "管理者グループ"
+  "admin_groups": "管理者グループ",
+  "admin_approval_required": "このホストには管理者の承認が必要です。",
+  "admin_approval_hosts": "管理者承認が必要なホスト"
 }

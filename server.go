@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -515,6 +516,17 @@ func (s *Server) getSessionRole(r *http.Request) string {
 	return "user"
 }
 
+// requiresAdminApproval checks if a hostname matches the admin approval policy.
+// Patterns use filepath.Match glob syntax (e.g., "*.prod", "bastion-*").
+func (s *Server) requiresAdminApproval(hostname string) bool {
+	for _, pattern := range s.cfg.AdminApprovalHosts {
+		if matched, _ := filepath.Match(pattern, hostname); matched {
+			return true
+		}
+	}
+	return false
+}
+
 // setFlashCookie sets a short-lived cookie containing a flash message.
 // The cookie is read and cleared on the next page load.
 func setFlashCookie(w http.ResponseWriter, flash string) {
@@ -684,16 +696,62 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		history = history[:5]
 	}
 
+	// Build 24-hour activity timeline
+	type timelineEntry struct {
+		Hour   int
+		Count  int
+		Hosts  []string
+		IsNow  bool
+		Height int // bar height in pixels (2-40)
+	}
+
 	now := time.Now()
+	var timeline []timelineEntry
+	for i := 23; i >= 0; i-- {
+		hour := now.Add(-time.Duration(i) * time.Hour)
+		hourStart := hour.Truncate(time.Hour)
+		hourEnd := hourStart.Add(time.Hour)
+
+		count := 0
+		hostSet := make(map[string]bool)
+		for _, e := range allHistory {
+			if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
+				count++
+				if e.Hostname != "" {
+					hostSet[e.Hostname] = true
+				}
+			}
+		}
+		var hosts []string
+		for h := range hostSet {
+			hosts = append(hosts, h)
+		}
+		height := 2
+		if count > 0 {
+			height = count * 8
+			if height > 40 {
+				height = 40
+			}
+		}
+		timeline = append(timeline, timelineEntry{
+			Hour:   hourStart.Hour(),
+			Count:  count,
+			Hosts:  hosts,
+			IsNow:  i == 0,
+			Height: height,
+		})
+	}
+
 	csrfTs := fmt.Sprintf("%d", now.Unix())
 	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
 
 	type pendingView struct {
-		ID        string
-		Username  string
-		Hostname  string
-		Code      string
-		ExpiresIn string
+		ID            string
+		Username      string
+		Hostname      string
+		Code          string
+		ExpiresIn     string
+		AdminRequired bool
 	}
 	// Sort pending challenges by expiry (most urgent first)
 	sort.Slice(pending, func(i, j int) bool {
@@ -707,11 +765,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			hostname = t("unknown_host")
 		}
 		pendingViews = append(pendingViews, pendingView{
-			ID:        c.ID,
-			Username:  c.Username,
-			Hostname:  hostname,
-			Code:      c.UserCode,
-			ExpiresIn: formatDuration(time.Until(c.ExpiresAt)),
+			ID:            c.ID,
+			Username:      c.Username,
+			Hostname:      hostname,
+			Code:          c.UserCode,
+			ExpiresIn:     formatDuration(time.Until(c.ExpiresAt)),
+			AdminRequired: s.requiresAdminApproval(c.Hostname),
 		})
 	}
 
@@ -758,6 +817,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"Sessions":       sessionViews,
 		"History":        history,
 		"HasMoreHistory": len(allHistory) > 5,
+		"Timeline":       timeline,
 		"CSRFToken":      csrfToken,
 		"CSRFTs":         csrfTs,
 		"ActivePage":     "sessions",
@@ -1265,6 +1325,12 @@ func (s *Server) handleBulkApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce admin-approval policy: only admins may approve policy-protected hosts.
+	if s.requiresAdminApproval(challenge.Hostname) && s.getSessionRole(r) != "admin" {
+		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "admin_approval_required")
+		return
+	}
+
 	// Approve the challenge
 	if err := s.store.Approve(challengeID, username); err != nil {
 		revokeErrorPage(w, r, http.StatusInternalServerError, "approval_failed", "approval_failed_message")
@@ -1339,6 +1405,13 @@ func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 	challenge, ok := s.store.Get(challengeID)
 	if !ok || challenge.Status != StatusPending {
 		revokeErrorPage(w, r, http.StatusNotFound, "challenge_not_found", "challenge_expired_or_resolved")
+		return
+	}
+
+	// Admin-approval-required hosts cannot be approved via one-tap — there is no
+	// session to verify admin role. The user must approve through the dashboard.
+	if s.requiresAdminApproval(challenge.Hostname) {
+		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "admin_approval_required")
 		return
 	}
 
@@ -1566,8 +1639,13 @@ func (s *Server) handleBulkApproveAll(w http.ResponseWriter, r *http.Request) {
 
 	// Approve all pending challenges for this user
 	pending := s.store.PendingChallenges(username)
+	isAdmin := s.getSessionRole(r) == "admin"
 	count := 0
 	for _, c := range pending {
+		// Skip admin-approval-required challenges if the approver is not an admin.
+		if s.requiresAdminApproval(c.Hostname) && !isAdmin {
+			continue
+		}
 		if err := s.store.Approve(c.ID, username); err == nil {
 			challengesApproved.Inc()
 			activeChallenges.Dec()
@@ -2320,7 +2398,13 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 		EscrowLink      string
 		Registered      bool
 		AuthorizedUsers []string
+		Group           string
 	}
+
+	// Collect all group names for the filter dropdown
+	groupFilter := r.URL.Query().Get("group")
+	groupSet := make(map[string]struct{})
+
 	var hostViews []hostView
 	for _, h := range hosts {
 		rem := s.store.GraceRemaining(username, h)
@@ -2341,12 +2425,27 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 				hv.EscrowLink = link
 			}
 		}
-		if users, _, ok := s.hostRegistry.GetHost(h); ok {
+		if users, group, _, ok := s.hostRegistry.GetHost(h); ok {
 			hv.Registered = true
 			hv.AuthorizedUsers = users
+			hv.Group = group
+		}
+		if hv.Group != "" {
+			groupSet[hv.Group] = struct{}{}
+		}
+		// Apply group filter if set
+		if groupFilter != "" && hv.Group != groupFilter {
+			continue
 		}
 		hostViews = append(hostViews, hv)
 	}
+
+	// Build sorted list of all known groups for the filter dropdown
+	var allGroups []string
+	for g := range groupSet {
+		allGroups = append(allGroups, g)
+	}
+	sort.Strings(allGroups)
 
 	now := time.Now()
 	csrfTs := fmt.Sprintf("%d", now.Unix())
@@ -2405,23 +2504,25 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := hostsTmpl.Execute(w, map[string]interface{}{
-		"Username":        username,
-		"Initial":         strings.ToUpper(username[:1]),
-		"Avatar":          getAvatar(r),
-		"Timezone":        hostsTZ,
-		"Flashes":         flashes,
-		"Hosts":           hostViews,
-		"CSRFToken":       csrfToken,
-		"CSRFTs":          csrfTs,
-		"Durations":       durations,
-		"ActivePage":      "hosts",
-		"Theme":           getTheme(r),
-		"CSPNonce":        r.Context().Value("csp-nonce"),
-		"T":               T(lang),
-		"Lang":            lang,
-		"Languages":       supportedLanguages,
-		"EscrowLinkLabel": s.cfg.EscrowLinkLabel,
+		"Username":         username,
+		"Initial":          strings.ToUpper(username[:1]),
+		"Avatar":           getAvatar(r),
+		"Timezone":         hostsTZ,
+		"Flashes":          flashes,
+		"Hosts":            hostViews,
+		"CSRFToken":        csrfToken,
+		"CSRFTs":           csrfTs,
+		"Durations":        durations,
+		"ActivePage":       "hosts",
+		"Theme":            getTheme(r),
+		"CSPNonce":         r.Context().Value("csp-nonce"),
+		"T":                T(lang),
+		"Lang":             lang,
+		"Languages":        supportedLanguages,
+		"EscrowLinkLabel":  s.cfg.EscrowLinkLabel,
 		"HasEscrowedHosts": hasEscrowed,
+		"AllGroups":        allGroups,
+		"GroupFilter":      groupFilter,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
@@ -2750,8 +2851,8 @@ func (s *Server) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 	s.setSessionCookie(w, username, s.getSessionRole(r))
 
 	// Server configuration values
-	gracePeriod := s.cfg.GracePeriod.String()
-	challengeTTL := s.cfg.ChallengeTTL.String()
+	gracePeriod := formatDuration(s.cfg.GracePeriod)
+	challengeTTL := formatDuration(s.cfg.ChallengeTTL)
 
 	breakglassType := s.cfg.ClientBreakglassPasswordType
 	if breakglassType == "" {
@@ -2835,6 +2936,7 @@ func (s *Server) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 		"SessionPersistence":  sessionPersistence,
 		"OneTapMaxAge":        formatDuration(s.cfg.OneTapMaxAge),
 		"AdminGroups":         func() string { if len(s.cfg.AdminGroups) == 0 { return t("not_configured") }; return strings.Join(s.cfg.AdminGroups, ", ") }(),
+		"AdminApprovalHosts":  func() string { if len(s.cfg.AdminApprovalHosts) == 0 { return t("not_configured") }; return strings.Join(s.cfg.AdminApprovalHosts, ", ") }(),
 		"Uptime":              uptimeStr,
 		"GoVersion":           runtime.Version(),
 		"OSArch":              runtime.GOOS + "/" + runtime.GOARCH,
@@ -3289,6 +3391,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .bulk-btn { display: inline-block; background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
     .bulk-btn.success { border-color: var(--success); color: var(--success); }
+    .admin-required { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); white-space: nowrap; }
     .bulk-btn.success:hover { background: var(--success-bg); }
     .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
     .bulk-btn.danger:hover { background: var(--danger-bg); }
@@ -3304,6 +3407,12 @@ const dashboardHTML = `<!DOCTYPE html>
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .view-all { display: block; text-align: left; margin-top: 8px; font-size: 0.813rem; color: var(--primary); text-decoration: none; font-weight: 600; }
     .view-all:hover { text-decoration: underline; }
+    .timeline { margin: 16px 0; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .timeline-bars { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
+    .timeline-bar { flex: 1; background: var(--primary); border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.5; transition: opacity 0.2s; }
+    .timeline-bar:hover { opacity: 1; }
+    .timeline-bar.now { background: var(--success); opacity: 0.8; }
+    .timeline-label { font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px; text-align: right; }
   </style>
   <script nonce="{{.CSPNonce}}">
   if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
@@ -3370,6 +3479,15 @@ const dashboardHTML = `<!DOCTYPE html>
 
     {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
 
+    {{if .Timeline}}
+    <div class="timeline">
+      <div class="timeline-bars">
+        {{range .Timeline}}<div class="timeline-bar{{if .IsNow}} now{{end}}" style="height:{{.Height}}px" title="{{.Hour}}:00 — {{.Count}} events"></div>{{end}}
+      </div>
+      <div class="timeline-label">24h</div>
+    </div>
+    {{end}}
+
     {{if .Pending}}
     <div class="section-label pending">{{call .T "pending_requests"}}</div>
     <div class="list" role="list" aria-label="{{call .T "pending_requests"}}">
@@ -3378,10 +3496,12 @@ const dashboardHTML = `<!DOCTYPE html>
         <div class="row-info">
           <span class="row-host">{{.Hostname}}</span>
           {{if $.IsAdmin}}<span class="row-sub" style="color:var(--primary)">{{.Username}}</span>{{end}}
+          {{if .AdminRequired}}<span class="admin-required">&#x1F512; {{call $.T "admin_approval_required"}}</span>{{end}}
           <span class="row-code">{{.Code}}</span>
           <span class="row-sub">{{call $.T "expires_in"}} {{.ExpiresIn}}</span>
         </div>
         <div style="display: flex; gap: 8px; flex-shrink: 0;">
+          {{if not .AdminRequired}}
           <form method="POST" action="/api/challenges/approve">
             <input type="hidden" name="challenge_id" value="{{.ID}}">
             <input type="hidden" name="username" value="{{$.Username}}">
@@ -3389,6 +3509,15 @@ const dashboardHTML = `<!DOCTYPE html>
             <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
             <button type="submit" class="approve-btn" aria-label="{{call $.T "approve"}} {{.Hostname}}">{{call $.T "approve"}}</button>
           </form>
+          {{else if $.IsAdmin}}
+          <form method="POST" action="/api/challenges/approve">
+            <input type="hidden" name="challenge_id" value="{{.ID}}">
+            <input type="hidden" name="username" value="{{$.Username}}">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+            <button type="submit" class="approve-btn" aria-label="{{call $.T "approve"}} {{.Hostname}}">{{call $.T "approve"}}</button>
+          </form>
+          {{end}}
           <form method="POST" action="/api/challenges/reject">
             <input type="hidden" name="challenge_id" value="{{.ID}}">
             <input type="hidden" name="username" value="{{$.Username}}">
@@ -3774,6 +3903,9 @@ const hostsPageHTML = `<!DOCTYPE html>
     .bulk-actions { margin: 16px 0 8px; text-align: right; }
     .bulk-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
+    .host-group { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--info-bg); color: var(--text-secondary); margin-left: 8px; vertical-align: middle; }
+    .group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.813rem; }
+    .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
   </style>
   <script nonce="{{.CSPNonce}}">
   if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
@@ -3840,12 +3972,24 @@ const hostsPageHTML = `<!DOCTYPE html>
 
     {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
 
+    {{if .AllGroups}}
+    <div class="group-filter">
+      <form method="GET" action="/hosts">
+        <select name="group" class="col-filter-select" aria-label="Filter by group">
+          <option value="">All groups</option>
+          {{range .AllGroups}}<option value="{{.}}" {{if eq . $.GroupFilter}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </form>
+      {{if .GroupFilter}}<a href="/hosts" style="font-size:0.813rem;color:var(--text-secondary)">clear filter</a>{{end}}
+    </div>
+    {{end}}
+
     {{if .Hosts}}
     <div class="list" role="list" aria-label="{{call .T "known_hosts"}}">
       {{range .Hosts}}
       <div class="row" role="listitem">
         <div class="row-info">
-          <span class="row-host">{{.Hostname}}</span>
+          <span class="row-host">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
           {{if .Active}}
             <span class="row-active">{{call $.T "active"}} — {{.Remaining}} {{call $.T "remaining"}}</span>
           {{else}}
@@ -3986,6 +4130,7 @@ const infoPageHTML = `<!DOCTYPE html>
       <table class="info-table">
         <tr><td class="info-label">{{call .T "version"}}</td><td>{{.Version}}</td></tr>
         <tr><td class="info-label">{{call .T "grace_period"}}</td><td>{{.GracePeriod}}</td></tr>
+        <tr><td class="info-label">{{call .T "onetap_max_age"}}</td><td>{{.OneTapMaxAge}}</td></tr>
         <tr><td class="info-label">{{call .T "challenge_ttl"}}</td><td>{{.ChallengeTTL}}</td></tr>
         <tr><td class="info-label">{{call .T "breakglass_type"}}</td><td>{{.BreakglassType}}</td></tr>
         <tr><td class="info-label">{{call .T "breakglass_rotation_days"}}</td><td>{{.BreakglassRotation}}</td></tr>
@@ -3995,8 +4140,8 @@ const infoPageHTML = `<!DOCTYPE html>
         <tr><td class="info-label">{{call .T "notifications_configured"}}</td><td>{{.NotifyConfigured}}</td></tr>
         <tr><td class="info-label">{{call .T "host_registry"}}</td><td>{{.HostRegistry}}</td></tr>
         <tr><td class="info-label">{{call .T "session_persistence"}}</td><td>{{.SessionPersistence}}</td></tr>
-        <tr><td class="info-label">{{call .T "onetap_max_age"}}</td><td>{{.OneTapMaxAge}}</td></tr>
         <tr><td class="info-label">{{call .T "admin_groups"}}</td><td>{{.AdminGroups}}</td></tr>
+        <tr><td class="info-label">{{call .T "admin_approval_hosts"}}</td><td>{{.AdminApprovalHosts}}</td></tr>
       </table>
     </div>
 

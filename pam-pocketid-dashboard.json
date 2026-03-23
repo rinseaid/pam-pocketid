@@ -1,0 +1,1009 @@
+{
+  "uid": "pam-pocketid",
+  "title": "PAM PocketID",
+  "description": "pam-pocketid sudo challenge gateway — challenge lifecycle, approval timing, notifications, security, and system health",
+  "tags": ["pam-pocketid", "sudo", "pam", "pocket-id", "security"],
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "schemaVersion": 40,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "timepicker": {},
+  "templating": { "list": [] },
+  "panels": [
+
+    {
+      "type": "row",
+      "title": "Health Overview",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "collapsed": false,
+      "panels": []
+    },
+
+    {
+      "type": "stat",
+      "title": "Active Challenges Now",
+      "description": "Pending sudo challenges waiting for approval",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 2,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "pam_pocketid_active_challenges",
+          "legendFormat": "Active",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 3, "color": "yellow" },
+              { "value": 10, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Challenges Created (24h)",
+      "description": "Total sudo challenges initiated in the last 24 hours",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 3,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "increase(pam_pocketid_challenges_created_total[24h])",
+          "legendFormat": "Created",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "blue" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Approval Rate (1h)",
+      "description": "Fraction of challenges approved (manual + grace) vs created in the last hour",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 4,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "(rate(pam_pocketid_challenges_approved_total[1h]) + rate(pam_pocketid_challenges_auto_approved_total[1h])) / rate(pam_pocketid_challenges_created_total[1h])",
+          "legendFormat": "Approval Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 0.5, "color": "yellow" },
+              { "value": 0.8, "color": "green" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Auth Failures (1h)",
+      "description": "Requests rejected due to invalid shared secret in the last hour",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 5,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "increase(pam_pocketid_auth_failures_total[1h])",
+          "legendFormat": "Auth Failures",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 1, "color": "yellow" },
+              { "value": 5, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Active Grace Sessions",
+      "description": "Users currently within an active grace period (auto-approval window)",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 6,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "pam_pocketid_grace_sessions_active",
+          "legendFormat": "Grace Sessions",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Registered Hosts",
+      "description": "Hosts registered in the host registry",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 7,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "pam_pocketid_registered_hosts",
+          "legendFormat": "Hosts",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "blue" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "row",
+      "title": "Challenge Lifecycle",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 10,
+      "collapsed": false,
+      "panels": []
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Challenge Flow (rates)",
+      "description": "Per-second rates of challenge state transitions",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 6 },
+      "id": 11,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(pam_pocketid_challenges_created_total[5m])",
+          "legendFormat": "Created",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pam_pocketid_challenges_approved_total[5m])",
+          "legendFormat": "Approved (manual)",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(pam_pocketid_challenges_auto_approved_total[5m])",
+          "legendFormat": "Auto-approved (grace)",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(pam_pocketid_challenges_expired_total[5m])",
+          "legendFormat": "Expired",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rate(pam_pocketid_challenges_denied_total[5m]))",
+          "legendFormat": "Denied",
+          "refId": "E"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 20,
+            "stacking": { "mode": "none", "group": "A" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": null, "color": "green" }]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Created" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Approved (manual)" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Auto-approved (grace)" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "light-green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Expired" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Denied" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Active Challenge Queue",
+      "description": "Number of pending challenges at any given moment",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
+      "id": 12,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "pam_pocketid_active_challenges",
+          "legendFormat": "Active Challenges",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 30
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 3, "color": "yellow" },
+              { "value": 10, "color": "red" }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "row",
+      "title": "Approval Timing",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 20,
+      "collapsed": false,
+      "panels": []
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Challenge Approval Latency",
+      "description": "Time from challenge creation to resolution (approval or denial)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "id": 21,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, rate(pam_pocketid_challenge_duration_seconds_bucket[10m]))",
+          "legendFormat": "p50 (median)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(pam_pocketid_challenge_duration_seconds_bucket[10m]))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(pam_pocketid_challenge_duration_seconds_bucket[10m]))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": null, "color": "green" }]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "p50 (median)" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "p95" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "p99" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "OIDC Exchange Latency",
+      "description": "Time spent on OIDC token exchange with PocketID",
+      "gridPos": { "h": 8, "w": 7, "x": 12, "y": 15 },
+      "id": 22,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, rate(pam_pocketid_oidc_exchange_duration_seconds_bucket[10m]))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(pam_pocketid_oidc_exchange_duration_seconds_bucket[10m]))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 1, "color": "yellow" },
+              { "value": 5, "color": "red" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Grace Hit Ratio (1h)",
+      "description": "Fraction of challenges auto-approved via grace period vs all created",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 15 },
+      "id": 23,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(pam_pocketid_challenges_auto_approved_total[1h]) / rate(pam_pocketid_challenges_created_total[1h])",
+          "legendFormat": "Grace Hit Ratio",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "blue" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Denial Breakdown (24h)",
+      "description": "Challenge denials by reason in the last 24 hours",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 19 },
+      "id": 24,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (reason) (increase(pam_pocketid_challenges_denied_total[24h]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 1, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "row",
+      "title": "Notifications",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "id": 30,
+      "collapsed": false,
+      "panels": []
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Notification Outcomes",
+      "description": "Rate of notification attempts by outcome (sent, failed, skipped)",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 24 },
+      "id": 31,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(pam_pocketid_notifications_total{status=\"sent\"}[5m])",
+          "legendFormat": "Sent",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pam_pocketid_notifications_total{status=\"failed\"}[5m])",
+          "legendFormat": "Failed",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(pam_pocketid_notifications_total{status=\"skipped\"}[5m])",
+          "legendFormat": "Skipped",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 15
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": null, "color": "green" }]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Sent" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Failed" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Skipped" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Notification Success Rate (1h)",
+      "description": "Fraction of notifications successfully sent in the last hour",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 24 },
+      "id": 32,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(pam_pocketid_notifications_total{status=\"sent\"}[1h]) / (rate(pam_pocketid_notifications_total{status=\"sent\"}[1h]) + rate(pam_pocketid_notifications_total{status=\"failed\"}[1h]))",
+          "legendFormat": "Success Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 0.9, "color": "yellow" },
+              { "value": 0.99, "color": "green" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Notifications Failed (24h)",
+      "description": "Total notification failures in the last 24 hours",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 28 },
+      "id": 33,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "increase(pam_pocketid_notifications_total{status=\"failed\"}[24h])",
+          "legendFormat": "Failed",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 1, "color": "yellow" },
+              { "value": 5, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "row",
+      "title": "Security & Break-glass",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 40,
+      "collapsed": false,
+      "panels": []
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Auth Failures Over Time",
+      "description": "Rate of requests rejected due to invalid shared secret",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "id": 41,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(pam_pocketid_auth_failures_total[5m])",
+          "legendFormat": "Auth Failures/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.01, "color": "red" }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Rate Limit Rejections",
+      "description": "Challenge creation requests rejected due to rate limiting",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "id": 42,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(pam_pocketid_rate_limit_rejections_total[5m])",
+          "legendFormat": "Rejections/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.01, "color": "orange" }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Escrow Operations (30d)",
+      "description": "Break-glass password escrow operations in the last 30 days",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 41 },
+      "id": 43,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "increase(pam_pocketid_breakglass_escrow_total{status=\"success\"}[30d])",
+          "legendFormat": "Success",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "stat",
+      "title": "Escrow Failures (30d)",
+      "description": "Break-glass password escrow failures in the last 30 days",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 41 },
+      "id": 44,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "increase(pam_pocketid_breakglass_escrow_total{status=\"failure\"}[30d])",
+          "legendFormat": "Failure",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 1, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Escrow Operations Over Time",
+      "description": "Break-glass password escrow operation rates",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 41 },
+      "id": 45,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(pam_pocketid_breakglass_escrow_total{status=\"success\"}[1d])",
+          "legendFormat": "Success/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pam_pocketid_breakglass_escrow_total{status=\"failure\"}[1d])",
+          "legendFormat": "Failure/s",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": null, "color": "green" }]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Failure/s" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "row",
+      "title": "System",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 45 },
+      "id": 50,
+      "collapsed": false,
+      "panels": []
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Goroutines",
+      "description": "Number of goroutines in the pam-pocketid process",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 46 },
+      "id": 51,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "go_goroutines{job=\"pam-pocketid\"}",
+          "legendFormat": "Goroutines",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 100, "color": "yellow" },
+              { "value": 500, "color": "red" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Process Memory (RSS)",
+      "description": "Resident set size of the pam-pocketid process",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 46 },
+      "id": 52,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"pam-pocketid\"}",
+          "legendFormat": "RSS",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 104857600, "color": "yellow" },
+              { "value": 268435456, "color": "red" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Go GC Duration",
+      "description": "Go garbage collection pause durations",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 46 },
+      "id": 53,
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(go_gc_duration_seconds_sum{job=\"pam-pocketid\"}[5m]) / rate(go_gc_duration_seconds_count{job=\"pam-pocketid\"}[5m])",
+          "legendFormat": "Avg GC pause",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.01, "color": "yellow" },
+              { "value": 0.1, "color": "red" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    }
+
+  ]
+}

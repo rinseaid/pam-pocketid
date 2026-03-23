@@ -166,5 +166,7 @@
   "export_json": "JSON",
   "admin": "관리자",
   "onetap_max_age": "원탭 최대 유효기간",
-  "admin_groups": "관리자 그룹"
+  "admin_groups": "관리자 그룹",
+  "admin_approval_required": "이 호스트는 관리자 승인이 필요합니다.",
+  "admin_approval_hosts": "관리자 승인 필요 호스트"
 }
