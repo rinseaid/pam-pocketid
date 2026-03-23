@@ -4698,6 +4698,7 @@ const historyPageHTML = `<!DOCTYPE html>
       background: var(--card-bg);
       color: var(--text);
       cursor: pointer;
+      max-width: 140px;
       appearance: none;
       -webkit-appearance: none;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5'/%3E%3C/svg%3E");
