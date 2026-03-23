@@ -1306,8 +1306,8 @@ func TestActionLog(t *testing.T) {
 	store := NewChallengeStore(60*time.Second, 0, "")
 	defer store.Stop()
 
-	store.LogAction("jordan", "approved", "docker", "ABCDEF-123456")
-	store.LogAction("jordan", "revoked", "plex", "")
+	store.LogAction("jordan", "approved", "docker", "ABCDEF-123456", "jordan")
+	store.LogAction("jordan", "revoked", "plex", "", "jordan")
 
 	history := store.ActionHistory("jordan")
 	if len(history) != 2 {
@@ -1330,7 +1330,7 @@ func TestActionLogGrowsUnbounded(t *testing.T) {
 	// Without file-size rotation, the log grows unbounded in memory.
 	n := 200
 	for i := 0; i < n; i++ {
-		store.LogAction("jordan", "approved", "host", "CODE")
+		store.LogAction("jordan", "approved", "host", "CODE", "jordan")
 	}
 
 	history := store.ActionHistory("jordan")

@@ -895,7 +895,7 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 			if hostname == "" {
 				hostname = "(unknown)"
 			}
-			s.store.LogAction(req.Username, "auto_approved", hostname, challenge.UserCode)
+			s.store.LogAction(req.Username, "auto_approved", hostname, challenge.UserCode, "")
 
 			w.Header().Set("Content-Type", "application/json")
 			resp := map[string]interface{}{
@@ -1317,7 +1317,7 @@ func (s *Server) handleBulkApprove(w http.ResponseWriter, r *http.Request) {
 	if hostname == "" {
 		hostname = "(unknown)"
 	}
-	s.store.LogAction(challenge.Username, "approved", hostname, challenge.UserCode)
+	s.store.LogAction(challenge.Username, "approved", hostname, challenge.UserCode, username)
 	s.broadcastSSE(challenge.Username, "challenge_resolved")
 
 	// Redirect back to the dashboard with flash cookie
@@ -1423,7 +1423,7 @@ func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 	if hostname == "" {
 		hostname = "(unknown)"
 	}
-	s.store.LogAction(challenge.Username, "approved", hostname, challenge.UserCode)
+	s.store.LogAction(challenge.Username, "approved", hostname, challenge.UserCode, challenge.Username)
 	log.Printf("ONETAP_APPROVED: sudo for user %q on host %q (challenge %s) from %s", challenge.Username, hostname, challengeID[:8], remoteAddr(r))
 
 	// Render a simple success page
@@ -1551,10 +1551,11 @@ func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionOwner := s.verifyFormAuth(w, r)
-	if sessionOwner == "" {
+	actor := s.verifyFormAuth(w, r)
+	if actor == "" {
 		return
 	}
+	sessionOwner := actor
 
 	// Admin may revoke another user's session via a "session_username" form field.
 	targetUsername := r.FormValue("session_username")
@@ -1582,7 +1583,7 @@ func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
 	log.Printf("SESSION_REVOKED: user %q host %q from %s", sessionOwner, hostname, remoteAddr(r))
 
 	// Log the action
-	s.store.LogAction(sessionOwner, "revoked", displayHostname, "")
+	s.store.LogAction(sessionOwner, "revoked", displayHostname, "", actor)
 	s.broadcastSSE(sessionOwner, "session_changed")
 
 	// Redirect back to the referring page with flash cookie
@@ -1624,7 +1625,7 @@ func (s *Server) handleBulkApproveAll(w http.ResponseWriter, r *http.Request) {
 			if hostname == "" {
 				hostname = "(unknown)"
 			}
-			s.store.LogAction(username, "approved", hostname, c.UserCode)
+			s.store.LogAction(username, "approved", hostname, c.UserCode, username)
 			count++
 			log.Printf("BULK_APPROVE_ALL: sudo for user %q on host %q (challenge %s) from %s", c.Username, c.Hostname, c.ID[:8], remoteAddr(r))
 		}
@@ -1657,7 +1658,7 @@ func (s *Server) handleRevokeAll(w http.ResponseWriter, r *http.Request) {
 			hostname = ""
 		}
 		s.store.RevokeSession(username, hostname)
-		s.store.LogAction(username, "revoked", sess.Hostname, "")
+		s.store.LogAction(username, "revoked", sess.Hostname, "", username)
 		count++
 		log.Printf("BULK_REVOKE_ALL: user %q host %q from %s", username, sess.Hostname, remoteAddr(r))
 	}
@@ -1703,7 +1704,7 @@ func (s *Server) handleExtendSession(w http.ResponseWriter, r *http.Request) {
 	if displayHostname == "" {
 		displayHostname = "(unknown)"
 	}
-	s.store.LogAction(username, "extended", displayHostname, "")
+	s.store.LogAction(username, "extended", displayHostname, "", username)
 	log.Printf("EXTENDED: user %q host %q to %s from %s", username, displayHostname, remaining, remoteAddr(r))
 	s.broadcastSSE(username, "session_changed")
 
@@ -1734,7 +1735,7 @@ func (s *Server) handleExtendAll(w http.ResponseWriter, r *http.Request) {
 			hostname = ""
 		}
 		if s.store.ExtendGraceSession(username, hostname) > 0 {
-			s.store.LogAction(username, "extended", sess.Hostname, "")
+			s.store.LogAction(username, "extended", sess.Hostname, "", username)
 			count++
 		}
 	}
@@ -1793,7 +1794,7 @@ func (s *Server) handleRejectChallenge(w http.ResponseWriter, r *http.Request) {
 		hostname = "(unknown)"
 	}
 	log.Printf("REJECTED: sudo for user %q on host %q (challenge %s) from %s", challenge.Username, hostname, challengeID[:8], remoteAddr(r))
-	s.store.LogAction(challenge.Username, "rejected", hostname, challenge.UserCode)
+	s.store.LogAction(challenge.Username, "rejected", hostname, challenge.UserCode, username)
 	s.broadcastSSE(challenge.Username, "challenge_resolved")
 
 	setFlashCookie(w, "rejected:"+hostname)
@@ -1825,7 +1826,7 @@ func (s *Server) handleRejectAll(w http.ResponseWriter, r *http.Request) {
 			if hostname == "" {
 				hostname = "(unknown)"
 			}
-			s.store.LogAction(username, "rejected", hostname, c.UserCode)
+			s.store.LogAction(username, "rejected", hostname, c.UserCode, username)
 			count++
 			log.Printf("BULK_REJECT_ALL: sudo for user %q on host %q (challenge %s) from %s", c.Username, c.Hostname, c.ID[:8], remoteAddr(r))
 		}
@@ -2322,6 +2323,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 			ActionLabel:   t(e.Action),
 			Hostname:      e.Hostname,
 			Code:          e.Code,
+			Actor:         e.Actor,
 			FormattedTime: e.Timestamp.In(tzLoc).Format("2006-01-02 15:04"),
 			TimeAgo:       timeAgoI18n(e.Timestamp, t),
 		})
@@ -2394,14 +2396,15 @@ func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 		case "csv":
 			w.Header().Set("Content-Type", "text/csv")
 			w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.csv")
-			w.Write([]byte("username,timestamp,action,hostname,code\n"))
+			w.Write([]byte("username,timestamp,action,hostname,code,actor\n"))
 			for _, e := range allHistory {
-				fmt.Fprintf(w, "%s,%s,%s,%s,%s\n",
+				fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s\n",
 					e.Username,
 					e.Timestamp.Format(time.RFC3339),
 					e.Action,
 					e.Hostname,
-					e.Code)
+					e.Code,
+					e.Actor)
 			}
 		case "json":
 			w.Header().Set("Content-Type", "application/json")
@@ -2419,13 +2422,14 @@ func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 	case "csv":
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.csv")
-		w.Write([]byte("timestamp,action,hostname,code\n"))
+		w.Write([]byte("timestamp,action,hostname,code,actor\n"))
 		for _, e := range history {
-			fmt.Fprintf(w, "%s,%s,%s,%s\n",
+			fmt.Fprintf(w, "%s,%s,%s,%s,%s\n",
 				e.Timestamp.Format(time.RFC3339),
 				e.Action,
 				e.Hostname,
-				e.Code)
+				e.Code,
+				e.Actor)
 		}
 	case "json":
 		w.Header().Set("Content-Type", "application/json")
@@ -2722,7 +2726,7 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.store.CreateGraceSession(username, hostname, duration)
-	s.store.LogAction(username, "elevated", hostname, "")
+	s.store.LogAction(username, "elevated", hostname, "", username)
 	log.Printf("ELEVATED: user %q host %q duration %s from %s", username, hostname, duration, remoteAddr(r))
 	s.broadcastSSE(username, "session_changed")
 
@@ -2751,7 +2755,7 @@ func (s *Server) handleRotateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.SetHostRotateBefore(hostname)
-	s.store.LogAction(username, "rotation_requested", hostname, "")
+	s.store.LogAction(username, "rotation_requested", hostname, "", username)
 	log.Printf("ROTATE_BREAKGLASS: user %q requested rotation for host %q from %s", username, hostname, remoteAddr(r))
 	s.broadcastSSE(username, "host_changed")
 	setFlashCookie(w, "rotated:"+hostname)
@@ -2787,7 +2791,7 @@ func (s *Server) handleRotateAllHosts(w http.ResponseWriter, r *http.Request) {
 	}
 	s.store.SetAllHostsRotateBefore(hosts)
 	for _, h := range hosts {
-		s.store.LogAction(username, "rotation_requested", h, "")
+		s.store.LogAction(username, "rotation_requested", h, "", username)
 	}
 	log.Printf("ROTATE_ALL_BREAKGLASS: user %q requested rotation for %d hosts from %s", username, len(hosts), remoteAddr(r))
 	s.broadcastSSE(username, "host_changed")
@@ -2963,7 +2967,7 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 	// Since escrow is a machine-level operation (no user session), log it for all
 	// users who have activity on this host so it appears in their history.
 	for _, user := range s.store.UsersWithHostActivity(req.Hostname) {
-		s.store.LogAction(user, "rotated_breakglass", req.Hostname, "")
+		s.store.LogAction(user, "rotated_breakglass", req.Hostname, "", "")
 	}
 	log.Printf("BREAKGLASS: password escrowed for host %q", req.Hostname)
 	w.Header().Set("Content-Type", "application/json")
@@ -3371,6 +3375,7 @@ type historyViewEntry struct {
 	ActionLabel   string
 	Hostname      string
 	Code          string
+	Actor         string
 	FormattedTime string
 	TimeAgo       string
 }
@@ -3567,6 +3572,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .history-action.elevated { color: var(--primary); }
     .history-action.extended { color: var(--primary); }
     .history-action.rotated_breakglass { color: var(--text-secondary); }
+    .history-actor { font-size: 0.7rem; color: var(--text-secondary); font-weight: 400; }
     .history-time { flex-shrink: 0; }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .view-all { display: block; text-align: left; margin-top: 8px; font-size: 0.813rem; color: var(--primary); text-decoration: none; font-weight: 600; }
@@ -3747,7 +3753,7 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="list">
       {{range .History}}
       <div class="history-entry">
-        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>
+        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>{{if .Actor}}<span class="history-actor">by {{.Actor}}</span>{{end}}
         <span>{{.Hostname}}</span>
         {{if .Code}}<span class="row-code">{{.Code}}</span>{{end}}
         <span class="history-time">{{timeAgo .Timestamp}}</span>
@@ -3777,6 +3783,7 @@ const historyPageHTML = `<!DOCTYPE html>
     .history-action.elevated { color: var(--primary); }
     .history-action.extended { color: var(--primary); }
     .history-action.rotated_breakglass { color: var(--text-secondary); }
+    .history-actor { font-size: 0.7rem; color: var(--text-secondary); font-weight: 400; }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .search-bar { margin-bottom: 16px; text-align: left; }
     .search-bar input[type="text"] {
@@ -4015,7 +4022,7 @@ const historyPageHTML = `<!DOCTYPE html>
             <span class="timestamp">{{.FormattedTime}}</span>
             <span class="time-ago">({{.TimeAgo}})</span>
           </td>
-          <td data-label="{{call $.T "action"}}"><span class="history-action {{.Action}}">{{.ActionLabel}}</span></td>
+          <td data-label="{{call $.T "action"}}"><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
           <td data-label="{{call $.T "host"}}" class="col-host">{{.Hostname}}</td>
           <td data-label="{{call $.T "code"}}" class="col-code">{{if .Code}}{{.Code}}{{end}}</td>
         </tr>

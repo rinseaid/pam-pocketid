@@ -95,6 +95,7 @@ type ActionLogEntry struct {
 	Action    string    `json:"action"`         // "approved", "revoked", "auto_approved"
 	Hostname  string    `json:"hostname"`
 	Code      string    `json:"code,omitempty"`
+	Actor     string    `json:"actor,omitempty"` // who performed the action (empty = self)
 }
 
 // maxActionLogPrune is the per-user entry limit applied when the state file
@@ -520,6 +521,7 @@ func (s *ChallengeStore) AllActionHistory() []ActionLogEntry {
 // used for cross-user exports (e.g. API key access).
 type ActionLogEntryWithUser struct {
 	Username  string    `json:"username"`
+	Actor     string    `json:"actor,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	Action    string    `json:"action"`
 	Hostname  string    `json:"hostname"`
@@ -536,6 +538,7 @@ func (s *ChallengeStore) AllActionHistoryWithUsers() []ActionLogEntryWithUser {
 		for _, e := range entries {
 			all = append(all, ActionLogEntryWithUser{
 				Username:  user,
+				Actor:     e.Actor,
 				Timestamp: e.Timestamp,
 				Action:    e.Action,
 				Hostname:  e.Hostname,
@@ -550,7 +553,8 @@ func (s *ChallengeStore) AllActionHistoryWithUsers() []ActionLogEntryWithUser {
 // LogAction records an action in the per-user action log.
 // The log grows unbounded; pruning happens during file rotation in saveStateLocked
 // when the serialized state exceeds 1 MB.
-func (s *ChallengeStore) LogAction(username, action, hostname, code string) {
+// actor is who performed the action; if empty or equal to username (self-action), Actor is not stored.
+func (s *ChallengeStore) LogAction(username, action, hostname, code, actor string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := ActionLogEntry{
@@ -558,6 +562,9 @@ func (s *ChallengeStore) LogAction(username, action, hostname, code string) {
 		Action:    action,
 		Hostname:  hostname,
 		Code:      code,
+	}
+	if actor != "" && actor != username {
+		entry.Actor = actor
 	}
 	s.actionLog[username] = append(s.actionLog[username], entry)
 	s.saveStateLocked()
