@@ -1658,21 +1658,28 @@ func (s *Server) handleRevokeAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Revoke all active sessions for this user
-	sessions := s.store.ActiveSessions(username)
+	targetUser := username
+	if s.getSessionRole(r) == "admin" {
+		if su := r.FormValue("session_username"); su != "" && validUsername.MatchString(su) {
+			targetUser = su
+		}
+	}
+
+	// Revoke all active sessions for the target user
+	sessions := s.store.ActiveSessions(targetUser)
 	count := 0
 	for _, sess := range sessions {
 		hostname := sess.Hostname
 		if hostname == "(unknown)" {
 			hostname = ""
 		}
-		s.store.RevokeSession(username, hostname)
-		s.store.LogAction(username, "revoked", sess.Hostname, "", username)
+		s.store.RevokeSession(targetUser, hostname)
+		s.store.LogAction(targetUser, "revoked", sess.Hostname, "", username)
 		count++
-		log.Printf("BULK_REVOKE_ALL: user %q host %q from %s", username, sess.Hostname, remoteAddr(r))
+		log.Printf("BULK_REVOKE_ALL: user %q host %q from %s", targetUser, sess.Hostname, remoteAddr(r))
 	}
 
-	s.broadcastSSE(username, "session_changed")
+	s.broadcastSSE(targetUser, "session_changed")
 	setFlashCookie(w, fmt.Sprintf("revoked_all:%d", count))
 	dest := r.FormValue("from")
 	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
@@ -4332,6 +4339,7 @@ const navCSS = `
     }
     .profile-dropdown-item:hover { background: var(--info-bg); }
     .profile-dropdown-divider { border-top: 1px solid var(--border); margin: 8px 0; }
+    .admin-pill { display: inline-block; font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; background: var(--primary); color: #fff; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; vertical-align: middle; margin-left: 6px; }
     .profile-dropdown-label {
       padding: 4px 16px; font-size: 0.75rem; color: var(--text-secondary);
       font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
@@ -4468,7 +4476,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div class="profile-menu" tabindex="-1">
         <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
-          <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span style="font-size:0.75em;color:var(--primary);font-weight:700">({{call .T "admin"}})</span>{{end}}</div>
+          <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span class="admin-pill">{{call .T "admin"}}</span>{{end}}</div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
           <form method="GET" action="/">
@@ -4763,7 +4771,7 @@ const historyPageHTML = `<!DOCTYPE html>
       <div class="profile-menu" tabindex="-1">
         <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
-          <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span style="font-size:0.75em;color:var(--primary);font-weight:700">({{call .T "admin"}})</span>{{end}}</div>
+          <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span class="admin-pill">{{call .T "admin"}}</span>{{end}}</div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
           <form method="GET" action="/history">
@@ -4838,7 +4846,6 @@ const historyPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
-          {{if $.IsAdmin}}<th>{{call .T "user"}}</th>{{end}}
           <th>{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
@@ -4851,6 +4858,7 @@ const historyPageHTML = `<!DOCTYPE html>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
 </form><a href="/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}" title="{{call .T "sort_by_action"}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          {{if $.IsAdmin}}<th>{{call .T "user"}}</th>{{end}}
           <th><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
@@ -4868,12 +4876,12 @@ const historyPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .History}}
         <tr>
-          {{if $.IsAdmin}}<td data-label="{{call $.T "user"}}">{{.Username}}</td>{{end}}
           <td data-label="{{call $.T "time"}}" class="col-time">
             <span class="timestamp">{{.FormattedTime}}</span>
             <span class="time-ago">({{.TimeAgo}})</span>
           </td>
           <td data-label="{{call $.T "action"}}"><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
+          {{if $.IsAdmin}}<td data-label="{{call $.T "user"}}">{{.Username}}</td>{{end}}
           <td data-label="{{call $.T "host"}}" class="col-host">{{.Hostname}}</td>
           <td data-label="{{call $.T "code"}}" class="col-code">{{if .Code}}{{.Code}}{{end}}</td>
         </tr>
@@ -5245,7 +5253,7 @@ const adminPageHTML = `<!DOCTYPE html>
   <meta http-equiv="refresh" content="240">
   <style>` + sharedCSS + navCSS + `
     body { align-items: flex-start; padding-top: 32px; }
-    .admin-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .admin-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); justify-content: center; }
     .admin-tabs a { padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; color: var(--text-secondary); text-decoration: none; }
     .admin-tabs a:hover { background: var(--info-bg); color: var(--text); }
     .admin-tabs a.active { background: var(--primary); color: #fff; font-weight: 600; }
@@ -5357,7 +5365,7 @@ const adminPageHTML = `<!DOCTYPE html>
       <div class="profile-menu" tabindex="-1">
         <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
-          <div class="profile-dropdown-label">{{.Username}} <span style="font-size:0.75em;color:var(--primary);font-weight:700">({{call .T "admin"}})</span></div>
+          <div class="profile-dropdown-label">{{.Username}} <span class="admin-pill">{{call .T "admin"}}</span></div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
           <form method="GET" action="/admin">
@@ -5444,12 +5452,20 @@ const adminPageHTML = `<!DOCTYPE html>
           <td>{{if .LastActive}}{{.LastActive}} <span style="color:var(--text-secondary);font-size:0.75rem">({{.LastActiveAgo}})</span>{{else}}—{{end}}</td>
           <td style="text-align:right">
             <a href="/admin/history?user={{.Username}}" class="host-btn" style="margin-right:4px">{{call $.T "history"}}</a>
-            <form method="POST" action="/api/users/remove" style="display:inline" onsubmit="return confirm('{{call $.T "confirm_remove_user"}}')">
+            <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
+              <input type="hidden" name="username" value="{{$.Username}}">
+              <input type="hidden" name="session_username" value="{{.Username}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+              <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+              <input type="hidden" name="from" value="/admin/users">
+              <button type="submit" class="host-btn danger" onclick="return confirm('Revoke all sessions for {{.Username}}?')">{{call $.T "revoke_all"}}</button>
+            </form>
+            <form method="POST" action="/api/users/remove" style="display:inline">
               <input type="hidden" name="target_user" value="{{.Username}}">
               <input type="hidden" name="username" value="{{$.Username}}">
               <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
               <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-              <button type="submit" class="host-btn danger">{{call $.T "remove_user"}}</button>
+              <button type="submit" class="host-btn danger" onclick="return confirm('Remove this user from pam-pocketid? This revokes all sessions and blocks future access.')">{{call $.T "remove_user"}}</button>
             </form>
           </td>
         </tr>
@@ -5582,18 +5598,6 @@ const adminPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
-          <th><form method="GET" action="/admin/history" class="col-filter-form">
-  <input type="hidden" name="q" value="{{.Query}}">
-  <input type="hidden" name="action" value="{{.ActionFilter}}">
-  <input type="hidden" name="hostname" value="{{.HostFilter}}">
-  <input type="hidden" name="sort" value="{{.Sort}}">
-  <input type="hidden" name="order" value="{{.Order}}">
-  <input type="hidden" name="per_page" value="{{.PerPage}}">
-  <select name="user" class="col-filter-select" aria-label="Filter by user">
-    <option value="">{{call .T "user"}} (all)</option>
-    {{range .UserOptions}}<option value="{{.}}" {{if eq . $.UserFilter}}selected{{end}}>{{.}}</option>{{end}}
-  </select>
-</form><a href="/admin/history?sort=user&order={{if eq .Sort "user"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "user"}} active{{end}}">{{if and (eq .Sort "user") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th>{{call .T "time"}} <a href="/admin/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th><form method="GET" action="/admin/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
@@ -5607,6 +5611,18 @@ const adminPageHTML = `<!DOCTYPE html>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
 </form><a href="/admin/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th><form method="GET" action="/admin/history" class="col-filter-form">
+  <input type="hidden" name="q" value="{{.Query}}">
+  <input type="hidden" name="action" value="{{.ActionFilter}}">
+  <input type="hidden" name="hostname" value="{{.HostFilter}}">
+  <input type="hidden" name="sort" value="{{.Sort}}">
+  <input type="hidden" name="order" value="{{.Order}}">
+  <input type="hidden" name="per_page" value="{{.PerPage}}">
+  <select name="user" class="col-filter-select" aria-label="Filter by user">
+    <option value="">{{call .T "user"}} (all)</option>
+    {{range .UserOptions}}<option value="{{.}}" {{if eq . $.UserFilter}}selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</form><a href="/admin/history?sort=user&order={{if eq .Sort "user"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "user"}} active{{end}}">{{if and (eq .Sort "user") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th><form method="GET" action="/admin/history" class="col-filter-form">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
@@ -5625,12 +5641,12 @@ const adminPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .History}}
         <tr>
-          <td>{{.Username}}</td>
           <td class="col-time">
             <span class="timestamp">{{.FormattedTime}}</span>
             <span class="time-ago">({{.TimeAgo}})</span>
           </td>
           <td><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
+          <td>{{.Username}}</td>
           <td class="col-host">{{.Hostname}}</td>
           <td class="col-code">{{if .Code}}{{.Code}}{{end}}</td>
         </tr>
