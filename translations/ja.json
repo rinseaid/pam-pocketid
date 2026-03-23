@@ -164,5 +164,7 @@
   "export": "エクスポート",
   "export_csv": "CSV",
   "export_json": "JSON",
-  "admin": "管理者"
+  "admin": "管理者",
+  "onetap_max_age": "ワンタップ最大有効期間",
+  "admin_groups": "管理者グループ"
 }

@@ -164,5 +164,7 @@
   "export": "Exportar",
   "export_csv": "CSV",
   "export_json": "JSON",
-  "admin": "Admin"
+  "admin": "Admin",
+  "onetap_max_age": "Idade máx. um toque",
+  "admin_groups": "Grupos admin"
 }

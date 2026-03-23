@@ -2778,6 +2778,8 @@ func (s *Server) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 		"NotifyConfigured":    notifyConfigured,
 		"HostRegistry":        hostRegistryStatus,
 		"SessionPersistence":  sessionPersistence,
+		"OneTapMaxAge":        formatDuration(s.cfg.OneTapMaxAge),
+		"AdminGroups":         func() string { if len(s.cfg.AdminGroups) == 0 { return t("not_configured") }; return strings.Join(s.cfg.AdminGroups, ", ") }(),
 		"Uptime":              uptimeStr,
 		"GoVersion":           runtime.Version(),
 		"OSArch":              runtime.GOOS + "/" + runtime.GOARCH,
@@ -3918,6 +3920,8 @@ const infoPageHTML = `<!DOCTYPE html>
         <tr><td class="info-label">{{call .T "notifications_configured"}}</td><td>{{.NotifyConfigured}}</td></tr>
         <tr><td class="info-label">{{call .T "host_registry"}}</td><td>{{.HostRegistry}}</td></tr>
         <tr><td class="info-label">{{call .T "session_persistence"}}</td><td>{{.SessionPersistence}}</td></tr>
+        <tr><td class="info-label">{{call .T "onetap_max_age"}}</td><td>{{.OneTapMaxAge}}</td></tr>
+        <tr><td class="info-label">{{call .T "admin_groups"}}</td><td>{{.AdminGroups}}</td></tr>
       </table>
     </div>
 
