@@ -4246,6 +4246,14 @@ const hostsPageHTML = `<!DOCTYPE html>
       {{end}}
     </div>
     <div class="bulk-actions">
+      {{if .HasEscrowedHosts}}
+      <form method="POST" action="/api/hosts/rotate-all" style="display:inline">
+        <input type="hidden" name="username" value="{{.Username}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+        <button type="submit" class="bulk-btn" onclick="return confirm('Request breakglass rotation on all hosts?')">{{call .T "rotate_all"}}</button>
+      </form>
+      {{end}}
       <form method="POST" action="/api/sessions/extend-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -4260,14 +4268,6 @@ const hostsPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="from" value="/hosts">
         <button type="submit" class="bulk-btn danger" onclick="return confirm('Revoke all active sessions?')">{{call .T "revoke_all"}}</button>
       </form>
-      {{if .HasEscrowedHosts}}
-      <form method="POST" action="/api/hosts/rotate-all" style="display:inline">
-        <input type="hidden" name="username" value="{{.Username}}">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn" onclick="return confirm('Request breakglass rotation on all hosts?')">{{call .T "rotate_all"}}</button>
-      </form>
-      {{end}}
     </div>
     {{else}}
     <p class="empty-state">{{call .T "no_known_hosts"}} {{call .T "hosts_appear_after_approve"}}</p>
