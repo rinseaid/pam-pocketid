@@ -3817,7 +3817,7 @@ const historyPageHTML = `<!DOCTYPE html>
     {{if .Timeline}}
     <div class="timeline">
       <div class="timeline-bars">
-        {{range .Timeline}}<a href="/history?hours_ago={{.HoursAgo}}&per_page={{$.PerPage}}" class="timeline-bar{{if .IsNow}} now{{end}}{{if eq .HoursAgo $.ActiveHoursAgo}} timeline-active{{end}}" style="height:{{.Height}}px" title="{{.Details}}"></a>{{end}}
+        {{range .Timeline}}<a href="/history?hours_ago={{.HoursAgo}}&per_page={{$.PerPage}}" class="timeline-bar{{if .IsNow}} now{{end}}{{if eqInt .HoursAgo $.ActiveHoursAgo}} timeline-active{{end}}" style="height:{{.Height}}px" title="{{.Details}}"></a>{{end}}
       </div>
       <div class="timeline-label">24h</div>
     </div>
