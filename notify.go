@@ -126,7 +126,7 @@ func lookupUserURLs(users map[string]string, username string) string {
 // new challenge is created. It is a no-op if no notify command is configured.
 // Runs in a goroutine so it never blocks the challenge API response.
 // The WaitGroup tracks in-flight goroutines for graceful shutdown.
-func (s *Server) sendNotification(challenge *Challenge, approvalURL string) {
+func (s *Server) sendNotification(challenge *Challenge, approvalURL string, oneTapURL string) {
 	if s.cfg.NotifyCommand == "" {
 		return
 	}
@@ -188,6 +188,7 @@ func (s *Server) sendNotification(challenge *Challenge, approvalURL string) {
 			"NOTIFY_APPROVAL_URL=" + approvalURL,
 			"NOTIFY_EXPIRES_IN=" + fmt.Sprintf("%d", expiresIn),
 			"NOTIFY_USER_URLS=" + userURLs,
+			"NOTIFY_ONETAP_URL=" + oneTapURL,
 		}
 
 		// Pass through configured env var prefixes (e.g., APPRISE_,TELEGRAM_).

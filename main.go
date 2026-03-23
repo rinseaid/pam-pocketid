@@ -20,6 +20,9 @@ import (
 // the user's terminal. We default to os.Stdout but allow override for testing.
 var messageWriter io.Writer = os.Stdout
 
+// version is set at build time via -ldflags "-X main.version=v0.6.1".
+var version = "dev"
+
 // safeUsername validates the PAM_USER value to prevent injection attacks.
 // PAM usernames should be short, alphanumeric with limited special chars.
 var safeUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
@@ -27,15 +30,23 @@ var safeUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Println(version)
+			os.Exit(0)
 		case "--help", "-h", "help":
-			fmt.Print(`pam-pocketid — browser-based sudo authentication via Pocket ID
-
+			fmt.Printf("pam-pocketid %s — browser-based sudo authentication via Pocket ID\n", version)
+			fmt.Print(`
 Usage:
-  pam-pocketid                   PAM helper (called by pam_exec)
-  pam-pocketid serve             Run the authentication server
-  pam-pocketid rotate-breakglass Rotate the break-glass password
-  pam-pocketid verify-breakglass Verify a break-glass password
-  pam-pocketid --help            Show this help message
+  pam-pocketid                        PAM helper (called by pam_exec)
+  pam-pocketid serve                  Run the authentication server
+  pam-pocketid rotate-breakglass      Rotate the break-glass password
+  pam-pocketid verify-breakglass      Verify a break-glass password
+  pam-pocketid add-host <hostname>    Register a host (--users user1,user2)
+  pam-pocketid remove-host <hostname> Unregister a host
+  pam-pocketid list-hosts             List registered hosts
+  pam-pocketid rotate-host-secret <hostname> Rotate a host's secret
+  pam-pocketid --version              Show version
+  pam-pocketid --help                 Show this help message
 `)
 			os.Exit(0)
 		case "serve":
@@ -47,6 +58,32 @@ Usage:
 		case "verify-breakglass":
 			runVerifyBreakglass()
 			return
+		case "add-host":
+			runAddHost()
+			return
+		case "remove-host":
+			runRemoveHost()
+			return
+		case "list-hosts":
+			runListHosts()
+			return
+		case "rotate-host-secret":
+			runRotateHostSecret()
+			return
+		}
+	}
+	// If there's an arg that looks like a subcommand but isn't recognized, show an error
+	if len(os.Args) > 1 {
+		knownArgs := map[string]bool{
+			"--version": true, "-v": true, "version": true,
+			"--help": true, "-h": true, "help": true,
+			"serve": true, "rotate-breakglass": true, "verify-breakglass": true,
+			"add-host": true, "remove-host": true, "list-hosts": true,
+			"rotate-host-secret": true,
+		}
+		if !strings.HasPrefix(os.Args[1], "-") && !knownArgs[os.Args[1]] {
+			fmt.Fprintf(os.Stderr, "unknown command: %s\nRun 'pam-pocketid --help' for usage.\n", os.Args[1])
+			os.Exit(1)
 		}
 	}
 	runPAMHelper()
@@ -71,6 +108,16 @@ func runServer() {
 	if cfg.GracePeriod > 0 {
 		log.Printf("Grace period: %s (sudo re-auth skipped within this window)", cfg.GracePeriod)
 	}
+	if cfg.SessionStateFile != "" {
+		log.Printf("Session persistence: %s", cfg.SessionStateFile)
+	}
+	if cfg.HostRegistryFile != "" {
+		if srv.hostRegistry.IsEnabled() {
+			log.Printf("Host registry: %s (%d hosts registered)", cfg.HostRegistryFile, len(srv.hostRegistry.RegisteredHosts()))
+		} else {
+			log.Printf("Host registry: %s (no hosts registered, using global shared secret)", cfg.HostRegistryFile)
+		}
+	}
 	if cfg.NotifyCommand != "" {
 		log.Printf("Notify command configured (push notifications enabled)")
 		if cfg.NotifyUsersFile != "" {
@@ -83,7 +130,7 @@ func runServer() {
 		Handler:           srv,
 		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      0, // disabled for SSE connections; per-handler timeouts used instead
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    8192,
 	}
@@ -113,6 +160,7 @@ func runServer() {
 			log.Printf("shutdown error: %v", err)
 		}
 		srv.WaitForNotifications(5 * time.Second)
+		srv.store.SaveState()
 		srv.Stop()
 	}()
 
@@ -228,6 +276,10 @@ func runVerifyBreakglass() {
 }
 
 func runPAMHelper() {
+	// Request SIGTERM when parent process dies (Linux only). This handles Ctrl+C
+	// during sudo: SIGINT goes to sudo, sudo exits, kernel sends us SIGTERM.
+	requestParentDeathSignal()
+
 	// Security: strip PAM_POCKETID_* env vars that a user might inject.
 	// When running under sudo, the environment is normally sanitized by sudo's
 	// env_reset. However, if env_keep is misconfigured to preserve PAM_POCKETID_*
@@ -289,11 +341,124 @@ func runPAMHelper() {
 		os.Exit(1)
 	}
 
-	client := NewPAMClient(cfg)
+	var cache *TokenCache
+	if cfg.TokenCacheEnabled {
+		cache = NewTokenCache(cfg.TokenCacheDir, cfg.TokenCacheIssuer, cfg.TokenCacheClientID)
+	}
+
+	client := NewPAMClient(cfg, cache)
 	if err := client.Authenticate(username); err != nil {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: %v\n", err)
 		os.Exit(1)
 	}
 
 	os.Exit(0)
+}
+
+func runAddHost() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: pam-pocketid add-host <hostname> [--users user1,user2]")
+		os.Exit(1)
+	}
+	hostname := os.Args[2]
+	if !validHostname.MatchString(hostname) {
+		fmt.Fprintln(os.Stderr, "invalid hostname format")
+		os.Exit(1)
+	}
+
+	// Parse --users flag
+	users := []string{"*"} // default: all users
+	for i := 3; i < len(os.Args); i++ {
+		if os.Args[i] == "--users" && i+1 < len(os.Args) {
+			users = strings.Split(os.Args[i+1], ",")
+			i++ // skip the value
+		} else if strings.HasPrefix(os.Args[i], "-") {
+			fmt.Fprintf(os.Stderr, "unknown flag: %s\nusage: pam-pocketid add-host <hostname> [--users user1,user2]\n", os.Args[i])
+			os.Exit(1)
+		}
+	}
+
+	registryPath := os.Getenv("PAM_POCKETID_HOST_REGISTRY_FILE")
+	if registryPath == "" {
+		registryPath = "/data/hosts.json"
+	}
+
+	registry := NewHostRegistry(registryPath)
+	secret, err := registry.AddHost(hostname, users)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "Host %q registered successfully.\n", hostname)
+	fmt.Fprintf(os.Stderr, "Authorized users: %s\n", strings.Join(users, ", "))
+	fmt.Fprintf(os.Stderr, "\nAdd this to /etc/pam-pocketid.conf on %s:\n", hostname)
+	fmt.Fprintf(os.Stderr, "  PAM_POCKETID_SHARED_SECRET=%s\n\n", secret)
+	// Also print just the secret to stdout for scripting
+	fmt.Fprintln(os.Stdout, secret)
+}
+
+func runRemoveHost() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: pam-pocketid remove-host <hostname>")
+		os.Exit(1)
+	}
+	hostname := os.Args[2]
+	if !validHostname.MatchString(hostname) {
+		fmt.Fprintln(os.Stderr, "invalid hostname format")
+		os.Exit(1)
+	}
+	registryPath := os.Getenv("PAM_POCKETID_HOST_REGISTRY_FILE")
+	if registryPath == "" {
+		registryPath = "/data/hosts.json"
+	}
+	registry := NewHostRegistry(registryPath)
+	if err := registry.RemoveHost(hostname); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "Host %q removed.\n", hostname)
+}
+
+func runListHosts() {
+	registryPath := os.Getenv("PAM_POCKETID_HOST_REGISTRY_FILE")
+	if registryPath == "" {
+		registryPath = "/data/hosts.json"
+	}
+	registry := NewHostRegistry(registryPath)
+	hosts := registry.RegisteredHosts()
+	if len(hosts) == 0 {
+		fmt.Fprintln(os.Stderr, "No hosts registered. All hosts accepted with global shared secret.")
+		return
+	}
+	for _, h := range hosts {
+		users, registeredAt, _ := registry.GetHost(h)
+		fmt.Fprintf(os.Stdout, "%s  users=%s  registered=%s\n", h, strings.Join(users, ","), registeredAt.Format("2006-01-02"))
+	}
+}
+
+func runRotateHostSecret() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: pam-pocketid rotate-host-secret <hostname>")
+		os.Exit(1)
+	}
+	hostname := os.Args[2]
+	if !validHostname.MatchString(hostname) {
+		fmt.Fprintln(os.Stderr, "invalid hostname format")
+		os.Exit(1)
+	}
+	registryPath := os.Getenv("PAM_POCKETID_HOST_REGISTRY_FILE")
+	if registryPath == "" {
+		registryPath = "/data/hosts.json"
+	}
+	registry := NewHostRegistry(registryPath)
+	secret, err := registry.RotateSecret(hostname)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "Secret rotated for %q.\n", hostname)
+	fmt.Fprintf(os.Stderr, "Update /etc/pam-pocketid.conf on %s:\n", hostname)
+	fmt.Fprintf(os.Stderr, "  PAM_POCKETID_SHARED_SECRET=%s\n\n", secret)
+	fmt.Fprintln(os.Stdout, secret)
 }

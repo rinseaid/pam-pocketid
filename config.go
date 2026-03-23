@@ -55,6 +55,33 @@ type Config struct {
 	EscrowCommand          string    // Shell command to escrow break-glass passwords
 	EscrowEnvPassthrough   []string  // Additional env var prefixes to pass to escrow command (e.g., AWS_,VAULT_)
 	BreakglassRotateBefore time.Time // Tell clients to rotate if their hash file is older than this
+
+	// History page settings (server mode)
+	DefaultHistoryPageSize int // Default number of entries per page (default 10)
+
+	// Escrow link settings (server mode)
+	EscrowLinkTemplate string // URL template for viewing escrowed credentials, with {hostname} placeholder
+	EscrowLinkLabel    string // Label for escrow link button (default "View credentials")
+
+	// Host registry (server mode)
+	HostRegistryFile string // Path to JSON file for registered hosts with per-host secrets
+
+	// Admin access (server mode)
+	AdminGroups []string // OIDC groups that grant admin access to the dashboard
+
+	// Session persistence (server mode)
+	SessionStateFile string // Path to JSON file for persisting grace sessions across restarts
+
+	// Server-side client config overrides (server mode)
+	ClientBreakglassPasswordType string // Override client's breakglass password type
+	ClientBreakglassRotationDays int    // Override client's breakglass rotation days
+	ClientTokenCacheEnabled      *bool  // Override client's token cache setting (nil = unset)
+
+	// Token cache settings (client mode)
+	TokenCacheEnabled  bool   // Whether token caching is enabled (default true)
+	TokenCacheDir      string // Directory for cached tokens (default /run/pocketid)
+	TokenCacheIssuer   string // OIDC issuer URL for local JWT validation
+	TokenCacheClientID string // OIDC client ID for aud verification
 }
 
 // LoadServerConfig loads server configuration from environment variables.
@@ -132,7 +159,13 @@ func LoadServerConfig() (*Config, error) {
 
 	// Warn if ExternalURL uses plain HTTP (secrets and auth codes will be in cleartext)
 	if strings.HasPrefix(cfg.ExternalURL, "http://") {
-		log.Printf("WARNING: PAM_POCKETID_EXTERNAL_URL uses http:// — OIDC callbacks and approval URLs are not encrypted")
+		log.Printf("SECURITY WARNING: PAM_POCKETID_EXTERNAL_URL uses HTTP — session cookies will be sent in cleartext. Use HTTPS in production.")
+	}
+
+	cfg.DefaultHistoryPageSize = envOrDefaultInt("PAM_POCKETID_HISTORY_PAGE_SIZE", 5)
+	validPageSizes := map[int]bool{5: true, 10: true, 25: true, 50: true, 100: true, 500: true, 1000: true}
+	if !validPageSizes[cfg.DefaultHistoryPageSize] {
+		cfg.DefaultHistoryPageSize = 5
 	}
 
 	cfg.NotifyCommand = os.Getenv("PAM_POCKETID_NOTIFY_COMMAND")
@@ -164,6 +197,18 @@ func LoadServerConfig() (*Config, error) {
 		}
 	}
 
+	cfg.SessionStateFile = os.Getenv("PAM_POCKETID_SESSION_STATE_FILE")
+
+	// Host registry file: if explicitly set, use it. Otherwise, if SESSION_STATE_FILE
+	// is set, default to the same directory + "hosts.json".
+	cfg.HostRegistryFile = os.Getenv("PAM_POCKETID_HOST_REGISTRY_FILE")
+	if cfg.HostRegistryFile == "" && cfg.SessionStateFile != "" {
+		dir := cfg.SessionStateFile[:strings.LastIndex(cfg.SessionStateFile, "/")+1]
+		if dir != "" {
+			cfg.HostRegistryFile = dir + "hosts.json"
+		}
+	}
+
 	cfg.EscrowCommand = os.Getenv("PAM_POCKETID_ESCROW_COMMAND")
 
 	// Additional env var prefixes to pass through to the escrow command.
@@ -179,12 +224,60 @@ func LoadServerConfig() (*Config, error) {
 		}
 	}
 
+	cfg.EscrowLinkTemplate = os.Getenv("PAM_POCKETID_ESCROW_LINK_TEMPLATE")
+	cfg.EscrowLinkLabel = os.Getenv("PAM_POCKETID_ESCROW_LINK_LABEL")
+	if cfg.EscrowLinkLabel == "" && cfg.EscrowLinkTemplate != "" {
+		cfg.EscrowLinkLabel = "View credentials"
+	}
+
+	if v := os.Getenv("PAM_POCKETID_ADMIN_GROUPS"); v != "" {
+		for _, g := range strings.Split(v, ",") {
+			g = strings.TrimSpace(g)
+			if g != "" {
+				cfg.AdminGroups = append(cfg.AdminGroups, g)
+			}
+		}
+	}
+
 	if v := os.Getenv("PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
 			return nil, fmt.Errorf("PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE must be RFC3339 format (e.g., 2025-01-15T00:00:00Z): %w", err)
 		}
 		cfg.BreakglassRotateBefore = t
+	}
+
+	// Server-side client config overrides
+	cfg.ClientBreakglassPasswordType = os.Getenv("PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE")
+	if cfg.ClientBreakglassPasswordType != "" {
+		switch cfg.ClientBreakglassPasswordType {
+		case "random", "passphrase", "alphanumeric":
+			// valid
+		default:
+			return nil, fmt.Errorf("PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE must be one of: random, passphrase, alphanumeric")
+		}
+	}
+	if v := os.Getenv("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS"); v != "" {
+		days, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS must be an integer: %w", err)
+		}
+		if days < 1 {
+			return nil, fmt.Errorf("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS must be at least 1")
+		}
+		cfg.ClientBreakglassRotationDays = days
+	}
+	if v := os.Getenv("PAM_POCKETID_CLIENT_TOKEN_CACHE"); v != "" {
+		switch v {
+		case "true", "1":
+			b := true
+			cfg.ClientTokenCacheEnabled = &b
+		case "false", "0":
+			b := false
+			cfg.ClientTokenCacheEnabled = &b
+		default:
+			log.Printf("WARNING: PAM_POCKETID_CLIENT_TOKEN_CACHE has unrecognized value %q (expected true/false/1/0) — ignoring", v)
+		}
 	}
 
 	// Best-effort: clear secrets from environment to reduce exposure window.
@@ -234,7 +327,7 @@ func LoadClientConfig() (*Config, error) {
 
 		// Warn if ServerURL uses plain HTTP (shared secret and break-glass passwords will be in cleartext)
 		if strings.HasPrefix(cfg.ServerURL, "http://") {
-			fmt.Fprintf(os.Stderr, "pam-pocketid: WARNING: PAM_POCKETID_SERVER_URL uses http:// — shared secret and break-glass passwords are transmitted in cleartext\n")
+			fmt.Fprintf(os.Stderr, "pam-pocketid: SECURITY WARNING: PAM_POCKETID_SERVER_URL uses HTTP — shared secret transmitted in cleartext\n")
 		}
 	}
 
@@ -292,6 +385,23 @@ func LoadClientConfig() (*Config, error) {
 		// valid
 	default:
 		return nil, fmt.Errorf("PAM_POCKETID_BREAKGLASS_PASSWORD_TYPE must be one of: random, passphrase, alphanumeric")
+	}
+
+	// Token cache settings
+	cfg.TokenCacheEnabled = configValueBool("PAM_POCKETID_TOKEN_CACHE", fileVars, true)
+	cfg.TokenCacheDir = configValue("PAM_POCKETID_TOKEN_CACHE_DIR", fileVars)
+	if cfg.TokenCacheDir == "" {
+		cfg.TokenCacheDir = "/run/pocketid"
+	}
+	if !strings.HasPrefix(cfg.TokenCacheDir, "/") {
+		return nil, fmt.Errorf("PAM_POCKETID_TOKEN_CACHE_DIR must be an absolute path (got %q)", cfg.TokenCacheDir)
+	}
+	cfg.TokenCacheIssuer = configValue("PAM_POCKETID_ISSUER_URL", fileVars)
+	cfg.TokenCacheClientID = configValue("PAM_POCKETID_CLIENT_ID", fileVars)
+
+	// Graceful degradation: disable cache if issuer/clientID are missing
+	if cfg.TokenCacheEnabled && (cfg.TokenCacheIssuer == "" || cfg.TokenCacheClientID == "") {
+		cfg.TokenCacheEnabled = false
 	}
 
 	return cfg, nil

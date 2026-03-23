@@ -72,6 +72,25 @@ var (
 		Name:      "notifications_total",
 		Help:      "Total number of push notification attempts.",
 	}, []string{"status"}) // status: sent, failed, skipped
+
+	graceSessions = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "pam_pocketid",
+		Name:      "grace_sessions_active",
+		Help:      "Current number of active grace period sessions.",
+	})
+
+	oidcExchangeDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "pam_pocketid",
+		Name:      "oidc_exchange_duration_seconds",
+		Help:      "Time spent on OIDC token exchange with the identity provider.",
+		Buckets:   []float64{0.1, 0.25, 0.5, 1, 2, 5, 15},
+	})
+
+	registeredHosts = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "pam_pocketid",
+		Name:      "registered_hosts",
+		Help:      "Number of hosts registered in the host registry.",
+	})
 )
 
 func init() {
@@ -83,4 +102,5 @@ func init() {
 	challengesDenied.WithLabelValues("oidc_error")
 	challengesDenied.WithLabelValues("nonce_mismatch")
 	challengesDenied.WithLabelValues("identity_mismatch")
+	challengesDenied.WithLabelValues("user_rejected")
 }

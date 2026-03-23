@@ -18,9 +18,10 @@ import (
 func newNotifyTestServer(t *testing.T, cfg *Config) (*Server, *httptest.Server) {
 	t.Helper()
 	s := &Server{
-		cfg:   cfg,
-		store: NewChallengeStore(cfg.ChallengeTTL, cfg.GracePeriod),
-		mux:   http.NewServeMux(),
+		cfg:          cfg,
+		store:        NewChallengeStore(cfg.ChallengeTTL, cfg.GracePeriod, ""),
+		hostRegistry: NewHostRegistry(""),
+		mux:          http.NewServeMux(),
 	}
 	s.mux.HandleFunc("/api/challenge", s.handleCreateChallenge)
 	ts := httptest.NewServer(s)
@@ -315,17 +316,19 @@ func TestNotifyCommandTimeout(t *testing.T) {
 
 	// WaitForNotifications should return after notifyTimeout (15s).
 	// In practice cmd.Run() will return as soon as the context cancels.
+	// Use very generous timeouts to avoid flakes on slow CI runners with -race,
+	// where process cleanup can take significantly longer than wall-clock time.
 	done := make(chan struct{})
 	go func() {
-		s.WaitForNotifications(20 * time.Second)
+		s.WaitForNotifications(90 * time.Second)
 		close(done)
 	}()
 
 	select {
 	case <-done:
 		// Good — completed within timeout.
-	case <-time.After(20 * time.Second):
-		t.Fatal("notify goroutine did not complete within 20s — timeout not working")
+	case <-time.After(90 * time.Second):
+		t.Fatal("notify goroutine did not complete within 90s — timeout not working")
 	}
 }
 

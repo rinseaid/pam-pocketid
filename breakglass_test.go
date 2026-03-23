@@ -333,6 +333,31 @@ func TestIsServerUnreachable(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "HTTP 404 Not Found (reverse proxy, no backend route)",
+			err:      &serverHTTPError{StatusCode: 404, Body: "404 page not found"},
+			expected: true,
+		},
+		{
+			name:     "HTTP 502 Bad Gateway (reverse proxy, backend down)",
+			err:      &serverHTTPError{StatusCode: 502, Body: "Bad Gateway"},
+			expected: true,
+		},
+		{
+			name:     "HTTP 503 Service Unavailable (reverse proxy, backend down)",
+			err:      &serverHTTPError{StatusCode: 503, Body: "Service Unavailable"},
+			expected: true,
+		},
+		{
+			name:     "HTTP 504 Gateway Timeout (reverse proxy, backend unresponsive)",
+			err:      &serverHTTPError{StatusCode: 504, Body: "Gateway Timeout"},
+			expected: true,
+		},
+		{
+			name:     "wrapped HTTP 502 error",
+			err:      fmt.Errorf("creating challenge: %w", &serverHTTPError{StatusCode: 502, Body: "Bad Gateway"}),
+			expected: true,
+		},
+		{
 			name:     "generic error",
 			err:      fmt.Errorf("some other error"),
 			expected: false,
@@ -401,7 +426,7 @@ func TestAuthenticateBreakglassFallback(t *testing.T) {
 		BreakglassFile:    hashFile,
 	}
 
-	client := NewPAMClient(cfg)
+	client := NewPAMClient(cfg, nil)
 	err = client.Authenticate("testuser")
 	if err != nil {
 		t.Fatalf("expected break-glass success, got: %v", err)
@@ -438,7 +463,7 @@ func TestBreakglassNotTriggeredOnHTTPError(t *testing.T) {
 		BreakglassFile:    hashFile,
 	}
 
-	client := NewPAMClient(cfg)
+	client := NewPAMClient(cfg, nil)
 	err := client.Authenticate("testuser")
 	if err == nil {
 		t.Fatal("expected error when server returns 500")
@@ -529,8 +554,10 @@ func TestEscrowEndpoint(t *testing.T) {
 
 			// Create a minimal server (without OIDC) just to test the handler
 			s := &Server{
-				cfg: cfg,
-				mux: http.NewServeMux(),
+				cfg:          cfg,
+				store:        NewChallengeStore(120*time.Second, 0, ""),
+				hostRegistry: NewHostRegistry(""),
+				mux:          http.NewServeMux(),
 			}
 			s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 
@@ -569,7 +596,7 @@ func TestEscrowEndpoint_PasswordOnStdin(t *testing.T) {
 		EscrowCommand: fmt.Sprintf("cat > %s", outFile),
 	}
 
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, store: NewChallengeStore(120*time.Second, 0, ""), hostRegistry: NewHostRegistry(""), mux: http.NewServeMux()}
 	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 
 	body := `{"hostname":"testhost","password":"my-secret-password"}`
@@ -604,7 +631,7 @@ func TestEscrowEndpoint_EnvVars(t *testing.T) {
 		EscrowCommand: fmt.Sprintf("env | grep BREAKGLASS > %s", outFile),
 	}
 
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, store: NewChallengeStore(120*time.Second, 0, ""), hostRegistry: NewHostRegistry(""), mux: http.NewServeMux()}
 	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 
 	body := `{"hostname":"myhost.example.com","password":"pw"}`
@@ -631,7 +658,7 @@ func TestEscrowEndpoint_EnvVars(t *testing.T) {
 }
 
 func TestEscrowEndpoint_MethodNotAllowed(t *testing.T) {
-	s := &Server{cfg: &Config{SharedSecret: "test-secret-1234567890"}, mux: http.NewServeMux()}
+	s := &Server{cfg: &Config{SharedSecret: "test-secret-1234567890"}, hostRegistry: NewHostRegistry(""), mux: http.NewServeMux()}
 	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/breakglass/escrow", nil)
@@ -653,10 +680,10 @@ func TestRotateBreakglassBefore(t *testing.T) {
 		BreakglassRotateBefore: rotateBefore,
 	}
 
-	store := NewChallengeStore(cfg.ChallengeTTL, 0)
+	store := NewChallengeStore(cfg.ChallengeTTL, 0, "")
 	defer store.Stop()
 
-	s := &Server{cfg: cfg, store: store, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, store: store, hostRegistry: NewHostRegistry(""), mux: http.NewServeMux()}
 	s.mux.HandleFunc("/api/challenge", s.handleCreateChallenge)
 
 	body := `{"username":"testuser"}`
@@ -972,7 +999,7 @@ func TestBreakglassNotTriggeredWhenDisabled(t *testing.T) {
 		BreakglassFile:    hashFile,
 	}
 
-	client := NewPAMClient(cfg)
+	client := NewPAMClient(cfg, nil)
 	err := client.Authenticate("testuser")
 	if err == nil {
 		t.Fatal("expected error when break-glass is disabled")
@@ -988,7 +1015,7 @@ func TestEscrowEndpoint_EmptyHostnameRejected(t *testing.T) {
 		SharedSecret:  "test-secret-1234567890",
 		EscrowCommand: "cat > /dev/null",
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, store: NewChallengeStore(120*time.Second, 0, ""), hostRegistry: NewHostRegistry(""), mux: http.NewServeMux()}
 	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 
 	body := `{"hostname":"","password":"secret123"}`
@@ -1009,7 +1036,7 @@ func TestEscrowEndpoint_WrongEscrowToken(t *testing.T) {
 		SharedSecret:  "test-secret-1234567890",
 		EscrowCommand: "cat > /dev/null",
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, store: NewChallengeStore(120*time.Second, 0, ""), hostRegistry: NewHostRegistry(""), mux: http.NewServeMux()}
 	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 
 	body := `{"hostname":"host1","password":"secret123"}`
@@ -1057,27 +1084,27 @@ func TestHMACWithRotateBreakglassBefore(t *testing.T) {
 	rotateBefore := "2025-06-01T00:00:00Z"
 
 	srv := &Server{cfg: &Config{SharedSecret: secret}}
-	client := NewPAMClient(&Config{SharedSecret: secret})
+	client := NewPAMClient(&Config{SharedSecret: secret}, nil)
 
 	// HMAC with rotateBefore
-	token := srv.computeStatusHMAC(challengeID, username, "approved", rotateBefore)
-	if !client.verifyStatusToken(challengeID, username, "approved", token, rotateBefore) {
+	token := srv.computeStatusHMAC(challengeID, username, "approved", rotateBefore, "")
+	if !client.verifyStatusToken(challengeID, username, "approved", token, rotateBefore, "") {
 		t.Error("valid token with rotateBefore rejected")
 	}
 
 	// Stripping rotateBefore should fail verification (MITM attack)
-	if client.verifyStatusToken(challengeID, username, "approved", token, "") {
+	if client.verifyStatusToken(challengeID, username, "approved", token, "", "") {
 		t.Error("token computed with rotateBefore should fail when verified without it")
 	}
 
 	// Injecting rotateBefore when not present should also fail
-	tokenNoRotate := srv.computeStatusHMAC(challengeID, username, "approved", "")
-	if client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, rotateBefore) {
+	tokenNoRotate := srv.computeStatusHMAC(challengeID, username, "approved", "", "")
+	if client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, rotateBefore, "") {
 		t.Error("token computed without rotateBefore should fail when verified with it")
 	}
 
 	// Token without rotateBefore should verify without it
-	if !client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, "") {
+	if !client.verifyStatusToken(challengeID, username, "approved", tokenNoRotate, "", "") {
 		t.Error("valid token without rotateBefore rejected")
 	}
 }
@@ -1210,7 +1237,7 @@ func TestEscrowHTTPError_TypedCheck(t *testing.T) {
 }
 
 func TestLastApprovalPruning(t *testing.T) {
-	store := NewChallengeStore(2*time.Second, 5*time.Second)
+	store := NewChallengeStore(2*time.Second, 5*time.Second, "")
 	defer store.Stop()
 
 	// Create and approve a challenge to populate lastApproval
@@ -1218,7 +1245,7 @@ func TestLastApprovalPruning(t *testing.T) {
 	store.Approve(c.ID, "pruneuser")
 
 	// Verify the entry exists
-	if !store.WithinGracePeriod("pruneuser") {
+	if !store.WithinGracePeriod("pruneuser", "") {
 		t.Fatal("expected user to be within grace period")
 	}
 
