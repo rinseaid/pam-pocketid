@@ -669,6 +669,23 @@ func (s *ChallengeStore) SetAllHostsRotateBefore(hostnames []string) {
 	s.saveStateLocked()
 }
 
+// ExtendGraceSession extends a grace session to the maximum allowed duration.
+// Returns the new remaining duration, or 0 if no session exists.
+func (s *ChallengeStore) ExtendGraceSession(username, hostname string) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := graceKey(username, hostname)
+	_, ok := s.lastApproval[key]
+	if !ok {
+		return 0
+	}
+	newExpiry := time.Now().Add(s.gracePeriod)
+	s.lastApproval[key] = newExpiry
+	graceSessions.Set(float64(len(s.lastApproval)))
+	s.saveStateLocked()
+	return s.gracePeriod
+}
+
 // RevokeSession removes a grace session for a user on a specific hostname
 // and sets the revocation timestamp so that token caches are invalidated.
 func (s *ChallengeStore) RevokeSession(username, hostname string) {

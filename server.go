@@ -148,6 +148,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.mux.HandleFunc("/api/breakglass/escrow", s.handleBreakglassEscrow)
 	s.mux.HandleFunc("/api/sessions/revoke", s.handleRevokeSession)
 	s.mux.HandleFunc("/api/sessions/revoke-all", s.handleRevokeAll)
+	s.mux.HandleFunc("/api/sessions/extend", s.handleExtendSession)
 	s.mux.HandleFunc("/api/history/export", s.handleHistoryExport)
 	s.mux.HandleFunc("/api/events", s.handleSSEEvents)
 	s.mux.HandleFunc("/approve/", s.handleApprovalPage)
@@ -653,6 +654,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 					flashes = append(flashes, fmt.Sprintf(t("rejected_n_requests"), atoi(parts[1])))
 				case "elevated":
 					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
+				case "extended":
+					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
 				case "expired":
 					flashes = append(flashes, t("session_expired_sign_in"))
 				}
@@ -1661,6 +1664,50 @@ func (s *Server) handleRevokeAll(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
 }
 
+// handleExtendSession extends an active grace session to the maximum allowed duration.
+// POST /api/sessions/extend
+func (s *Server) handleExtendSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username := s.verifyFormAuth(w, r)
+	if username == "" {
+		return
+	}
+	hostname := r.FormValue("hostname")
+	if hostname == "(unknown)" {
+		hostname = ""
+	} else if hostname == "" {
+		revokeErrorPage(w, r, http.StatusBadRequest, "invalid_request", "missing_fields")
+		return
+	} else if !validHostname.MatchString(hostname) {
+		revokeErrorPage(w, r, http.StatusBadRequest, "invalid_request", "invalid_format")
+		return
+	}
+
+	remaining := s.store.ExtendGraceSession(username, hostname)
+	if remaining == 0 {
+		revokeErrorPage(w, r, http.StatusNotFound, "challenge_not_found", "challenge_expired_or_resolved")
+		return
+	}
+
+	displayHostname := hostname
+	if displayHostname == "" {
+		displayHostname = "(unknown)"
+	}
+	s.store.LogAction(username, "extended", displayHostname, "")
+	log.Printf("EXTENDED: user %q host %q to %s from %s", username, displayHostname, remaining, remoteAddr(r))
+	s.broadcastSSE(username, "session_changed")
+
+	dest := r.FormValue("from")
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+		dest = "/"
+	}
+	setFlashCookie(w, "extended:"+displayHostname)
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+dest, http.StatusSeeOther)
+}
+
 // handleRejectChallenge rejects a pending challenge from the dashboard.
 // POST /api/challenges/reject
 func (s *Server) handleRejectChallenge(w http.ResponseWriter, r *http.Request) {
@@ -2037,7 +2084,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	// Build ActionOptions
 	t := T(lang)
 	var actionOptions []ActionOption
-	actionOrder := []string{"approved", "auto_approved", "rejected", "revoked", "elevated", "rotated_breakglass"}
+	actionOrder := []string{"approved", "auto_approved", "rejected", "revoked", "elevated", "extended", "rotated_breakglass"}
 	for _, a := range actionOrder {
 		if actionSet[a] {
 			actionOptions = append(actionOptions, ActionOption{Value: a, Label: t(a)})
@@ -2379,6 +2426,8 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 				switch parts[0] {
 				case "elevated":
 					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
+				case "extended":
+					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
 				case "revoked":
 					flashes = append(flashes, t("revoked_session_on")+" "+parts[1])
 				case "rotated":
@@ -3198,6 +3247,8 @@ func actionLabel(action string) string {
 		return "Rejected"
 	case "elevated":
 		return "Elevated"
+	case "extended":
+		return "Extended"
 	default:
 		return action
 	}
@@ -3261,6 +3312,8 @@ func actionLabelStr(action string) string {
 		return "Rejected"
 	case "elevated":
 		return "Elevated"
+	case "extended":
+		return "Extended"
 	default:
 		return action
 	}
@@ -3448,6 +3501,8 @@ const dashboardHTML = `<!DOCTYPE html>
     .revoke-btn { background: none; border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 32px; white-space: nowrap; flex-shrink: 0; }
     .revoke-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(220,38,38,0.4); }
     .revoke-btn:hover { background: var(--danger-bg); }
+    .extend-btn { background: none; border: 1px solid var(--primary); color: var(--primary); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
+    .extend-btn:hover { background: var(--info-bg); }
     .bulk-actions { margin-top: 8px; text-align: left; }
     .bulk-btn { display: inline-block; background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
@@ -3463,6 +3518,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .history-action.auto_approved { color: var(--primary); }
     .history-action.rejected { color: var(--danger); }
     .history-action.elevated { color: var(--primary); }
+    .history-action.extended { color: var(--primary); }
     .history-action.rotated_breakglass { color: var(--text-secondary); }
     .history-time { flex-shrink: 0; }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
@@ -3609,6 +3665,13 @@ const dashboardHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <button type="submit" class="revoke-btn" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
         </form>
+        <form method="POST" action="/api/sessions/extend" style="display:inline">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <button type="submit" class="extend-btn" onclick="return confirm('Extend session on {{.Hostname}} to maximum?')">{{call $.T "extend"}}</button>
+        </form>
       </div>
       {{end}}
     </div>
@@ -3631,7 +3694,7 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="list">
       {{range .History}}
       <div class="history-entry">
-        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>
+        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>
         <span>{{.Hostname}}</span>
         {{if .Code}}<span class="row-code">{{.Code}}</span>{{end}}
         <span class="history-time">{{timeAgo .Timestamp}}</span>
@@ -3659,6 +3722,7 @@ const historyPageHTML = `<!DOCTYPE html>
     .history-action.auto_approved { color: var(--primary); }
     .history-action.rejected { color: var(--danger); }
     .history-action.elevated { color: var(--primary); }
+    .history-action.extended { color: var(--primary); }
     .history-action.rotated_breakglass { color: var(--text-secondary); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .search-bar { margin-bottom: 16px; text-align: left; }
@@ -3956,6 +4020,8 @@ const hostsPageHTML = `<!DOCTYPE html>
     .revoke-btn { background: none; border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 32px; white-space: nowrap; flex-shrink: 0; }
     .revoke-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(220,38,38,0.4); }
     .revoke-btn:hover { background: var(--danger-bg); }
+    .extend-btn { background: none; border: 1px solid var(--primary); color: var(--primary); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
+    .extend-btn:hover { background: var(--info-bg); }
     .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
     .elevate-form select {
       padding: 8px 10px;
@@ -4081,6 +4147,14 @@ const hostsPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <input type="hidden" name="from" value="/hosts">
           <button type="submit" class="revoke-btn" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+        </form>
+        <form method="POST" action="/api/sessions/extend" style="display:inline">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <input type="hidden" name="from" value="/hosts">
+          <button type="submit" class="extend-btn">{{call $.T "extend"}}</button>
         </form>
         {{else}}
         <form method="POST" action="/api/hosts/elevate" class="elevate-form">
