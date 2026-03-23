@@ -75,7 +75,7 @@ type Config struct {
 
 	// Escrow link settings (server mode)
 	EscrowLinkTemplate string // URL template for viewing escrowed credentials, with {hostname} placeholder
-	EscrowLinkLabel    string // Label for escrow link button (default "View credentials")
+	EscrowLinkLabel    string // Label for escrow link button (default "View password")
 
 	// Host registry (server mode)
 	HostRegistryFile string // Path to JSON file for registered hosts with per-host secrets
@@ -271,7 +271,7 @@ func LoadServerConfig() (*Config, error) {
 	cfg.EscrowLinkTemplate = os.Getenv("PAM_POCKETID_ESCROW_LINK_TEMPLATE")
 	cfg.EscrowLinkLabel = os.Getenv("PAM_POCKETID_ESCROW_LINK_LABEL")
 	if cfg.EscrowLinkLabel == "" && cfg.EscrowLinkTemplate != "" {
-		cfg.EscrowLinkLabel = "View credentials"
+		cfg.EscrowLinkLabel = "View password"
 	}
 
 	if v := os.Getenv("PAM_POCKETID_ADMIN_GROUPS"); v != "" {

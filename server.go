@@ -2113,11 +2113,12 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 
 	// Build 24-hour activity timeline from the full unfiltered history.
 	// This always shows the complete 24h view so users can see the overall pattern.
-	now := time.Now()
+	nowInTZ := time.Now().In(tzLoc)
 	var timeline []timelineEntry
 	activeHoursAgo := -1 // which bar is currently active (-1 = none)
 	for i := 23; i >= 0; i-- {
-		hourStart := now.Add(-time.Duration(i+1) * time.Hour).Truncate(time.Hour)
+		hourInTZ := nowInTZ.Add(-time.Duration(i+1) * time.Hour)
+		hourStart := hourInTZ.Truncate(time.Hour)
 		hourEnd := hourStart.Add(time.Hour)
 		hoursAgo := i // bar at i=0 is the current (most recent) hour
 
@@ -2182,7 +2183,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	if hoursAgoStr != "" {
 		if h, err := strconv.Atoi(hoursAgoStr); err == nil && h >= 0 && h < 24 {
 			activeHoursAgo = h
-			hourStart := now.Add(-time.Duration(h+1) * time.Hour).Truncate(time.Hour)
+			hourStart := nowInTZ.Add(-time.Duration(h+1) * time.Hour).Truncate(time.Hour)
 			hourEnd := hourStart.Add(time.Hour)
 			var filtered []ActionLogEntry
 			for _, e := range allHistory {
@@ -3498,11 +3499,12 @@ const dashboardHTML = `<!DOCTYPE html>
     .approve-btn { background: var(--success); border: none; color: #fff; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 32px; white-space: nowrap; flex-shrink: 0; }
     .approve-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(5,150,105,0.4); }
     .approve-btn:hover { opacity: 0.9; }
-    .revoke-btn { background: none; border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 32px; white-space: nowrap; flex-shrink: 0; }
-    .revoke-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(220,38,38,0.4); }
-    .revoke-btn:hover { background: var(--danger-bg); }
-    .extend-btn { background: none; border: 1px solid var(--primary); color: var(--primary); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
-    .extend-btn:hover { background: var(--info-bg); }
+    .host-btn { display: inline-block; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; white-space: nowrap; border: 1px solid var(--border); background: none; color: var(--text-secondary); text-decoration: none; text-align: center; line-height: 1.4; }
+    .host-btn:hover { background: var(--info-bg); color: var(--text); }
+    .host-btn.danger { border-color: var(--danger); color: var(--danger); }
+    .host-btn.danger:hover { background: var(--danger-bg); }
+    .host-btn.primary { border-color: var(--primary); color: var(--primary); }
+    .host-btn.primary:hover { background: var(--info-bg); }
     .bulk-actions { margin-top: 8px; text-align: left; }
     .bulk-btn { display: inline-block; background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
@@ -3625,7 +3627,7 @@ const dashboardHTML = `<!DOCTYPE html>
             <input type="hidden" name="username" value="{{$.Username}}">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-            <button type="submit" class="revoke-btn" aria-label="{{call $.T "reject"}} {{.Hostname}}">{{call $.T "reject"}}</button>
+            <button type="submit" class="host-btn danger" aria-label="{{call $.T "reject"}} {{.Hostname}}">{{call $.T "reject"}}</button>
           </form>
         </div>
       </div>
@@ -3663,14 +3665,14 @@ const dashboardHTML = `<!DOCTYPE html>
           {{if $.IsAdmin}}<input type="hidden" name="session_username" value="{{.Username}}">{{end}}
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="revoke-btn" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+          <button type="submit" class="host-btn danger" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
         </form>
         <form method="POST" action="/api/sessions/extend" style="display:inline">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="extend-btn" onclick="return confirm('Extend session on {{.Hostname}} to maximum?')">{{call $.T "extend"}}</button>
+          <button type="submit" class="host-btn primary" onclick="return confirm('Extend session on {{.Hostname}} to maximum?')">{{call $.T "extend"}}</button>
         </form>
       </div>
       {{end}}
@@ -4017,11 +4019,14 @@ const hostsPageHTML = `<!DOCTYPE html>
     .row-active { color: var(--success); font-size: 0.813rem; font-weight: 600; display: block; }
     .banner { padding: 10px 16px; border-radius: 8px; margin-bottom: 12px; font-size: 0.875rem; font-weight: 600; text-align: left; }
     .banner-success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success); }
-    .revoke-btn { background: none; border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 32px; white-space: nowrap; flex-shrink: 0; }
-    .revoke-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(220,38,38,0.4); }
-    .revoke-btn:hover { background: var(--danger-bg); }
-    .extend-btn { background: none; border: 1px solid var(--primary); color: var(--primary); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
-    .extend-btn:hover { background: var(--info-bg); }
+    .host-btn { display: inline-block; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; white-space: nowrap; border: 1px solid var(--border); background: none; color: var(--text-secondary); text-decoration: none; text-align: center; line-height: 1.4; }
+    .host-btn:hover { background: var(--info-bg); color: var(--text); }
+    .host-btn.danger { border-color: var(--danger); color: var(--danger); }
+    .host-btn.danger:hover { background: var(--danger-bg); }
+    .host-btn.primary { border-color: var(--primary); color: var(--primary); }
+    .host-btn.primary:hover { background: var(--info-bg); }
+    .host-btn.filled { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .host-btn.filled:hover { background: var(--primary-hover); }
     .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
     .elevate-form select {
       padding: 8px 10px;
@@ -4032,14 +4037,7 @@ const hostsPageHTML = `<!DOCTYPE html>
       color: var(--text);
       cursor: pointer;
     }
-    .elevate-btn { background: var(--primary); border: none; color: var(--primary-text); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; min-height: 32px; white-space: nowrap; }
-    .elevate-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-    .elevate-btn:hover { background: var(--primary-hover); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
-    .rotate-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
-    .rotate-btn:hover { background: var(--info-bg); color: var(--text); }
-    .escrow-link { font-size: 0.75rem; color: var(--primary); text-decoration: none; margin-right: 8px; }
-    .escrow-link:hover { text-decoration: underline; }
     .bulk-actions { margin: 16px 0 8px; text-align: right; }
     .bulk-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
@@ -4146,7 +4144,7 @@ const hostsPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <input type="hidden" name="from" value="/hosts">
-          <button type="submit" class="revoke-btn" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+          <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
         </form>
         <form method="POST" action="/api/sessions/extend" style="display:inline">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
@@ -4154,7 +4152,7 @@ const hostsPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <input type="hidden" name="from" value="/hosts">
-          <button type="submit" class="extend-btn">{{call $.T "extend"}}</button>
+          <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
         </form>
         {{else}}
         <form method="POST" action="/api/hosts/elevate" class="elevate-form">
@@ -4167,19 +4165,19 @@ const hostsPageHTML = `<!DOCTYPE html>
             {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
           </select>
           {{end}}
-          <button type="submit" class="elevate-btn">{{call $.T "elevate"}}</button>
+          <button type="submit" class="host-btn filled">{{call $.T "elevate"}}</button>
         </form>
         {{end}}
         {{if .Escrowed}}
         {{if .EscrowLink}}
-        <a href="{{.EscrowLink}}" target="_blank" class="escrow-link">{{$.EscrowLinkLabel}}</a>
+        <a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>
         {{end}}
         <form method="POST" action="/api/hosts/rotate" style="display:inline">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="rotate-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
+          <button type="submit" class="host-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
         </form>
         {{end}}
       </div>
