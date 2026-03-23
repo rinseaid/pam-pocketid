@@ -4,6 +4,23 @@ Browser-based sudo elevation via [Pocket ID](https://github.com/pocket-id/pocket
 
 > **Note**: The majority of this project's code was generated using AI-powered coding tools, with human direction, design decisions, and review throughout. All features have been extensively tested by hand against real infrastructure.
 
+## Screenshots
+
+### Sessions
+![Sessions](screenshots/sessions.svg)
+
+### History
+![History](screenshots/history.svg)
+
+### Hosts
+![Hosts](screenshots/hosts.svg)
+
+### Terminal
+![Terminal](screenshots/terminal.svg)
+
+### Notification
+![Notification](screenshots/notification.svg)
+
 ## How it works
 
 ```

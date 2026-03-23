@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="300" viewBox="0 0 800 300">
+  <defs>
+    <style>
+      text { font-family: system-ui, -apple-system, sans-serif; }
+      .mono { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace; }
+    </style>
+  </defs>
+
+  <!-- Outer background -->
+  <rect width="800" height="300" fill="#0f172a" rx="12"/>
+
+  <!-- Terminal window -->
+  <rect x="40" y="32" width="720" height="236" fill="#0d1117" rx="12" stroke="#334155" stroke-width="1"/>
+
+  <!-- Terminal title bar -->
+  <rect x="40" y="32" width="720" height="36" fill="#1e293b" rx="12"/>
+  <rect x="40" y="56" width="720" height="12" fill="#1e293b"/>
+  <!-- Window controls -->
+  <circle cx="68" cy="50" r="6" fill="#f87171"/>
+  <circle cx="88" cy="50" r="6" fill="#fbbf24"/>
+  <circle cx="108" cy="50" r="6" fill="#34d399"/>
+  <!-- Title -->
+  <text x="400" y="54" fill="#94a3b8" font-size="12" text-anchor="middle" class="mono">rinseaid@docker — bash</text>
+
+  <!-- Terminal content -->
+  <!-- Prompt + command -->
+  <text x="64" y="100" fill="#34d399" font-size="14" class="mono">$</text>
+  <text x="80" y="100" fill="#e2e8f0" font-size="14" class="mono">sudo -i</text>
+
+  <!-- PAM output -->
+  <text x="64" y="126" fill="#94a3b8" font-size="14" class="mono">  Sudo requires Pocket ID approval.</text>
+
+  <text x="64" y="152" fill="#94a3b8" font-size="14" class="mono">  Approve at:</text>
+  <text x="168" y="152" fill="#60a5fa" font-size="14" class="mono">https://pam.rinseaid.org/approve/ABCDEF-123456</text>
+
+  <text x="64" y="178" fill="#94a3b8" font-size="14" class="mono">  Code:</text>
+  <text x="126" y="178" fill="#fbbf24" font-size="14" class="mono">ABCDEF-123456</text>
+  <text x="290" y="178" fill="#64748b" font-size="14" class="mono">(notification sent)</text>
+
+  <!-- Waiting indicator (dots) -->
+  <text x="64" y="204" fill="#64748b" font-size="14" class="mono">  Waiting for approval</text>
+  <circle cx="264" cy="199" r="3" fill="#60a5fa" opacity="1"/>
+  <circle cx="276" cy="199" r="3" fill="#60a5fa" opacity="0.6"/>
+  <circle cx="288" cy="199" r="3" fill="#60a5fa" opacity="0.3"/>
+
+  <!-- Approved -->
+  <text x="64" y="230" fill="#34d399" font-size="14" font-weight="700" class="mono">  Approved!</text>
+
+  <!-- Root prompt -->
+  <text x="64" y="256" fill="#f87171" font-size="14" class="mono">root@docker</text>
+  <text x="156" y="256" fill="#e2e8f0" font-size="14" class="mono">:~#</text>
+  <!-- Cursor -->
+  <rect x="192" y="242" width="9" height="16" fill="#e2e8f0" opacity="0.8" rx="1"/>
+</svg>

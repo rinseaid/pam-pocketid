@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="340" viewBox="0 0 800 340">
+  <defs>
+    <style>
+      text { font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="340" fill="#0f172a" rx="12"/>
+
+  <!-- Phone/app chrome (subtle) -->
+  <rect x="220" y="20" width="360" height="300" fill="#1a1a2e" rx="20" stroke="#334155" stroke-width="1"/>
+
+  <!-- Telegram header bar -->
+  <rect x="220" y="20" width="360" height="52" fill="#1e293b" rx="20"/>
+  <rect x="220" y="52" width="360" height="20" fill="#1e293b"/>
+  <!-- Back arrow area -->
+  <text x="244" y="52" fill="#60a5fa" font-size="18">←</text>
+  <!-- Bot name -->
+  <text x="400" y="48" fill="#e2e8f0" font-size="14" font-weight="700" text-anchor="middle">pam-pocketid</text>
+  <text x="400" y="64" fill="#94a3b8" font-size="11" text-anchor="middle">bot</text>
+
+  <!-- ===== MESSAGE BUBBLE ===== -->
+  <rect x="244" y="92" width="280" height="188" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
+
+  <!-- Message header: icon + title -->
+  <!-- Bot icon circle -->
+  <circle cx="268" cy="116" r="14" fill="#1d4ed8"/>
+  <text x="268" y="121" fill="#ffffff" font-size="12" font-weight="700" text-anchor="middle">P</text>
+
+  <!-- Title -->
+  <text x="290" y="110" fill="#e2e8f0" font-size="14" font-weight="700">Sudo approval needed</text>
+  <text x="290" y="126" fill="#94a3b8" font-size="11">pam-pocketid</text>
+
+  <!-- Divider -->
+  <line x1="254" y1="138" x2="514" y2="138" stroke="#334155" stroke-width="1"/>
+
+  <!-- Message fields -->
+  <text x="264" y="160" fill="#94a3b8" font-size="12">User</text>
+  <text x="370" y="160" fill="#e2e8f0" font-size="12" font-weight="600">rinseaid</text>
+
+  <text x="264" y="182" fill="#94a3b8" font-size="12">Host</text>
+  <text x="370" y="182" fill="#e2e8f0" font-size="12" font-weight="600">docker</text>
+
+  <text x="264" y="204" fill="#94a3b8" font-size="12">Code</text>
+  <text x="370" y="204" fill="#fbbf24" font-size="12" font-weight="600" font-family="monospace, monospace">ABCDEF-123456</text>
+
+  <text x="264" y="226" fill="#94a3b8" font-size="12">Expires</text>
+  <text x="370" y="226" fill="#e2e8f0" font-size="12" font-weight="600">120s</text>
+
+  <!-- Divider above button -->
+  <line x1="254" y1="242" x2="514" y2="242" stroke="#334155" stroke-width="1"/>
+
+  <!-- Approve link/button -->
+  <text x="400" y="265" fill="#60a5fa" font-size="14" font-weight="700" text-anchor="middle">✓  Approve</text>
+
+  <!-- Timestamp -->
+  <text x="516" y="286" fill="#64748b" font-size="10" text-anchor="end">14:31</text>
+
+  <!-- ===== CONTEXT LABEL ===== -->
+  <text x="400" y="316" fill="#475569" font-size="12" text-anchor="middle">Telegram notification via apprise-api</text>
+</svg>

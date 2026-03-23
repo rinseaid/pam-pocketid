@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
+  <defs>
+    <style>
+      text { font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="520" fill="#0f172a" rx="12"/>
+
+  <!-- Nav bar -->
+  <rect x="0" y="0" width="800" height="56" fill="#1e293b" rx="12"/>
+  <rect x="0" y="44" width="800" height="12" fill="#1e293b"/>
+  <line x1="0" y1="56" x2="800" y2="56" stroke="#334155" stroke-width="1"/>
+
+  <!-- Logo -->
+  <text x="24" y="35" fill="#e2e8f0" font-size="16" font-weight="700">pam-pocketid</text>
+
+  <!-- Nav tabs -->
+  <text x="226" y="31" fill="#94a3b8" font-size="14" text-anchor="middle">Sessions</text>
+
+  <!-- History (active) -->
+  <rect x="270" y="0" width="90" height="55" fill="transparent"/>
+  <text x="315" y="31" fill="#60a5fa" font-size="14" font-weight="600" text-anchor="middle">History</text>
+  <line x1="270" y1="54" x2="360" y2="54" stroke="#60a5fa" stroke-width="2"/>
+
+  <text x="400" y="31" fill="#94a3b8" font-size="14" text-anchor="middle">Hosts</text>
+  <text x="472" y="31" fill="#94a3b8" font-size="14" text-anchor="middle">Info</text>
+
+  <!-- Profile avatar -->
+  <circle cx="765" cy="28" r="18" fill="#334155"/>
+  <text x="765" y="33" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">R</text>
+
+  <!-- ===== SEARCH + EXPORT BAR ===== -->
+  <!-- Search box -->
+  <rect x="24" y="72" width="420" height="36" fill="#1e293b" rx="8" stroke="#334155" stroke-width="1"/>
+  <!-- Search icon -->
+  <circle cx="46" cy="90" r="7" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+  <line x1="51" y1="95" x2="56" y2="100" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="66" y="95" fill="#64748b" font-size="13">Search hostname or code…</text>
+
+  <!-- Export buttons -->
+  <rect x="460" y="72" width="56" height="36" fill="#1e293b" rx="8" stroke="#334155" stroke-width="1"/>
+  <text x="488" y="95" fill="#94a3b8" font-size="12" font-weight="600" text-anchor="middle">CSV</text>
+  <rect x="524" y="72" width="60" height="36" fill="#1e293b" rx="8" stroke="#334155" stroke-width="1"/>
+  <text x="554" y="95" fill="#94a3b8" font-size="12" font-weight="600" text-anchor="middle">JSON</text>
+
+  <!-- Per-page selector -->
+  <rect x="660" y="72" width="116" height="36" fill="#1e293b" rx="8" stroke="#334155" stroke-width="1"/>
+  <text x="678" y="91" fill="#94a3b8" font-size="12">Per page:</text>
+  <text x="742" y="91" fill="#e2e8f0" font-size="12" font-weight="600">25 ▾</text>
+
+  <!-- ===== TABLE HEADER ===== -->
+  <rect x="24" y="120" width="752" height="36" fill="#1e293b" rx="8"/>
+  <!-- Time -->
+  <text x="44" y="143" fill="#94a3b8" font-size="11" font-weight="700" letter-spacing="0.5">TIME</text>
+  <!-- Action (with dropdown indicator) -->
+  <text x="200" y="143" fill="#94a3b8" font-size="11" font-weight="700" letter-spacing="0.5">ACTION ▾</text>
+  <!-- Host -->
+  <text x="360" y="143" fill="#94a3b8" font-size="11" font-weight="700" letter-spacing="0.5">HOST ▾</text>
+  <!-- Code -->
+  <text x="530" y="143" fill="#94a3b8" font-size="11" font-weight="700" letter-spacing="0.5">CODE</text>
+
+  <!-- ===== TABLE ROWS ===== -->
+
+  <!-- Row 1 -->
+  <rect x="24" y="158" width="752" height="44" fill="#1e293b" rx="0" stroke="#334155" stroke-width="0"/>
+  <line x1="24" y1="202" x2="776" y2="202" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="44" y="175" fill="#e2e8f0" font-size="13">2026-03-23 14:31</text>
+  <text x="44" y="192" fill="#64748b" font-size="11">12 min ago</text>
+  <rect x="200" y="162" width="72" height="20" fill="#14532d" rx="4"/>
+  <text x="236" y="176" fill="#34d399" font-size="11" font-weight="600" text-anchor="middle">Approved</text>
+  <text x="360" y="182" fill="#e2e8f0" font-size="13">docker</text>
+  <text x="530" y="182" fill="#60a5fa" font-size="12" font-family="monospace, monospace">ABCDEF-123456</text>
+
+  <!-- Row 2 -->
+  <rect x="24" y="203" width="752" height="44" fill="#0f172a" rx="0"/>
+  <line x1="24" y1="247" x2="776" y2="247" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="44" y="220" fill="#e2e8f0" font-size="13">2026-03-23 14:08</text>
+  <text x="44" y="237" fill="#64748b" font-size="11">35 min ago</text>
+  <rect x="200" y="207" width="64" height="20" fill="#7f1d1d" rx="4"/>
+  <text x="232" y="221" fill="#f87171" font-size="11" font-weight="600" text-anchor="middle">Revoked</text>
+  <text x="360" y="227" fill="#e2e8f0" font-size="13">plex</text>
+  <text x="530" y="227" fill="#60a5fa" font-size="12" font-family="monospace, monospace">MNOPQR-345678</text>
+
+  <!-- Row 3 -->
+  <rect x="24" y="248" width="752" height="44" fill="#1e293b" rx="0"/>
+  <line x1="24" y1="292" x2="776" y2="292" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="44" y="265" fill="#e2e8f0" font-size="13">2026-03-23 13:44</text>
+  <text x="44" y="282" fill="#64748b" font-size="11">59 min ago</text>
+  <rect x="200" y="252" width="96" height="20" fill="#1e3a5f" rx="4"/>
+  <text x="248" y="266" fill="#60a5fa" font-size="11" font-weight="600" text-anchor="middle">Auto-approved</text>
+  <text x="360" y="272" fill="#e2e8f0" font-size="13">docker</text>
+  <text x="530" y="272" fill="#60a5fa" font-size="12" font-family="monospace, monospace">STUVWX-901234</text>
+
+  <!-- Row 4 -->
+  <rect x="24" y="293" width="752" height="44" fill="#0f172a" rx="0"/>
+  <line x1="24" y1="337" x2="776" y2="337" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="44" y="310" fill="#e2e8f0" font-size="13">2026-03-23 11:22</text>
+  <text x="44" y="327" fill="#64748b" font-size="11">3h 21m ago</text>
+  <rect x="200" y="297" width="72" height="20" fill="#14532d" rx="4"/>
+  <text x="236" y="311" fill="#34d399" font-size="11" font-weight="600" text-anchor="middle">Approved</text>
+  <text x="360" y="317" fill="#e2e8f0" font-size="13">pvemsa2</text>
+  <text x="530" y="317" fill="#60a5fa" font-size="12" font-family="monospace, monospace">YZABCD-567890</text>
+
+  <!-- Row 5 -->
+  <rect x="24" y="338" width="752" height="44" fill="#1e293b" rx="0"/>
+  <line x1="24" y1="382" x2="776" y2="382" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="44" y="355" fill="#e2e8f0" font-size="13">2026-03-22 22:05</text>
+  <text x="44" y="372" fill="#64748b" font-size="11">16h ago</text>
+  <rect x="200" y="342" width="64" height="20" fill="#312e07" rx="4"/>
+  <text x="232" y="356" fill="#facc15" font-size="11" font-weight="600" text-anchor="middle">Rejected</text>
+  <text x="360" y="362" fill="#e2e8f0" font-size="13">docker</text>
+  <text x="530" y="362" fill="#60a5fa" font-size="12" font-family="monospace, monospace">EFGHIJ-112233</text>
+
+  <!-- Bottom border of table area -->
+  <rect x="24" y="383" width="752" height="1" fill="#334155"/>
+
+  <!-- ===== PAGINATION ===== -->
+  <rect x="24" y="396" width="752" height="40" fill="#1e293b" rx="8"/>
+  <!-- Prev button -->
+  <rect x="36" y="406" width="80" height="24" fill="#334155" rx="6"/>
+  <text x="76" y="422" fill="#94a3b8" font-size="12" text-anchor="middle">← Previous</text>
+  <!-- Page info -->
+  <text x="400" y="422" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">Page 1 of 3</text>
+  <!-- Next button -->
+  <rect x="680" y="406" width="80" height="24" fill="#1d4ed8" rx="6"/>
+  <text x="720" y="422" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">Next →</text>
+
+  <!-- Result count -->
+  <text x="400" y="480" fill="#64748b" font-size="12" text-anchor="middle">Showing 1–25 of 68 entries</text>
+</svg>
