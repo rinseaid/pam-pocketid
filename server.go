@@ -122,7 +122,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		ClientSecret: cfg.ClientSecret,
 		Endpoint:     provider.Endpoint(),
 		RedirectURL:  strings.TrimRight(cfg.ExternalURL, "/") + "/callback",
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
+		Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups"},
 	}
 
 	verifier := provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
