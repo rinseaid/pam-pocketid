@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -233,6 +234,52 @@ func (s *Server) sendNotification(challenge *Challenge, approvalURL string, oneT
 		notificationsTotal.WithLabelValues("sent").Inc()
 		log.Printf("NOTIFY: sent for user %q on host %q", username, hostname)
 	}()
+}
+
+// sendWebhookNotification sends a JSON POST to the configured webhook URL when
+// a new challenge is created. It is a no-op if no webhook URL is configured.
+func (s *Server) sendWebhookNotification(username, hostname, userCode, approvalURL, oneTapURL string, expiresIn int) {
+	if s.cfg.NotifyWebhookURL == "" {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"event":        "challenge_created",
+		"username":     username,
+		"hostname":     hostname,
+		"user_code":    userCode,
+		"approval_url": approvalURL,
+		"onetap_url":   oneTapURL,
+		"expires_in":   expiresIn,
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("ERROR: marshaling webhook payload: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.NotifyWebhookURL, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("ERROR: creating webhook request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("ERROR: sending webhook notification: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		log.Printf("ERROR: webhook returned %d", resp.StatusCode)
+	}
 }
 
 // WaitForNotifications blocks until all in-flight notification goroutines

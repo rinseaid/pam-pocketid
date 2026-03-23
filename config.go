@@ -51,6 +51,7 @@ type Config struct {
 	NotifyCommand        string   // Shell command to run when a new challenge is created
 	NotifyEnvPassthrough []string // Additional env var prefixes to pass to notify command (e.g., APPRISE_,TELEGRAM_)
 	NotifyUsersFile      string   // Path to JSON file mapping usernames to per-user notification URLs
+	NotifyWebhookURL     string   // URL for webhook notifications (POST JSON)
 
 	// Break-glass settings (server mode)
 	EscrowCommand          string    // Shell command to escrow break-glass passwords
@@ -69,6 +70,9 @@ type Config struct {
 
 	// Admin access (server mode)
 	AdminGroups []string // OIDC groups that grant admin access to the dashboard
+
+	// API access (server mode)
+	APIKeys []string // Bearer tokens for programmatic API access
 
 	// Session persistence (server mode)
 	SessionStateFile string // Path to JSON file for persisting grace sessions across restarts
@@ -189,6 +193,8 @@ func LoadServerConfig() (*Config, error) {
 		return nil, fmt.Errorf("PAM_POCKETID_NOTIFY_USERS_FILE must be an absolute path (got %q)", cfg.NotifyUsersFile)
 	}
 
+	cfg.NotifyWebhookURL = os.Getenv("PAM_POCKETID_NOTIFY_WEBHOOK_URL")
+
 	// Warn about likely misconfigurations: per-user file or env passthrough
 	// without a notify command means those settings have no effect.
 	if cfg.NotifyCommand == "" {
@@ -238,6 +244,15 @@ func LoadServerConfig() (*Config, error) {
 			g = strings.TrimSpace(g)
 			if g != "" {
 				cfg.AdminGroups = append(cfg.AdminGroups, g)
+			}
+		}
+	}
+
+	if v := os.Getenv("PAM_POCKETID_API_KEYS"); v != "" {
+		for _, k := range strings.Split(v, ",") {
+			k = strings.TrimSpace(k)
+			if k != "" {
+				cfg.APIKeys = append(cfg.APIKeys, k)
 			}
 		}
 	}

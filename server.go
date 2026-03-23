@@ -335,6 +335,25 @@ func (s *Server) verifyAPISecret(r *http.Request) bool {
 	return false
 }
 
+// verifyAPIKey checks the Authorization: Bearer header against configured API keys.
+// Returns true only when at least one key is configured and the token matches.
+func (s *Server) verifyAPIKey(r *http.Request) bool {
+	if len(s.cfg.APIKeys) == 0 {
+		return false
+	}
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return false
+	}
+	token := strings.TrimPrefix(auth, "Bearer ")
+	for _, key := range s.cfg.APIKeys {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(token)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
 // authenticateChallenge checks whether a challenge creation request is authorized.
 // Tries the global shared secret first, then per-host secrets from the registry.
 // Returns (authorized bool, errorMsg string). When authorized is false, errorMsg
@@ -895,6 +914,7 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 
 	// Fire push notification asynchronously (no-op if not configured).
 	s.sendNotification(challenge, approvalURL, oneTapURL)
+	go s.sendWebhookNotification(challenge.Username, challenge.Hostname, challenge.UserCode, approvalURL, oneTapURL, int(s.cfg.ChallengeTTL.Seconds()))
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{
@@ -2127,22 +2147,57 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleHistoryExport exports the authenticated user's full action history as CSV or JSON.
+// handleHistoryExport exports action history as CSV or JSON.
+// Session-authenticated users see their own history.
+// API key callers (Authorization: Bearer <key>) see all users' combined history.
 // GET /api/history/export?format=csv|json
 func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
 	username := s.getSessionUser(r)
+	apiKeyAccess := false
 	if username == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if !s.verifyAPIKey(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// API key access — export ALL users' history (admin-level)
+		apiKeyAccess = true
+	}
+
+	format := r.URL.Query().Get("format")
+
+	if apiKeyAccess {
+		// Return all-users history with username field included.
+		allHistory := s.store.AllActionHistoryWithUsers()
+		switch format {
+		case "csv":
+			w.Header().Set("Content-Type", "text/csv")
+			w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.csv")
+			w.Write([]byte("username,timestamp,action,hostname,code\n"))
+			for _, e := range allHistory {
+				fmt.Fprintf(w, "%s,%s,%s,%s,%s\n",
+					e.Username,
+					e.Timestamp.Format(time.RFC3339),
+					e.Action,
+					e.Hostname,
+					e.Code)
+			}
+		case "json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.json")
+			json.NewEncoder(w).Encode(allHistory)
+		default:
+			http.Error(w, "format must be csv or json", http.StatusBadRequest)
+		}
 		return
 	}
 
+	// Session-based access: export the authenticated user's own history.
 	history := s.store.ActionHistory(username)
-	format := r.URL.Query().Get("format")
-
 	switch format {
 	case "csv":
 		w.Header().Set("Content-Type", "text/csv")
@@ -3494,6 +3549,7 @@ const historyPageHTML = `<!DOCTYPE html>
       border-color: var(--primary);
       box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
     }
+    .filter-toolbar { display: none; }
     @media (max-width: 600px) {
       .history-table, .history-table thead, .history-table tbody, .history-table th, .history-table td, .history-table tr {
         display: block;
@@ -3502,6 +3558,8 @@ const historyPageHTML = `<!DOCTYPE html>
       .history-table tr { padding: 12px 0; border-bottom: 1px solid var(--border); }
       .history-table td { padding: 2px 0; border: none; }
       .history-table td:before { content: attr(data-label); font-weight: 600; font-size: 0.75rem; color: var(--text-secondary); display: block; }
+      .filter-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+      .filter-toolbar .col-filter-select { flex: 1; }
     }
   </style>
   <script nonce="{{.CSPNonce}}">
@@ -3581,6 +3639,23 @@ const historyPageHTML = `<!DOCTYPE html>
     <div class="export-links">
       <a href="/api/history/export?format=csv" class="export-btn">{{call .T "export_csv"}}</a>
       <a href="/api/history/export?format=json" class="export-btn">{{call .T "export_json"}}</a>
+    </div>
+
+    <div class="filter-toolbar">
+      <form method="GET" action="/history" class="filter-form">
+        <input type="hidden" name="q" value="{{.Query}}">
+        <input type="hidden" name="sort" value="{{.Sort}}">
+        <input type="hidden" name="order" value="{{.Order}}">
+        <input type="hidden" name="per_page" value="{{.PerPage}}">
+        <select name="action" class="col-filter-select" aria-label="Filter by action">
+          <option value="">{{call .T "action_all"}}</option>
+          {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+        <select name="hostname" class="col-filter-select" aria-label="Filter by hostname">
+          <option value="">{{call .T "host_all"}}</option>
+          {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </form>
     </div>
 
     {{if .History}}

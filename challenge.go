@@ -516,6 +516,37 @@ func (s *ChallengeStore) AllActionHistory() []ActionLogEntry {
 	return all
 }
 
+// ActionLogEntryWithUser extends ActionLogEntry with the owning username,
+// used for cross-user exports (e.g. API key access).
+type ActionLogEntryWithUser struct {
+	Username  string    `json:"username"`
+	Timestamp time.Time `json:"timestamp"`
+	Action    string    `json:"action"`
+	Hostname  string    `json:"hostname"`
+	Code      string    `json:"code,omitempty"`
+}
+
+// AllActionHistoryWithUsers returns merged action log across all users (with
+// username included per entry), sorted most recent first.
+func (s *ChallengeStore) AllActionHistoryWithUsers() []ActionLogEntryWithUser {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var all []ActionLogEntryWithUser
+	for user, entries := range s.actionLog {
+		for _, e := range entries {
+			all = append(all, ActionLogEntryWithUser{
+				Username:  user,
+				Timestamp: e.Timestamp,
+				Action:    e.Action,
+				Hostname:  e.Hostname,
+				Code:      e.Code,
+			})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Timestamp.After(all[j].Timestamp) })
+	return all
+}
+
 // LogAction records an action in the per-user action log.
 // The log grows unbounded; pruning happens during file rotation in saveStateLocked
 // when the serialized state exceeds 1 MB.
