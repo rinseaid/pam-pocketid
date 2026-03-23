@@ -176,5 +176,14 @@
   "admin_approval_required": "此主机需要管理员审批。",
   "admin_approval_hosts": "需要管理员审批的主机",
   "filtered_to_one_hour": "正在显示单个小时内的事件。",
-  "clear_time_filter": "清除时间筛选"
+  "clear_time_filter": "清除时间筛选",
+  "overview": "概览",
+  "users": "用户",
+  "remove_user": "删除",
+  "removed_user_on": "已删除用户",
+  "user_removed": "用户已删除",
+  "confirm_remove_user": "从 pam-pocketid 中删除此用户？这将撤销所有会话并阻止将来的访问。",
+  "last_active": "最后活动",
+  "active_sessions_count": "活动会话",
+  "no_users": "未找到用户。"
 }

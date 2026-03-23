@@ -176,5 +176,14 @@
   "admin_approval_required": "このホストには管理者の承認が必要です。",
   "admin_approval_hosts": "管理者承認が必要なホスト",
   "filtered_to_one_hour": "特定の1時間のイベントを表示しています。",
-  "clear_time_filter": "時間フィルターを解除"
+  "clear_time_filter": "時間フィルターを解除",
+  "overview": "概要",
+  "users": "ユーザー",
+  "remove_user": "削除",
+  "removed_user_on": "ユーザーを削除しました",
+  "user_removed": "ユーザーが削除されました",
+  "confirm_remove_user": "このユーザーをpam-pocketidから削除しますか？すべてのセッションが取り消され、今後のアクセスがブロックされます。",
+  "last_active": "最終アクティブ",
+  "active_sessions_count": "アクティブセッション",
+  "no_users": "ユーザーが見つかりません。"
 }

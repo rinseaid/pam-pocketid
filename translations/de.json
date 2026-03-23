@@ -176,5 +176,14 @@
   "admin_approval_required": "Dieser Host erfordert Admin-Genehmigung.",
   "admin_approval_hosts": "Hosts mit Admin-Genehmigung",
   "filtered_to_one_hour": "Ereignisse einer einzelnen Stunde werden angezeigt.",
-  "clear_time_filter": "Zeitfilter aufheben"
+  "clear_time_filter": "Zeitfilter aufheben",
+  "overview": "Übersicht",
+  "users": "Benutzer",
+  "remove_user": "Entfernen",
+  "removed_user_on": "Benutzer entfernt",
+  "user_removed": "Benutzer entfernt",
+  "confirm_remove_user": "Diesen Benutzer aus pam-pocketid entfernen? Alle Sitzungen werden widerrufen und zukünftiger Zugriff gesperrt.",
+  "last_active": "Zuletzt aktiv",
+  "active_sessions_count": "Aktive Sitzungen",
+  "no_users": "Keine Benutzer gefunden."
 }

@@ -51,6 +51,7 @@ var (
 	approvalAlreadyTmpl  = template.Must(template.New("already").Parse(approvalAlreadyHTML))
 	approvalExpiredTmpl  = template.Must(template.New("expired").Parse(approvalExpiredHTML))
 	approvalMismatchTmpl = template.Must(template.New("mismatch").Parse(approvalMismatchHTML))
+	adminTmpl            = template.Must(template.New("admin").Funcs(templateFuncMap).Parse(adminPageHTML))
 	dashboardTmpl        = template.Must(template.New("dashboard").Funcs(templateFuncMap).Parse(dashboardHTML))
 	historyTmpl          = template.Must(template.New("history").Funcs(templateFuncMap).Parse(historyPageHTML))
 	hostsTmpl            = template.Must(template.New("hosts").Funcs(templateFuncMap).Parse(hostsPageHTML))
@@ -157,8 +158,18 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.mux.HandleFunc("/sessions", s.handleSessionsRedirect)
 	s.mux.HandleFunc("/sessions/login", s.handleSessionsLogin)
 	s.mux.HandleFunc("/history", s.handleHistoryPage)
-	s.mux.HandleFunc("/hosts", s.handleHostsPage)
-	s.mux.HandleFunc("/info", s.handleInfoPage)
+	s.mux.HandleFunc("/admin", s.handleAdmin)
+	s.mux.HandleFunc("/admin/users", s.handleAdminUsers)
+	s.mux.HandleFunc("/admin/hosts", s.handleAdminHosts)
+	s.mux.HandleFunc("/admin/history", s.handleAdminHistory)
+	s.mux.HandleFunc("/api/users/remove", s.handleRemoveUser)
+	// Redirect old URLs for bookmarks
+	s.mux.HandleFunc("/hosts", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/hosts", http.StatusMovedPermanently)
+	})
+	s.mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin", http.StatusMovedPermanently)
+	})
 	s.mux.HandleFunc("/api/hosts/elevate", s.handleElevate)
 	s.mux.HandleFunc("/api/hosts/rotate", s.handleRotateHost)
 	s.mux.HandleFunc("/api/hosts/rotate-all", s.handleRotateAllHosts)
@@ -680,30 +691,19 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Determine if this user has admin role
 	isAdmin := s.getSessionRole(r) == "admin"
 
-	// Build data for the dashboard
-	var pending []Challenge
-	var sessions []GraceSession
-	if isAdmin {
-		pending = s.store.AllPendingChallenges()
-		sessions = s.store.AllActiveSessions()
-	} else {
-		pending = s.store.PendingChallenges(username)
-		sessions = s.store.ActiveSessions(username)
-	}
+	// Sessions tab always shows current user's own data (admin-wide view is in /admin).
+	pending := s.store.PendingChallenges(username)
+	sessions := s.store.ActiveSessions(username)
 	var allHistoryWithUsers []ActionLogEntryWithUser
-	if isAdmin {
-		allHistoryWithUsers = s.store.AllActionHistoryWithUsers()
-	} else {
-		for _, e := range s.store.ActionHistory(username) {
-			allHistoryWithUsers = append(allHistoryWithUsers, ActionLogEntryWithUser{
-				Username:  username,
-				Actor:     e.Actor,
-				Timestamp: e.Timestamp,
-				Action:    e.Action,
-				Hostname:  e.Hostname,
-				Code:      e.Code,
-			})
-		}
+	for _, e := range s.store.ActionHistory(username) {
+		allHistoryWithUsers = append(allHistoryWithUsers, ActionLogEntryWithUser{
+			Username:  username,
+			Actor:     e.Actor,
+			Timestamp: e.Timestamp,
+			Action:    e.Action,
+			Hostname:  e.Hostname,
+			Code:      e.Code,
+		})
 	}
 	// Limit dashboard to most recent 5 entries
 	dashHistory := allHistoryWithUsers
@@ -2122,22 +2122,17 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 
 	isAdmin := s.getSessionRole(r) == "admin"
 
-	// For admin, load all users' history (with username per entry).
-	// For non-admin, load own history and tag each entry with the session username.
+	// History tab always shows current user's own history (all-users is at /admin/history).
 	var allHistory []ActionLogEntryWithUser
-	if isAdmin {
-		allHistory = s.store.AllActionHistoryWithUsers()
-	} else {
-		for _, e := range s.store.ActionHistory(username) {
-			allHistory = append(allHistory, ActionLogEntryWithUser{
-				Username:  username,
-				Actor:     e.Actor,
-				Timestamp: e.Timestamp,
-				Action:    e.Action,
-				Hostname:  e.Hostname,
-				Code:      e.Code,
-			})
-		}
+	for _, e := range s.store.ActionHistory(username) {
+		allHistory = append(allHistory, ActionLogEntryWithUser{
+			Username:  username,
+			Actor:     e.Actor,
+			Timestamp: e.Timestamp,
+			Action:    e.Action,
+			Hostname:  e.Hostname,
+			Code:      e.Code,
+		})
 	}
 
 	// Collect unique action types and hostnames from the FULL unfiltered history
@@ -2782,7 +2777,7 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 	s.broadcastSSE(username, "session_changed")
 
 	setFlashCookie(w, "elevated:"+hostname)
-	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/hosts", http.StatusSeeOther)
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/admin/hosts", http.StatusSeeOther)
 }
 
 // handleRotateHost requests breakglass rotation for a single host.
@@ -2810,7 +2805,7 @@ func (s *Server) handleRotateHost(w http.ResponseWriter, r *http.Request) {
 	log.Printf("ROTATE_BREAKGLASS: user %q requested rotation for host %q from %s", username, hostname, remoteAddr(r))
 	s.broadcastSSE(username, "host_changed")
 	setFlashCookie(w, "rotated:"+hostname)
-	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/hosts", http.StatusSeeOther)
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/admin/hosts", http.StatusSeeOther)
 }
 
 // handleRotateAllHosts requests breakglass rotation for all hosts.
@@ -2847,7 +2842,7 @@ func (s *Server) handleRotateAllHosts(w http.ResponseWriter, r *http.Request) {
 	log.Printf("ROTATE_ALL_BREAKGLASS: user %q requested rotation for %d hosts from %s", username, len(hosts), remoteAddr(r))
 	s.broadcastSSE(username, "host_changed")
 	setFlashCookie(w, fmt.Sprintf("rotated_all:%d", len(hosts)))
-	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/hosts", http.StatusSeeOther)
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/admin/hosts", http.StatusSeeOther)
 }
 
 // buildClientConfig returns a client config override map if any fields are set,
@@ -3152,6 +3147,814 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
+}
+
+// handleAdmin renders the admin overview page at /admin.
+// GET /admin
+func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Handle language change via query param
+	if setLanguageCookie(w, r) {
+		return
+	}
+	lang := detectLanguage(r)
+	t := T(lang)
+
+	username := s.getSessionUser(r)
+	if username == "" {
+		setFlashCookie(w, "expired:")
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+	s.setSessionCookie(w, username, s.getSessionRole(r))
+
+	if s.getSessionRole(r) != "admin" {
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+
+	// Server configuration values
+	gracePeriod := formatDuration(s.cfg.GracePeriod)
+	challengeTTL := formatDuration(s.cfg.ChallengeTTL)
+
+	breakglassType := s.cfg.ClientBreakglassPasswordType
+	if breakglassType == "" {
+		breakglassType = t("not_configured")
+	}
+
+	breakglassRotation := t("not_configured")
+	if s.cfg.ClientBreakglassRotationDays > 0 {
+		breakglassRotation = fmt.Sprintf("%d %s", s.cfg.ClientBreakglassRotationDays, t("days"))
+	}
+
+	tokenCache := t("disabled")
+	if s.cfg.ClientTokenCacheEnabled != nil && *s.cfg.ClientTokenCacheEnabled {
+		tokenCache = t("enabled")
+	}
+
+	escrowConfigured := t("not_configured")
+	if s.cfg.EscrowCommand != "" {
+		escrowConfigured = t("configured")
+	}
+
+	notifyConfigured := t("not_configured")
+	if s.cfg.NotifyCommand != "" {
+		notifyConfigured = t("configured")
+	}
+
+	hostRegistryEnabled := s.hostRegistry.IsEnabled()
+	hostRegistryStatus := t("host_registry_global_secret")
+	if hostRegistryEnabled {
+		hostRegistryStatus = fmt.Sprintf(t("enabled_n_hosts"), len(s.hostRegistry.RegisteredHosts()))
+	}
+
+	sessionPersistence := t("disabled")
+	if s.cfg.SessionStateFile != "" {
+		sessionPersistence = s.cfg.SessionStateFile
+	}
+
+	// System info
+	uptime := time.Since(serverStartTime)
+	uptimeStr := formatDuration(uptime)
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	allocMB := float64(memStats.Alloc) / 1024 / 1024
+	sysMB := float64(memStats.Sys) / 1024 / 1024
+	memUsage := fmt.Sprintf("%.1f MB alloc / %.1f MB sys", allocMB, sysMB)
+
+	activeSessions := len(s.store.AllActiveSessions())
+
+	// Read timezone from cookie for profile dropdown display
+	adminTZ := "UTC"
+	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if _, err := time.LoadLocation(c.Value); err == nil {
+			adminTZ = c.Value
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := adminTmpl.Execute(w, map[string]interface{}{
+		"Username":            username,
+		"Initial":             strings.ToUpper(username[:1]),
+		"Avatar":              getAvatar(r),
+		"Timezone":            adminTZ,
+		"ActivePage":          "admin",
+		"AdminTab":            "overview",
+		"Theme":               getTheme(r),
+		"CSPNonce":            r.Context().Value("csp-nonce"),
+		"T":                   T(lang),
+		"Lang":                lang,
+		"Languages":           supportedLanguages,
+		"IsAdmin":             true,
+		"Version":             version,
+		"GracePeriod":         gracePeriod,
+		"ChallengeTTL":        challengeTTL,
+		"BreakglassType":      breakglassType,
+		"BreakglassRotation":  breakglassRotation,
+		"TokenCache":          tokenCache,
+		"DefaultPageSize":     s.cfg.DefaultHistoryPageSize,
+		"EscrowConfigured":    escrowConfigured,
+		"NotifyConfigured":    notifyConfigured,
+		"HostRegistry":        hostRegistryStatus,
+		"SessionPersistence":  sessionPersistence,
+		"OneTapMaxAge":        formatDuration(s.cfg.OneTapMaxAge),
+		"AdminGroups":         func() string { if len(s.cfg.AdminGroups) == 0 { return t("not_configured") }; return strings.Join(s.cfg.AdminGroups, ", ") }(),
+		"AdminApprovalHosts":  func() string { if len(s.cfg.AdminApprovalHosts) == 0 { return t("not_configured") }; return strings.Join(s.cfg.AdminApprovalHosts, ", ") }(),
+		"Uptime":              uptimeStr,
+		"GoVersion":           runtime.Version(),
+		"OSArch":              runtime.GOOS + "/" + runtime.GOARCH,
+		"Goroutines":          runtime.NumGoroutine(),
+		"MemUsage":            memUsage,
+		"ActiveSessionsCount": activeSessions,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
+}
+
+// handleAdminUsers renders the admin users list at /admin/users.
+// GET /admin/users
+func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Handle language change via query param
+	if setLanguageCookie(w, r) {
+		return
+	}
+	lang := detectLanguage(r)
+	t := T(lang)
+
+	username := s.getSessionUser(r)
+	if username == "" {
+		setFlashCookie(w, "expired:")
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+	s.setSessionCookie(w, username, s.getSessionRole(r))
+
+	if s.getSessionRole(r) != "admin" {
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+
+	// Parse flash messages
+	var flashes []string
+	if flashParam := getAndClearFlash(w, r); flashParam != "" {
+		for _, f := range strings.Split(flashParam, ",") {
+			parts := strings.SplitN(f, ":", 2)
+			if len(parts) == 2 {
+				switch parts[0] {
+				case "removed_user":
+					flashes = append(flashes, t("removed_user_on")+" "+parts[1])
+				}
+			}
+		}
+	}
+
+	users := s.store.AllUsers()
+
+	type userView struct {
+		Username       string
+		ActiveSessions int
+		LastActive     string
+		LastActiveAgo  string
+	}
+
+	now := time.Now()
+	csrfTs := fmt.Sprintf("%d", now.Unix())
+	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
+
+	var userViews []userView
+	for _, u := range users {
+		sessions := s.store.ActiveSessions(u)
+		history := s.store.ActionHistory(u)
+		lastActive := ""
+		lastActiveAgo := ""
+		if len(history) > 0 {
+			// Find most recent entry
+			var latest time.Time
+			for _, e := range history {
+				if e.Timestamp.After(latest) {
+					latest = e.Timestamp
+				}
+			}
+			lastActive = latest.Format("2006-01-02 15:04")
+			lastActiveAgo = timeAgoI18n(latest, t)
+		}
+		userViews = append(userViews, userView{
+			Username:       u,
+			ActiveSessions: len(sessions),
+			LastActive:     lastActive,
+			LastActiveAgo:  lastActiveAgo,
+		})
+	}
+
+	adminTZ := "UTC"
+	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if _, err := time.LoadLocation(c.Value); err == nil {
+			adminTZ = c.Value
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := adminTmpl.Execute(w, map[string]interface{}{
+		"Username":   username,
+		"Initial":    strings.ToUpper(username[:1]),
+		"Avatar":     getAvatar(r),
+		"Timezone":   adminTZ,
+		"Flashes":    flashes,
+		"ActivePage": "admin",
+		"AdminTab":   "users",
+		"Theme":      getTheme(r),
+		"CSPNonce":   r.Context().Value("csp-nonce"),
+		"T":          T(lang),
+		"Lang":       lang,
+		"Languages":  supportedLanguages,
+		"IsAdmin":    true,
+		"Users":      userViews,
+		"CSRFToken":  csrfToken,
+		"CSRFTs":     csrfTs,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
+}
+
+// handleAdminHosts renders the admin hosts page at /admin/hosts.
+// GET /admin/hosts
+func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Handle language change via query param
+	if setLanguageCookie(w, r) {
+		return
+	}
+	lang := detectLanguage(r)
+	t := T(lang)
+
+	username := s.getSessionUser(r)
+	if username == "" {
+		setFlashCookie(w, "expired:")
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+	s.setSessionCookie(w, username, s.getSessionRole(r))
+
+	if s.getSessionRole(r) != "admin" {
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+
+	// Parse flash messages from cookie
+	var flashes []string
+	if flashParam := getAndClearFlash(w, r); flashParam != "" {
+		for _, f := range strings.Split(flashParam, ",") {
+			parts := strings.SplitN(f, ":", 2)
+			if len(parts) == 2 {
+				switch parts[0] {
+				case "elevated":
+					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
+				case "extended":
+					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
+				case "extended_all":
+					flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
+				case "revoked":
+					flashes = append(flashes, t("revoked_session_on")+" "+parts[1])
+				case "revoked_all":
+					flashes = append(flashes, fmt.Sprintf(t("revoked_n_sessions"), atoi(parts[1])))
+				case "rotated":
+					flashes = append(flashes, t("rotated_breakglass_on")+" "+parts[1])
+				case "rotated_all":
+					flashes = append(flashes, fmt.Sprintf(t("rotated_n_hosts"), atoi(parts[1])))
+				}
+			}
+		}
+	}
+
+	hosts := s.store.KnownHosts(username)
+	escrowed := s.store.EscrowedHosts()
+
+	// Merge escrowed hosts into the known hosts list
+	escrowedSet := make(map[string]bool)
+	for h := range escrowed {
+		if s.hostRegistry.IsEnabled() && !s.hostRegistry.IsUserAuthorized(h, username) {
+			continue
+		}
+		escrowedSet[h] = true
+		found := false
+		for _, kh := range hosts {
+			if kh == h {
+				found = true
+				break
+			}
+		}
+		if !found {
+			hosts = append(hosts, h)
+		}
+	}
+	sort.Strings(hosts)
+
+	// Default rotation days for escrow validity
+	rotationDays := 90
+	if s.cfg.ClientBreakglassRotationDays > 0 {
+		rotationDays = s.cfg.ClientBreakglassRotationDays
+	}
+
+	// Merge registered hosts into the known hosts list
+	if s.hostRegistry.IsEnabled() {
+		for _, rh := range s.hostRegistry.HostsForUser(username) {
+			found := false
+			for _, kh := range hosts {
+				if kh == rh {
+					found = true
+					break
+				}
+			}
+			if !found {
+				hosts = append(hosts, rh)
+			}
+		}
+		sort.Strings(hosts)
+	}
+
+	type activeUserView struct {
+		Username  string
+		Remaining string
+	}
+
+	type hostView struct {
+		Hostname        string
+		Active          bool
+		ActiveUsers     []activeUserView
+		Escrowed        bool
+		EscrowAge       string
+		EscrowExpired   bool
+		EscrowLink      string
+		Registered      bool
+		AuthorizedUsers []string
+		Group           string
+	}
+
+	// Collect all group names for the filter dropdown
+	groupFilter := r.URL.Query().Get("group")
+	groupSet := make(map[string]struct{})
+
+	var hostViews []hostView
+	for _, h := range hosts {
+		hv := hostView{Hostname: h}
+		var activeUsers []activeUserView
+		for _, sess := range s.store.ActiveSessionsForHost(h) {
+			activeUsers = append(activeUsers, activeUserView{
+				Username:  sess.Username,
+				Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+			})
+		}
+		hv.ActiveUsers = activeUsers
+		hv.Active = len(activeUsers) > 0
+		if escrowRecord, ok := escrowed[h]; ok {
+			hv.Escrowed = true
+			hv.EscrowAge = formatDuration(time.Since(escrowRecord.Timestamp))
+			hv.EscrowExpired = time.Since(escrowRecord.Timestamp) > time.Duration(rotationDays)*24*time.Hour
+			if s.cfg.EscrowLinkTemplate != "" {
+				link := strings.ReplaceAll(s.cfg.EscrowLinkTemplate, "{hostname}", h)
+				if escrowRecord.ItemID != "" {
+					link = strings.ReplaceAll(link, "{item_id}", escrowRecord.ItemID)
+				}
+				hv.EscrowLink = link
+			}
+		}
+		if users, group, _, ok := s.hostRegistry.GetHost(h); ok {
+			hv.Registered = true
+			hv.AuthorizedUsers = users
+			hv.Group = group
+		}
+		if hv.Group != "" {
+			groupSet[hv.Group] = struct{}{}
+		}
+		// Apply group filter if set
+		if groupFilter != "" && hv.Group != groupFilter {
+			continue
+		}
+		hostViews = append(hostViews, hv)
+	}
+
+	// Build sorted list of all known groups for the filter dropdown
+	var allGroups []string
+	for g := range groupSet {
+		allGroups = append(allGroups, g)
+	}
+	sort.Strings(allGroups)
+
+	now := time.Now()
+	csrfTs := fmt.Sprintf("%d", now.Unix())
+	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
+
+	// Build duration options, filtering to those <= GracePeriod
+	type durationOption struct {
+		Value    int
+		Label    string
+		Selected bool
+	}
+	allDurations := []durationOption{
+		{3600, t("1_hour"), false},
+		{14400, t("4_hours"), false},
+		{28800, t("8_hours"), true},
+		{86400, t("1_day"), false},
+	}
+	var durations []durationOption
+	graceSec := int(s.cfg.GracePeriod.Seconds())
+	if graceSec <= 0 {
+		graceSec = 86400
+	}
+	for _, d := range allDurations {
+		if d.Value <= graceSec {
+			d.Selected = false
+			durations = append(durations, d)
+		}
+	}
+	if len(durations) > 0 {
+		durations[len(durations)-1].Selected = true
+	}
+	if len(durations) == 0 && s.cfg.GracePeriod > 0 {
+		durations = append(durations, durationOption{
+			Value:    int(s.cfg.GracePeriod.Seconds()),
+			Label:    formatDuration(s.cfg.GracePeriod),
+			Selected: true,
+		})
+	}
+
+	hostsTZ := "UTC"
+	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if _, err := time.LoadLocation(c.Value); err == nil {
+			hostsTZ = c.Value
+		}
+	}
+
+	hasEscrowed := false
+	for _, hv := range hostViews {
+		if hv.Escrowed {
+			hasEscrowed = true
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := adminTmpl.Execute(w, map[string]interface{}{
+		"Username":         username,
+		"Initial":          strings.ToUpper(username[:1]),
+		"Avatar":           getAvatar(r),
+		"Timezone":         hostsTZ,
+		"Flashes":          flashes,
+		"Hosts":            hostViews,
+		"CSRFToken":        csrfToken,
+		"CSRFTs":           csrfTs,
+		"Durations":        durations,
+		"ActivePage":       "admin",
+		"AdminTab":         "hosts",
+		"Theme":            getTheme(r),
+		"CSPNonce":         r.Context().Value("csp-nonce"),
+		"T":                T(lang),
+		"Lang":             lang,
+		"Languages":        supportedLanguages,
+		"IsAdmin":          true,
+		"EscrowLinkLabel":  s.cfg.EscrowLinkLabel,
+		"HasEscrowedHosts": hasEscrowed,
+		"AllGroups":        allGroups,
+		"GroupFilter":      groupFilter,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
+}
+
+// handleAdminHistory renders the all-users history at /admin/history.
+// GET /admin/history
+func (s *Server) handleAdminHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Handle language change via query param
+	if setLanguageCookie(w, r) {
+		return
+	}
+	lang := detectLanguage(r)
+
+	username := s.getSessionUser(r)
+	if username == "" {
+		setFlashCookie(w, "expired:")
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+	s.setSessionCookie(w, username, s.getSessionRole(r))
+
+	if s.getSessionRole(r) != "admin" {
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+
+	// Timezone handling
+	tzName := "UTC"
+	if tzParam := r.URL.Query().Get("tz"); tzParam != "" {
+		if loc, err := time.LoadLocation(tzParam); err == nil {
+			_ = loc
+			tzName = tzParam
+			http.SetCookie(w, &http.Cookie{
+				Name:     "pam_tz",
+				Value:    tzParam,
+				Path:     "/",
+				MaxAge:   86400,
+				HttpOnly: false,
+				SameSite: http.SameSiteLaxMode,
+			})
+		}
+	} else if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if loc, err := time.LoadLocation(c.Value); err == nil {
+			_ = loc
+			tzName = c.Value
+		}
+	}
+	tzLoc, _ := time.LoadLocation(tzName)
+
+	query := r.URL.Query().Get("q")
+	actionFilter := r.URL.Query().Get("action")
+	hostFilter := r.URL.Query().Get("hostname")
+	userFilter := r.URL.Query().Get("user")
+
+	sortField := r.URL.Query().Get("sort")
+	switch sortField {
+	case "timestamp", "action", "hostname", "code", "user":
+		// valid
+	default:
+		sortField = "timestamp"
+	}
+	sortOrder := r.URL.Query().Get("order")
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+
+	page := 1
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
+		page = p
+	}
+
+	perPage := s.cfg.DefaultHistoryPageSize
+	if pp, err := strconv.Atoi(r.URL.Query().Get("per_page")); err == nil {
+		validSizes := map[int]bool{5: true, 10: true, 25: true, 50: true, 100: true, 500: true, 1000: true}
+		if validSizes[pp] {
+			perPage = pp
+		}
+	}
+
+	// All users history
+	allHistory := s.store.AllActionHistoryWithUsers()
+
+	// Collect unique values for filter dropdowns
+	t := T(lang)
+	actionSet := make(map[string]bool)
+	hostSet := make(map[string]bool)
+	userSet := make(map[string]bool)
+	for _, e := range allHistory {
+		actionSet[e.Action] = true
+		if e.Hostname != "" {
+			hostSet[e.Hostname] = true
+		}
+		userSet[e.Username] = true
+	}
+
+	var actionOptions []ActionOption
+	actionOrder := []string{"approved", "auto_approved", "rejected", "revoked", "elevated", "extended", "rotated_breakglass"}
+	for _, a := range actionOrder {
+		if actionSet[a] {
+			actionOptions = append(actionOptions, ActionOption{Value: a, Label: t(a)})
+		}
+	}
+	for a := range actionSet {
+		found := false
+		for _, known := range actionOrder {
+			if a == known {
+				found = true
+				break
+			}
+		}
+		if !found {
+			actionOptions = append(actionOptions, ActionOption{Value: a, Label: t(a)})
+		}
+	}
+
+	var hostOptions []string
+	for h := range hostSet {
+		hostOptions = append(hostOptions, h)
+	}
+	sort.Strings(hostOptions)
+
+	var userOptions []string
+	for u := range userSet {
+		userOptions = append(userOptions, u)
+	}
+	sort.Strings(userOptions)
+
+	history := allHistory
+
+	// Filter by user
+	if userFilter != "" {
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if e.Username == userFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
+	// Filter by action type
+	if actionFilter != "" {
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if e.Action == actionFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
+	// Filter by hostname
+	if hostFilter != "" {
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if e.Hostname == hostFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
+	// Filter by search term
+	if query != "" {
+		q := strings.ToLower(query)
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if strings.Contains(strings.ToLower(e.Hostname), q) ||
+				strings.Contains(strings.ToLower(e.Code), q) ||
+				strings.Contains(strings.ToLower(e.Username), q) {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
+	// Sort results
+	asc := sortOrder == "asc"
+	sort.SliceStable(history, func(i, j int) bool {
+		switch sortField {
+		case "action":
+			if asc {
+				return history[i].Action < history[j].Action
+			}
+			return history[i].Action > history[j].Action
+		case "hostname":
+			if asc {
+				return history[i].Hostname < history[j].Hostname
+			}
+			return history[i].Hostname > history[j].Hostname
+		case "code":
+			if asc {
+				return history[i].Code < history[j].Code
+			}
+			return history[i].Code > history[j].Code
+		case "user":
+			if asc {
+				return history[i].Username < history[j].Username
+			}
+			return history[i].Username > history[j].Username
+		default: // timestamp
+			if asc {
+				return history[i].Timestamp.Before(history[j].Timestamp)
+			}
+			return history[i].Timestamp.After(history[j].Timestamp)
+		}
+	})
+
+	// Paginate
+	totalPages := (len(history) + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if end > len(history) {
+		end = len(history)
+	}
+	pageHistory := history[start:end]
+
+	var viewEntries []historyViewEntry
+	for _, e := range pageHistory {
+		viewEntries = append(viewEntries, historyViewEntry{
+			Action:        e.Action,
+			ActionLabel:   t(e.Action),
+			Hostname:      e.Hostname,
+			Code:          e.Code,
+			Actor:         e.Actor,
+			Username:      e.Username,
+			FormattedTime: e.Timestamp.In(tzLoc).Format("2006-01-02 15:04"),
+			TimeAgo:       timeAgoI18n(e.Timestamp, t),
+		})
+	}
+
+	perPageOptions := []int{5, 10, 25, 50, 100, 500, 1000}
+
+	adminTZ := "UTC"
+	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if _, err := time.LoadLocation(c.Value); err == nil {
+			adminTZ = c.Value
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := adminTmpl.Execute(w, map[string]interface{}{
+		"Username":       username,
+		"Initial":        strings.ToUpper(username[:1]),
+		"Avatar":         getAvatar(r),
+		"Timezone":       adminTZ,
+		"ActivePage":     "admin",
+		"AdminTab":       "history",
+		"Theme":          getTheme(r),
+		"CSPNonce":       r.Context().Value("csp-nonce"),
+		"T":              T(lang),
+		"Lang":           lang,
+		"Languages":      supportedLanguages,
+		"IsAdmin":        true,
+		"History":        viewEntries,
+		"Query":          query,
+		"ActionFilter":   actionFilter,
+		"HostFilter":     hostFilter,
+		"UserFilter":     userFilter,
+		"ActionOptions":  actionOptions,
+		"HostOptions":    hostOptions,
+		"UserOptions":    userOptions,
+		"TZName":         tzName,
+		"Page":           page,
+		"TotalPages":     totalPages,
+		"HasPrev":        page > 1,
+		"HasNext":        page < totalPages,
+		"Sort":           sortField,
+		"Order":          sortOrder,
+		"PerPage":        perPage,
+		"PerPageOptions": perPageOptions,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
+}
+
+// handleRemoveUser removes all data for a user.
+// POST /api/users/remove
+func (s *Server) handleRemoveUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	adminUser := s.verifyFormAuth(w, r)
+	if adminUser == "" {
+		return
+	}
+	if s.getSessionRole(r) != "admin" {
+		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "not_authorized_message")
+		return
+	}
+	targetUser := r.FormValue("target_user")
+	if targetUser == "" || !validUsername.MatchString(targetUser) {
+		revokeErrorPage(w, r, http.StatusBadRequest, "invalid_request", "invalid_format")
+		return
+	}
+	// Don't allow removing yourself
+	if targetUser == adminUser {
+		revokeErrorPage(w, r, http.StatusBadRequest, "invalid_request", "invalid_format")
+		return
+	}
+
+	// Remove from host registry user lists
+	if s.hostRegistry.IsEnabled() {
+		s.hostRegistry.RemoveUserFromAllHosts(targetUser)
+	}
+
+	s.store.RemoveUser(targetUser)
+	s.store.LogAction(targetUser, "user_removed", "", "", adminUser)
+	log.Printf("USER_REMOVED: admin %q removed user %q from %s", adminUser, targetUser, remoteAddr(r))
+
+	setFlashCookie(w, "removed_user:"+targetUser)
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/admin/users", http.StatusSeeOther)
 }
 
 // atoi converts a string to int, returning 0 on error. Used for flash message formatting.
@@ -3660,9 +4463,8 @@ const dashboardHTML = `<!DOCTYPE html>
 
     <nav class="nav">
       <a href="/" class="{{if eq .ActivePage "sessions"}}active{{end}}">{{call .T "sessions"}}</a>
-      <a href="/history">{{call .T "history"}}</a>
-      <a href="/hosts">{{call .T "hosts"}}</a>
-      <a href="/info">{{call .T "info"}}</a>
+      <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
+      {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
         <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
@@ -3955,14 +4757,13 @@ const historyPageHTML = `<!DOCTYPE html>
     <h2>{{call .T "app_name"}}</h2>
 
     <nav class="nav">
-      <a href="/">{{call .T "sessions"}}</a>
+      <a href="/" class="{{if eq .ActivePage "sessions"}}active{{end}}">{{call .T "sessions"}}</a>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
-      <a href="/hosts">{{call .T "hosts"}}</a>
-      <a href="/info">{{call .T "info"}}</a>
+      {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
         <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
-          <div class="profile-dropdown-label">{{.Username}}</div>
+          <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span style="font-size:0.75em;color:var(--primary);font-weight:700">({{call .T "admin"}})</span>{{end}}</div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
           <form method="GET" action="/history">
@@ -4431,6 +5232,432 @@ const infoPageHTML = `<!DOCTYPE html>
         <tr><td class="info-label">{{call .T "active_sessions"}}</td><td>{{.ActiveSessionsCount}}</td></tr>
       </table>
     </div>
+  </div>
+</body>
+</html>`
+
+const adminPageHTML = `<!DOCTYPE html>
+<html lang="{{.Lang}}" class="{{if eq .Theme "dark"}}theme-dark{{else if eq .Theme "light"}}theme-light{{end}}">
+<head>
+  <title>Admin - pam-pocketid</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="240">
+  <style>` + sharedCSS + navCSS + `
+    body { align-items: flex-start; padding-top: 32px; }
+    .admin-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .admin-tabs a { padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; color: var(--text-secondary); text-decoration: none; }
+    .admin-tabs a:hover { background: var(--info-bg); color: var(--text); }
+    .admin-tabs a.active { background: var(--primary); color: #fff; font-weight: 600; }
+    .info-section { margin-bottom: 24px; }
+    .info-section h3 { font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 12px; }
+    .info-table { width: 100%; border-collapse: collapse; }
+    .info-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
+    .info-label { color: var(--text-secondary); width: 40%; }
+    .section-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin: 24px 0 8px; text-align: left; }
+    .list { text-align: left; margin: 0 0 8px; }
+    .row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+    .row-info { min-width: 0; flex: 1; }
+    .row-host { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-sub { color: var(--text-secondary); font-size: 0.813rem; display: block; }
+    .row-active { color: var(--success); font-size: 0.813rem; font-weight: 600; display: block; }
+    .banner { padding: 10px 16px; border-radius: 8px; margin-bottom: 12px; font-size: 0.875rem; font-weight: 600; text-align: left; }
+    .banner-success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success); }
+    .host-btn { display: inline-block; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; white-space: nowrap; border: 1px solid var(--border); background: none; color: var(--text-secondary); text-decoration: none; text-align: center; line-height: 1.4; }
+    .host-btn:hover { background: var(--info-bg); color: var(--text); }
+    .host-btn.danger { border-color: var(--danger); color: var(--danger); }
+    .host-btn.danger:hover { background: var(--danger-bg); }
+    .host-btn.primary { border-color: var(--primary); color: var(--primary); }
+    .host-btn.primary:hover { background: var(--info-bg); }
+    .host-btn.filled { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .host-btn.filled:hover { background: var(--primary-hover); }
+    .bulk-actions { margin: 16px 0 8px; text-align: right; }
+    .bulk-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; }
+    .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
+    .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
+    .bulk-btn.danger:hover { background: var(--danger-bg); }
+    .host-group { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--info-bg); color: var(--text-secondary); margin-left: 8px; vertical-align: middle; }
+    .group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.813rem; }
+    .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
+    .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+    .elevate-form select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); cursor: pointer; }
+    .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
+    .history-action { font-weight: 600; }
+    .history-action.approved { color: var(--success); }
+    .history-action.revoked { color: var(--danger); }
+    .history-action.auto_approved { color: var(--primary); }
+    .history-action.rejected { color: var(--danger); }
+    .history-action.elevated { color: var(--primary); }
+    .history-action.extended { color: var(--primary); }
+    .history-action.rotated_breakglass { color: var(--text-secondary); }
+    .history-actor { font-size: 0.7rem; color: var(--text-secondary); font-weight: 400; }
+    .search-bar { margin-bottom: 16px; text-align: left; }
+    .search-bar input[type="text"] { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.875rem; background: var(--card-bg); color: var(--text); outline: none; }
+    .search-bar input[type="text"]:focus { border-color: var(--primary); box-shadow: var(--focus-ring); }
+    .pagination { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 16px; font-size: 0.875rem; flex-wrap: wrap; }
+    .pagination a { color: var(--primary); text-decoration: none; font-weight: 600; }
+    .pagination a:hover { text-decoration: underline; }
+    .page-info { color: var(--text-secondary); }
+    .page-size-form { display: inline-flex; align-items: center; gap: 4px; }
+    .page-size-form select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); }
+    .page-size-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); cursor: pointer; }
+    .page-size-btn:hover { background: var(--info-bg); }
+    .history-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
+    .history-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); white-space: nowrap; }
+    .history-table th a { color: var(--text-secondary); text-decoration: none; font-size: 0.75rem; text-transform: none; }
+    .history-table th a:hover { color: var(--text); }
+    .history-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .col-time { white-space: nowrap; }
+    .timestamp { display: block; }
+    .time-ago { display: block; font-size: 0.75rem; color: var(--text-secondary); }
+    .col-host { overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+    .col-code { font-family: monospace; font-size: 0.813rem; color: var(--text-secondary); white-space: nowrap; }
+    .col-filter-form { display: inline-flex; align-items: center; gap: 2px; margin: 0; padding: 0; text-transform: none; }
+    .col-filter-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.75rem; background: var(--card-bg); color: var(--text); cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; padding-right: 22px; }
+    .col-filter-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+    .sort-btn { display: inline-block; padding: 4px 6px; margin-left: 4px; color: var(--border); text-decoration: none; font-size: 0.75rem; border-radius: 4px; }
+    .sort-btn:hover { color: var(--text); background: var(--info-bg); }
+    .sort-btn.active { color: var(--primary); }
+    .users-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
+    .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
+    .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  </style>
+  <script nonce="{{.CSPNonce}}">
+  if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
+    var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if(tz){var d=new Date();d.setTime(d.getTime()+86400000);document.cookie='pam_tz='+tz+';path=/;expires='+d.toUTCString()+';SameSite=Lax';}
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    document.querySelectorAll('.col-filter-select,.page-size-select,.tz-select,.lang-select').forEach(function(el){el.addEventListener('change',function(){this.form.submit();});});
+    document.querySelectorAll('.tz-select').forEach(function(sel){
+      for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===tz){sel.selectedIndex=i;break;}}
+    });
+    var searchInput=document.querySelector('.search-bar input[name="q"]');
+    if(searchInput){
+      searchInput.addEventListener('input',function(){
+        var q=this.value.toLowerCase();
+        document.querySelectorAll('.history-table tbody tr,.users-table tbody tr').forEach(function(row){
+          var text=row.textContent.toLowerCase();
+          row.style.display=text.indexOf(q)!==-1?'':'none';
+        });
+      });
+    }
+  });
+  </script>
+</head>
+<body class="wide">
+  <div class="card">
+    <h2>{{call .T "app_name"}}</h2>
+
+    <nav class="nav">
+      <a href="/" class="{{if eq .ActivePage "sessions"}}active{{end}}">{{call .T "sessions"}}</a>
+      <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
+      <a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>
+      <div class="profile-menu" tabindex="-1">
+        <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
+        <div class="profile-dropdown">
+          <div class="profile-dropdown-label">{{.Username}} <span style="font-size:0.75em;color:var(--primary);font-weight:700">({{call .T "admin"}})</span></div>
+          <div class="profile-dropdown-divider"></div>
+          <div class="profile-dropdown-label">{{call .T "language"}}</div>
+          <form method="GET" action="/admin">
+            <select name="lang" class="lang-select" aria-label="Language">
+              {{range .Languages}}<option value="{{.Code}}" {{if eq .Code $.Lang}}selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </form>
+          <div class="profile-dropdown-divider"></div>
+          <div class="profile-dropdown-label">{{call .T "timezone"}}</div>
+          <form method="GET" action="/admin">
+            <select name="tz" class="tz-select" aria-label="Timezone">` + tzOptionsHTML + `
+            </select>
+          </form>
+          <div class="profile-dropdown-divider"></div>
+          <div class="profile-dropdown-label">{{call .T "theme"}}</div>
+          <div class="theme-options">
+            <a href="/theme?set=system&from=/admin" class="theme-option{{if eq .Theme ""}} active{{end}}">{{call .T "theme_system"}}</a>
+            <a href="/theme?set=dark&from=/admin" class="theme-option{{if eq .Theme "dark"}} active{{end}}">{{call .T "theme_dark"}}</a>
+            <a href="/theme?set=light&from=/admin" class="theme-option{{if eq .Theme "light"}} active{{end}}">{{call .T "theme_light"}}</a>
+          </div>
+          <div class="profile-dropdown-divider"></div>
+          <a href="/signout" class="profile-dropdown-item" style="color:var(--danger)">{{call .T "sign_out"}}</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="admin-tabs">
+      <a href="/admin" class="{{if eq .AdminTab "overview"}}active{{end}}">{{call .T "overview"}}</a>
+      <a href="/admin/users" class="{{if eq .AdminTab "users"}}active{{end}}">{{call .T "users"}}</a>
+      <a href="/admin/hosts" class="{{if eq .AdminTab "hosts"}}active{{end}}">{{call .T "hosts"}}</a>
+      <a href="/admin/history" class="{{if eq .AdminTab "history"}}active{{end}}">{{call .T "history"}}</a>
+    </div>
+
+    {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
+
+    {{if eq .AdminTab "overview"}}
+    <div class="info-section">
+      <h3>{{call .T "server_config"}}</h3>
+      <table class="info-table">
+        <tr><td class="info-label">{{call .T "version"}}</td><td>{{.Version}}</td></tr>
+        <tr><td class="info-label">{{call .T "grace_period"}}</td><td>{{.GracePeriod}}</td></tr>
+        <tr><td class="info-label">{{call .T "onetap_max_age"}}</td><td>{{.OneTapMaxAge}}</td></tr>
+        <tr><td class="info-label">{{call .T "challenge_ttl"}}</td><td>{{.ChallengeTTL}}</td></tr>
+        <tr><td class="info-label">{{call .T "breakglass_type"}}</td><td>{{.BreakglassType}}</td></tr>
+        <tr><td class="info-label">{{call .T "breakglass_rotation_days"}}</td><td>{{.BreakglassRotation}}</td></tr>
+        <tr><td class="info-label">{{call .T "token_cache"}}</td><td>{{.TokenCache}}</td></tr>
+        <tr><td class="info-label">{{call .T "default_page_size"}}</td><td>{{.DefaultPageSize}}</td></tr>
+        <tr><td class="info-label">{{call .T "escrow_configured"}}</td><td>{{.EscrowConfigured}}</td></tr>
+        <tr><td class="info-label">{{call .T "notifications_configured"}}</td><td>{{.NotifyConfigured}}</td></tr>
+        <tr><td class="info-label">{{call .T "host_registry"}}</td><td>{{.HostRegistry}}</td></tr>
+        <tr><td class="info-label">{{call .T "session_persistence"}}</td><td>{{.SessionPersistence}}</td></tr>
+        <tr><td class="info-label">{{call .T "admin_groups"}}</td><td>{{.AdminGroups}}</td></tr>
+        <tr><td class="info-label">{{call .T "admin_approval_hosts"}}</td><td>{{.AdminApprovalHosts}}</td></tr>
+      </table>
+    </div>
+    <div class="info-section">
+      <h3>{{call .T "system_info"}}</h3>
+      <table class="info-table">
+        <tr><td class="info-label">{{call .T "uptime"}}</td><td>{{.Uptime}}</td></tr>
+        <tr><td class="info-label">{{call .T "go_version"}}</td><td>{{.GoVersion}}</td></tr>
+        <tr><td class="info-label">{{call .T "os_arch"}}</td><td>{{.OSArch}}</td></tr>
+        <tr><td class="info-label">{{call .T "goroutines"}}</td><td>{{.Goroutines}}</td></tr>
+        <tr><td class="info-label">{{call .T "memory_usage"}}</td><td>{{.MemUsage}}</td></tr>
+        <tr><td class="info-label">{{call .T "active_sessions"}}</td><td>{{.ActiveSessionsCount}}</td></tr>
+      </table>
+    </div>
+
+    {{else if eq .AdminTab "users"}}
+    {{if .Users}}
+    <table class="users-table">
+      <thead>
+        <tr>
+          <th>{{call .T "user"}}</th>
+          <th>{{call .T "active_sessions_count"}}</th>
+          <th>{{call .T "last_active"}}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Users}}
+        <tr>
+          <td><strong>{{.Username}}</strong></td>
+          <td>{{.ActiveSessions}}</td>
+          <td>{{if .LastActive}}{{.LastActive}} <span style="color:var(--text-secondary);font-size:0.75rem">({{.LastActiveAgo}})</span>{{else}}—{{end}}</td>
+          <td style="text-align:right">
+            <a href="/admin/history?user={{.Username}}" class="host-btn" style="margin-right:4px">{{call $.T "history"}}</a>
+            <form method="POST" action="/api/users/remove" style="display:inline" onsubmit="return confirm('{{call $.T "confirm_remove_user"}}')">
+              <input type="hidden" name="target_user" value="{{.Username}}">
+              <input type="hidden" name="username" value="{{$.Username}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+              <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+              <button type="submit" class="host-btn danger">{{call $.T "remove_user"}}</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty-state">{{call .T "no_users"}}</p>
+    {{end}}
+
+    {{else if eq .AdminTab "hosts"}}
+    {{if .AllGroups}}
+    <div class="group-filter">
+      <form method="GET" action="/admin/hosts">
+        <select name="group" class="col-filter-select" aria-label="Filter by group">
+          <option value="">All groups</option>
+          {{range .AllGroups}}<option value="{{.}}" {{if eq . $.GroupFilter}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </form>
+      {{if .GroupFilter}}<a href="/admin/hosts" style="font-size:0.813rem;color:var(--text-secondary)">clear filter</a>{{end}}
+    </div>
+    {{end}}
+
+    {{if .Hosts}}
+    <div class="list" role="list" aria-label="{{call .T "known_hosts"}}">
+      {{range .Hosts}}
+      <div class="row" role="listitem">
+        <div class="row-info">
+          <span class="row-host">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
+          {{if .ActiveUsers}}
+            {{range .ActiveUsers}}
+              <span class="row-active">{{.Username}} — {{.Remaining}} {{call $.T "remaining"}}</span>
+            {{end}}
+          {{else}}
+            <span class="row-sub">{{call $.T "no_active_session"}}</span>
+          {{end}}
+          {{if .Escrowed}}
+            <span class="row-sub">{{if .EscrowExpired}}{{call $.T "breakglass_expired"}} ({{call $.T "escrowed"}} {{.EscrowAge}} {{call $.T "ago"}}){{else}}{{call $.T "breakglass_escrowed"}} ({{.EscrowAge}} {{call $.T "ago"}}){{end}}</span>
+          {{end}}
+          {{if .AuthorizedUsers}}
+            <span class="row-sub" style="font-size:0.75rem">{{call $.T "users"}}: {{range $i,$u := .AuthorizedUsers}}{{if $i}}, {{end}}{{$u}}{{end}}</span>
+          {{end}}
+        </div>
+        {{if .Escrowed}}
+        {{if .EscrowLink}}
+        <a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>
+        {{end}}
+        <form method="POST" action="/api/hosts/rotate" style="display:inline">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <button type="submit" class="host-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
+        </form>
+        {{end}}
+        {{if .Active}}
+        <form method="POST" action="/api/sessions/extend" style="display:inline">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <input type="hidden" name="from" value="/admin/hosts">
+          <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
+        </form>
+        <form method="POST" action="/api/sessions/revoke">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <input type="hidden" name="from" value="/admin/hosts">
+          <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+        </form>
+        {{else}}
+        <form method="POST" action="/api/hosts/elevate" class="elevate-form">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          {{if $.Durations}}
+          <select name="duration" aria-label="Duration">
+            {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+          {{end}}
+          <button type="submit" class="host-btn filled">{{call $.T "elevate"}}</button>
+        </form>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    <div class="bulk-actions">
+      {{if .HasEscrowedHosts}}
+      <form method="POST" action="/api/hosts/rotate-all" style="display:inline">
+        <input type="hidden" name="username" value="{{.Username}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+        <button type="submit" class="bulk-btn" onclick="return confirm('Request breakglass rotation on all hosts?')">{{call .T "rotate_all"}}</button>
+      </form>
+      {{end}}
+      <form method="POST" action="/api/sessions/extend-all" style="display:inline">
+        <input type="hidden" name="username" value="{{.Username}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+        <input type="hidden" name="from" value="/admin/hosts">
+        <button type="submit" class="bulk-btn primary" onclick="return confirm('Extend all active sessions to maximum?')">{{call .T "extend_all"}}</button>
+      </form>
+      <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
+        <input type="hidden" name="username" value="{{.Username}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+        <input type="hidden" name="from" value="/admin/hosts">
+        <button type="submit" class="bulk-btn danger" onclick="return confirm('Revoke all active sessions?')">{{call .T "revoke_all"}}</button>
+      </form>
+    </div>
+    {{else}}
+    <p class="empty-state">{{call .T "no_known_hosts"}}</p>
+    {{end}}
+
+    {{else if eq .AdminTab "history"}}
+    <form method="GET" action="/admin/history" class="search-bar">
+      <input type="hidden" name="action" value="{{.ActionFilter}}">
+      <input type="hidden" name="hostname" value="{{.HostFilter}}">
+      <input type="hidden" name="user" value="{{.UserFilter}}">
+      <input type="hidden" name="sort" value="{{.Sort}}">
+      <input type="hidden" name="order" value="{{.Order}}">
+      <input type="hidden" name="per_page" value="{{.PerPage}}">
+      <input type="text" name="q" value="{{.Query}}" placeholder="{{call .T "search"}}" aria-label="Search">
+    </form>
+
+    {{if .History}}
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th><form method="GET" action="/admin/history" class="col-filter-form">
+  <input type="hidden" name="q" value="{{.Query}}">
+  <input type="hidden" name="action" value="{{.ActionFilter}}">
+  <input type="hidden" name="hostname" value="{{.HostFilter}}">
+  <input type="hidden" name="sort" value="{{.Sort}}">
+  <input type="hidden" name="order" value="{{.Order}}">
+  <input type="hidden" name="per_page" value="{{.PerPage}}">
+  <select name="user" class="col-filter-select" aria-label="Filter by user">
+    <option value="">{{call .T "user"}} (all)</option>
+    {{range .UserOptions}}<option value="{{.}}" {{if eq . $.UserFilter}}selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</form><a href="/admin/history?sort=user&order={{if eq .Sort "user"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "user"}} active{{end}}">{{if and (eq .Sort "user") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th>{{call .T "time"}} <a href="/admin/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th><form method="GET" action="/admin/history" class="col-filter-form">
+  <input type="hidden" name="hostname" value="{{.HostFilter}}">
+  <input type="hidden" name="q" value="{{.Query}}">
+  <input type="hidden" name="user" value="{{.UserFilter}}">
+  <input type="hidden" name="sort" value="{{.Sort}}">
+  <input type="hidden" name="order" value="{{.Order}}">
+  <input type="hidden" name="per_page" value="{{.PerPage}}">
+  <select name="action" class="col-filter-select" aria-label="Filter by action">
+    <option value="">{{call .T "action_all"}}</option>
+    {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+</form><a href="/admin/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th><form method="GET" action="/admin/history" class="col-filter-form">
+  <input type="hidden" name="action" value="{{.ActionFilter}}">
+  <input type="hidden" name="q" value="{{.Query}}">
+  <input type="hidden" name="user" value="{{.UserFilter}}">
+  <input type="hidden" name="sort" value="{{.Sort}}">
+  <input type="hidden" name="order" value="{{.Order}}">
+  <input type="hidden" name="per_page" value="{{.PerPage}}">
+  <select name="hostname" class="col-filter-select" aria-label="Filter by hostname">
+    <option value="">{{call .T "host_all"}}</option>
+    {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</form><a href="/admin/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th>{{call .T "code"}} <a href="/admin/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .History}}
+        <tr>
+          <td>{{.Username}}</td>
+          <td class="col-time">
+            <span class="timestamp">{{.FormattedTime}}</span>
+            <span class="time-ago">({{.TimeAgo}})</span>
+          </td>
+          <td><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
+          <td class="col-host">{{.Hostname}}</td>
+          <td class="col-code">{{if .Code}}{{.Code}}{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <div class="pagination">
+      {{if .HasPrev}}<a href="/admin/history?page={{sub .Page 1}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}">&#8592; {{call .T "previous"}}</a>{{end}}
+      <span class="page-info">{{call .T "page"}} {{.Page}} {{call .T "of"}} {{.TotalPages}}</span>
+      {{if .HasNext}}<a href="/admin/history?page={{add .Page 1}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}">{{call .T "next"}} &#8594;</a>{{end}}
+      <form method="GET" action="/admin/history" class="page-size-form">
+        <input type="hidden" name="action" value="{{.ActionFilter}}">
+        <input type="hidden" name="hostname" value="{{.HostFilter}}">
+        <input type="hidden" name="user" value="{{.UserFilter}}">
+        <input type="hidden" name="sort" value="{{.Sort}}">
+        <input type="hidden" name="order" value="{{.Order}}">
+        <input type="hidden" name="q" value="{{.Query}}">
+        <select name="per_page" class="page-size-select" aria-label="Page size">
+          {{range .PerPageOptions}}<option value="{{.}}" {{if eqInt . $.PerPage}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        <button type="submit" class="page-size-btn">{{call .T "go"}}</button>
+      </form>
+    </div>
+    {{else}}
+    <p class="empty-state">{{call .T "no_activity"}}</p>
+    {{end}}
+    {{end}}
   </div>
 </body>
 </html>`

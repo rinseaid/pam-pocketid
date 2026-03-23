@@ -283,6 +283,25 @@ func (r *HostRegistry) saveLocked() {
 	}
 }
 
+// RemoveUserFromAllHosts removes a username from all host user lists.
+func (r *HostRegistry) RemoveUserFromAllHosts(username string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	changed := false
+	for _, host := range r.hosts {
+		for i, u := range host.Users {
+			if u == username {
+				host.Users = append(host.Users[:i], host.Users[i+1:]...)
+				changed = true
+				break
+			}
+		}
+	}
+	if changed {
+		r.saveLocked()
+	}
+}
+
 // subtleCompare does constant-time string comparison, preventing timing attacks.
 // Hashes both values before comparison to prevent length leakage.
 func subtleCompare(a, b string) bool {

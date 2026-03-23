@@ -768,6 +768,50 @@ func (s *ChallengeStore) LastOIDCAuth(username string) time.Time {
 	return s.lastOIDCAuth[username]
 }
 
+// AllUsers returns all usernames that have any data in the store.
+func (s *ChallengeStore) AllUsers() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	users := make(map[string]bool)
+	for user := range s.actionLog {
+		users[user] = true
+	}
+	for key := range s.lastApproval {
+		parts := strings.SplitN(key, "@", 2)
+		users[parts[0]] = true
+	}
+	for user := range s.revokeTokensBefore {
+		users[user] = true
+	}
+	result := make([]string, 0, len(users))
+	for u := range users {
+		result = append(result, u)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// RemoveUser removes all data for a user: grace sessions, action log, revocation timestamps.
+func (s *ChallengeStore) RemoveUser(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Revoke all grace sessions for this user
+	prefix := username + "@"
+	for key := range s.lastApproval {
+		if key == username || strings.HasPrefix(key, prefix) {
+			delete(s.lastApproval, key)
+		}
+	}
+	// Set revocation timestamp so token caches are invalidated
+	s.revokeTokensBefore[username] = time.Now()
+	// Clear action log
+	delete(s.actionLog, username)
+	// Clear OIDC auth record
+	delete(s.lastOIDCAuth, username)
+	graceSessions.Set(float64(len(s.lastApproval)))
+	s.saveStateLocked()
+}
+
 // reapLoop removes expired challenges periodically.
 func (s *ChallengeStore) reapLoop() {
 	defer func() {
