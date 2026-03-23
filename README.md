@@ -157,8 +157,6 @@ $ sudo systemctl restart nginx
 [sudo] runs the command
 ```
 
-Visual mockups of all terminal, browser, and mobile notification UIs are available at [**rinseaid.github.io/pam-pocketid**](https://rinseaid.github.io/pam-pocketid/all-pages.html) (supports light/dark mode).
-
 ## Web dashboard
 
 The server exposes a full web dashboard at the `PAM_POCKETID_EXTERNAL_URL`. Users authenticate via Pocket ID OIDC (passkey) to access it. The dashboard is organized into four tabs:
@@ -209,6 +207,28 @@ Accessible from the avatar in the top-right corner of every dashboard page:
 - **Language selector** — switch the dashboard UI language. See [Internationalization](#internationalization) below.
 - **Sign out** — clears the session cookie and redirects to the OIDC login page
 
+### Live updates (Server-Sent Events)
+
+The dashboard subscribes to a per-user SSE stream at `/events`. Pending challenges, grace session changes, and history entries are pushed to the browser in real time — no polling or manual refresh required. Each browser tab maintains its own SSE connection; connections are cleaned up automatically on tab close.
+
+### Multi-user admin dashboard
+
+Users who are members of a group listed in `PAM_POCKETID_ADMIN_GROUPS` gain admin access to the dashboard. Admins see a user switcher that lets them view and manage challenges and sessions for any user — approve, reject, or revoke on behalf of others. Non-admin users see only their own data.
+
+```yaml
+environment:
+  PAM_POCKETID_ADMIN_GROUPS: "admins,ops-team"
+```
+
+### One-tap approval from notifications
+
+Push notification messages include a direct approval URL. When a user taps the link from their phone:
+
+1. If their existing OIDC session is fresh (within `PAM_POCKETID_ONETAP_MAX_AGE` seconds, default 300), the challenge is approved immediately — **no second login required**.
+2. If the session has expired, the user is redirected through a standard OIDC login first.
+
+This makes mobile approval a single tap in the common case.
+
 ## Internationalization
 
 The dashboard UI is fully translated into 8 languages:
@@ -240,6 +260,8 @@ Language is detected in priority order:
 | `PAM_POCKETID_CLIENT_SECRET` | *(required)* | OIDC client secret |
 | `PAM_POCKETID_EXTERNAL_URL` | *(required)* | Public URL of this server |
 | `PAM_POCKETID_SHARED_SECRET` | *(required)* | Shared secret for PAM helper auth (min 16 chars) |
+| `PAM_POCKETID_ADMIN_GROUPS` | *(empty)* | Comma-separated OIDC group names with admin dashboard access (can manage all users' challenges) |
+| `PAM_POCKETID_ONETAP_MAX_AGE` | `300` | Max OIDC session age in seconds for one-tap approval without re-login |
 | `PAM_POCKETID_LISTEN` | `:8090` | Listen address |
 | `PAM_POCKETID_CHALLENGE_TTL` | `120` | Challenge lifetime in seconds (10–600) |
 | `PAM_POCKETID_GRACE_PERIOD` | `0` | Skip re-auth if user approved within this many seconds, per-host (0 = disabled, max 86400) |
