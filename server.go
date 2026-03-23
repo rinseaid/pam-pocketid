@@ -4312,9 +4312,9 @@ const navCSS = `
     .nav a:hover { color: var(--text); background: var(--info-bg); }
     .nav a.active { color: var(--primary); font-weight: 700; }
     .theme-options { display: flex; gap: 4px; padding: 4px 12px 8px; }
-    .theme-option { flex: 1; text-align: center; padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary); text-decoration: none; border: 1px solid var(--border); cursor: pointer; }
-    .theme-option:hover { background: var(--info-bg); color: var(--text); }
-    .theme-option.active { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; }
+    .theme-option { flex: 1; text-align: center; padding: 5px 8px; border-radius: 6px; font-size: 0.75rem; color: var(--text); text-decoration: none; border: 1px solid var(--border); cursor: pointer; font-weight: 500; }
+    .theme-option:hover { background: var(--info-bg); }
+    .theme-option.active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; font-weight: 600; }
     .profile-menu { position: relative; }
     .profile-btn {
       width: 32px; height: 32px; border-radius: 50%;
@@ -5393,10 +5393,10 @@ const adminPageHTML = `<!DOCTYPE html>
     </nav>
 
     <div class="admin-tabs">
-      <a href="/admin" class="{{if eq .AdminTab "overview"}}active{{end}}">{{call .T "overview"}}</a>
+      <a href="/admin/history" class="{{if eq .AdminTab "history"}}active{{end}}">{{call .T "history"}}</a>
       <a href="/admin/users" class="{{if eq .AdminTab "users"}}active{{end}}">{{call .T "users"}}</a>
       <a href="/admin/hosts" class="{{if eq .AdminTab "hosts"}}active{{end}}">{{call .T "hosts"}}</a>
-      <a href="/admin/history" class="{{if eq .AdminTab "history"}}active{{end}}">{{call .T "history"}}</a>
+      <a href="/admin" class="{{if eq .AdminTab "overview"}}active{{end}}">{{call .T "info"}}</a>
     </div>
 
     {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
