@@ -546,7 +546,18 @@ The server can override the client-side setting via `PAM_POCKETID_CLIENT_TOKEN_C
 
 **Prometheus metrics:** `GET /metrics` — all metrics prefixed with `pam_pocketid_`.
 
-**Grafana dashboard:** a pre-built dashboard with 22 panels (challenge throughput, approval latency, grace session activity, break-glass events, notification outcomes, and host registry stats) is available for auto-provisioning via GitOps. Point Grafana's provisioning at the `grafana/` directory in this repo.
+**Grafana dashboard:** [`pam-pocketid-dashboard.json`](pam-pocketid-dashboard.json) provides a pre-built dashboard with 22 panels across 6 rows:
+
+| Row | Panels |
+|-----|--------|
+| Health Overview | Active challenges, challenges created (24h), approval rate, auth failures, grace sessions, registered hosts |
+| Challenge Lifecycle | Challenge flow (stacked: created/approved/auto-approved/expired/denied), active queue |
+| Approval Timing | p50/p95/p99 duration, OIDC exchange latency, grace hit ratio, denial breakdown |
+| Notifications | Outcomes (sent/failed/skipped), success rate, failures (24h) |
+| Security & Break-glass | Auth failures over time, rate limit rejections, escrow operations |
+| System | Goroutines, process memory, GC duration |
+
+Import via Grafana UI (Dashboards → Import → upload JSON) or copy to your Grafana provisioning directory for auto-loading.
 
 | Metric | Type | Description |
 |---|---|---|
