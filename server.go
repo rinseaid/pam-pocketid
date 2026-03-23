@@ -1985,7 +1985,6 @@ func (s *Server) handleSessionsCallback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Determine role based on group membership
-	log.Printf("OIDC groups claim for %q: %v (admin groups config: %v)", username, claims.Groups, s.cfg.AdminGroups)
 	role := "user"
 	if len(s.cfg.AdminGroups) > 0 {
 		for _, userGroup := range claims.Groups {
