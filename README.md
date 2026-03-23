@@ -26,6 +26,9 @@ Browser-based sudo elevation via [Pocket ID](https://github.com/pocket-id/pocket
 |------|-------|
 | ![Info (dark)](screenshots/info.png) | ![Info (light)](screenshots/info-light.png) |
 
+### Terminal
+![Terminal](screenshots/terminal.png)
+
 ## How it works
 
 ```
