@@ -248,6 +248,14 @@ type webhookData struct {
 	Timestamp   string
 }
 
+// BestApprovalURL returns the one-tap URL if available, otherwise the dashboard URL.
+func (d webhookData) BestApprovalURL() string {
+	if d.OneTapURL != "" {
+		return d.OneTapURL
+	}
+	return d.ApprovalURL
+}
+
 // formatWebhookRaw returns a generic JSON payload with all challenge fields.
 func formatWebhookRaw(d webhookData) ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
@@ -265,7 +273,7 @@ func formatWebhookRaw(d webhookData) ([]byte, error) {
 // formatWebhookApprise returns a payload suitable for an Apprise API endpoint.
 func formatWebhookApprise(d webhookData) ([]byte, error) {
 	body := fmt.Sprintf("**User:** %s\n**Host:** %s\n**Code:** `%s`\n**Expires:** %ds\n\n[Approve](%s)",
-		d.Username, d.Hostname, d.UserCode, d.ExpiresIn, d.ApprovalURL)
+		d.Username, d.Hostname, d.UserCode, d.ExpiresIn, d.BestApprovalURL())
 	return json.Marshal(map[string]interface{}{
 		"title":  "Sudo approval needed",
 		"body":   body,
@@ -285,7 +293,7 @@ func formatWebhookDiscord(d webhookData) ([]byte, error) {
 				{"name": "Code", "value": "`" + d.UserCode + "`", "inline": false},
 				{"name": "Expires", "value": fmt.Sprintf("%ds", d.ExpiresIn), "inline": true},
 			},
-			"url": d.ApprovalURL,
+			"url": d.BestApprovalURL(),
 		}},
 	})
 }
@@ -293,7 +301,7 @@ func formatWebhookDiscord(d webhookData) ([]byte, error) {
 // formatWebhookSlack returns a Slack incoming-webhook payload.
 func formatWebhookSlack(d webhookData) ([]byte, error) {
 	text := fmt.Sprintf("*Sudo approval needed*\nUser: %s | Host: %s | Code: `%s` | Expires: %ds\n<%s|Approve>",
-		d.Username, d.Hostname, d.UserCode, d.ExpiresIn, d.ApprovalURL)
+		d.Username, d.Hostname, d.UserCode, d.ExpiresIn, d.BestApprovalURL())
 	return json.Marshal(map[string]string{"text": text})
 }
 
@@ -305,7 +313,7 @@ func formatWebhookNtfy(d webhookData) ([]byte, error) {
 		"message": fmt.Sprintf("User: %s\nHost: %s\nCode: %s\nExpires: %ds",
 			d.Username, d.Hostname, d.UserCode, d.ExpiresIn),
 		"actions": []map[string]string{
-			{"action": "view", "label": "Approve", "url": d.ApprovalURL},
+			{"action": "view", "label": "Approve", "url": d.BestApprovalURL()},
 		},
 	})
 }
