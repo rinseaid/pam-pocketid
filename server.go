@@ -3797,9 +3797,9 @@ const historyPageHTML = `<!DOCTYPE html>
       outline: none;
     }
     .search-bar input[type="text"]:focus { border-color: var(--primary); box-shadow: var(--focus-ring); }
-    .export-links { display: inline-flex; gap: 4px; margin-left: 8px; }
-    .export-btn { font-size: 0.75rem; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); text-decoration: none; }
-    .export-btn:hover { background: var(--info-bg); color: var(--text); }
+    .export-links { margin-left: auto; font-size: 0.7rem; }
+    .export-link { color: var(--text-secondary); text-decoration: none; padding: 0 4px; }
+    .export-link:hover { color: var(--primary); text-decoration: underline; }
     .pagination { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 16px; font-size: 0.875rem; flex-wrap: wrap; }
     .pagination a { color: var(--primary); text-decoration: none; font-weight: 600; }
     .pagination a:hover { text-decoration: underline; }
@@ -3963,10 +3963,6 @@ const historyPageHTML = `<!DOCTYPE html>
       {{if .HoursAgo}}<input type="hidden" name="hours_ago" value="{{.HoursAgo}}">{{end}}
       <input type="text" name="q" value="{{.Query}}" placeholder="{{call .T "search"}}" aria-label="Search">
     </form>
-    <div class="export-links">
-      <a href="/api/history/export?format=csv" class="export-btn">{{call .T "export_csv"}}</a>
-      <a href="/api/history/export?format=json" class="export-btn">{{call .T "export_json"}}</a>
-    </div>
 
     <div class="filter-toolbar">
       <form method="GET" action="/history" class="filter-form">
@@ -4044,6 +4040,7 @@ const historyPageHTML = `<!DOCTYPE html>
         </select>
         <button type="submit" class="page-size-btn">{{call .T "go"}}</button>
       </form>
+      <span class="export-links"><a href="/api/history/export?format=csv" class="export-link">CSV</a> <a href="/api/history/export?format=json" class="export-link">JSON</a></span>
     </div>
     {{else}}
     <p class="empty-state">{{call .T "no_activity"}}</p>
