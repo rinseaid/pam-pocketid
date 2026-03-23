@@ -690,16 +690,25 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		pending = s.store.PendingChallenges(username)
 		sessions = s.store.ActiveSessions(username)
 	}
-	var allHistory []ActionLogEntry
+	var allHistoryWithUsers []ActionLogEntryWithUser
 	if isAdmin {
-		allHistory = s.store.AllActionHistory()
+		allHistoryWithUsers = s.store.AllActionHistoryWithUsers()
 	} else {
-		allHistory = s.store.ActionHistory(username)
+		for _, e := range s.store.ActionHistory(username) {
+			allHistoryWithUsers = append(allHistoryWithUsers, ActionLogEntryWithUser{
+				Username:  username,
+				Actor:     e.Actor,
+				Timestamp: e.Timestamp,
+				Action:    e.Action,
+				Hostname:  e.Hostname,
+				Code:      e.Code,
+			})
+		}
 	}
 	// Limit dashboard to most recent 5 entries
-	history := allHistory
-	if len(history) > 5 {
-		history = history[:5]
+	dashHistory := allHistoryWithUsers
+	if len(dashHistory) > 5 {
+		dashHistory = dashHistory[:5]
 	}
 
 	now := time.Now()
@@ -776,8 +785,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"Flashes":        flashes,
 		"Pending":        pendingViews,
 		"Sessions":       sessionViews,
-		"History":        history,
-		"HasMoreHistory": len(allHistory) > 5,
+		"History":        dashHistory,
+		"HasMoreHistory": len(allHistoryWithUsers) > 5,
 		"CSRFToken":      csrfToken,
 		"CSRFTs":         csrfTs,
 		"ActivePage":     "sessions",
@@ -2111,7 +2120,25 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	allHistory := s.store.ActionHistory(username)
+	isAdmin := s.getSessionRole(r) == "admin"
+
+	// For admin, load all users' history (with username per entry).
+	// For non-admin, load own history and tag each entry with the session username.
+	var allHistory []ActionLogEntryWithUser
+	if isAdmin {
+		allHistory = s.store.AllActionHistoryWithUsers()
+	} else {
+		for _, e := range s.store.ActionHistory(username) {
+			allHistory = append(allHistory, ActionLogEntryWithUser{
+				Username:  username,
+				Actor:     e.Actor,
+				Timestamp: e.Timestamp,
+				Action:    e.Action,
+				Hostname:  e.Hostname,
+				Code:      e.Code,
+			})
+		}
+	}
 
 	// Collect unique action types and hostnames from the FULL unfiltered history
 	actionSet := make(map[string]bool)
@@ -2227,7 +2254,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 			activeHoursAgo = h
 			hourStart := nowInTZ.Add(-time.Duration(h+1) * time.Hour).Truncate(time.Hour)
 			hourEnd := hourStart.Add(time.Hour)
-			var filtered []ActionLogEntry
+			var filtered []ActionLogEntryWithUser
 			for _, e := range allHistory {
 				if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
 					filtered = append(filtered, e)
@@ -2241,7 +2268,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 
 	// Filter by action type
 	if actionFilter != "" {
-		var filtered []ActionLogEntry
+		var filtered []ActionLogEntryWithUser
 		for _, e := range history {
 			if e.Action == actionFilter {
 				filtered = append(filtered, e)
@@ -2252,7 +2279,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 
 	// Filter by hostname
 	if hostFilter != "" {
-		var filtered []ActionLogEntry
+		var filtered []ActionLogEntryWithUser
 		for _, e := range history {
 			if e.Hostname == hostFilter {
 				filtered = append(filtered, e)
@@ -2264,7 +2291,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	// Filter by search term (case-insensitive match on hostname or code)
 	if query != "" {
 		q := strings.ToLower(query)
-		var filtered []ActionLogEntry
+		var filtered []ActionLogEntryWithUser
 		for _, e := range history {
 			if strings.Contains(strings.ToLower(e.Hostname), q) || strings.Contains(strings.ToLower(e.Code), q) {
 				filtered = append(filtered, e)
@@ -2324,6 +2351,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 			Hostname:      e.Hostname,
 			Code:          e.Code,
 			Actor:         e.Actor,
+			Username:      e.Username,
 			FormattedTime: e.Timestamp.In(tzLoc).Format("2006-01-02 15:04"),
 			TimeAgo:       timeAgoI18n(e.Timestamp, t),
 		})
@@ -2361,6 +2389,7 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		"Timeline":        timeline,
 		"HoursAgo":        hoursAgoStr,
 		"ActiveHoursAgo":  activeHoursAgo,
+		"IsAdmin":         isAdmin,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
@@ -2537,10 +2566,15 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 		sort.Strings(hosts)
 	}
 
+	type activeUserView struct {
+		Username  string
+		Remaining string
+	}
+
 	type hostView struct {
 		Hostname        string
 		Active          bool
-		Remaining       string
+		ActiveUsers     []activeUserView
 		Escrowed        bool
 		EscrowAge       string
 		EscrowExpired   bool
@@ -2550,18 +2584,34 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 		Group           string
 	}
 
+	isAdmin := s.getSessionRole(r) == "admin"
+
 	// Collect all group names for the filter dropdown
 	groupFilter := r.URL.Query().Get("group")
 	groupSet := make(map[string]struct{})
 
 	var hostViews []hostView
 	for _, h := range hosts {
-		rem := s.store.GraceRemaining(username, h)
 		hv := hostView{Hostname: h}
-		if rem > 0 {
-			hv.Active = true
-			hv.Remaining = formatDuration(rem)
+		var activeUsers []activeUserView
+		if isAdmin {
+			for _, sess := range s.store.ActiveSessionsForHost(h) {
+				activeUsers = append(activeUsers, activeUserView{
+					Username:  sess.Username,
+					Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+				})
+			}
+		} else {
+			rem := s.store.GraceRemaining(username, h)
+			if rem > 0 {
+				activeUsers = append(activeUsers, activeUserView{
+					Username:  username,
+					Remaining: formatDuration(rem),
+				})
+			}
 		}
+		hv.ActiveUsers = activeUsers
+		hv.Active = len(activeUsers) > 0
 		if escrowRecord, ok := escrowed[h]; ok {
 			hv.Escrowed = true
 			hv.EscrowAge = formatDuration(time.Since(escrowRecord.Timestamp))
@@ -2672,6 +2722,7 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 		"HasEscrowedHosts": hasEscrowed,
 		"AllGroups":        allGroups,
 		"GroupFilter":      groupFilter,
+		"IsAdmin":          isAdmin,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
@@ -3376,6 +3427,7 @@ type historyViewEntry struct {
 	Hostname      string
 	Code          string
 	Actor         string
+	Username      string
 	FormattedTime string
 	TimeAgo       string
 }
@@ -3753,7 +3805,7 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="list">
       {{range .History}}
       <div class="history-entry">
-        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>{{if .Actor}}<span class="history-actor">by {{.Actor}}</span>{{end}}
+        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>{{if .Actor}}<span class="history-actor">by {{.Actor}}</span>{{end}}{{if $.IsAdmin}}<span class="history-actor">{{.Username}}</span>{{end}}
         <span>{{.Hostname}}</span>
         {{if .Code}}<span class="row-code">{{.Code}}</span>{{end}}
         <span class="history-time">{{timeAgo .Timestamp}}</span>
@@ -3985,6 +4037,7 @@ const historyPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
+          {{if $.IsAdmin}}<th>{{call .T "user"}}</th>{{end}}
           <th>{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
@@ -4014,6 +4067,7 @@ const historyPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .History}}
         <tr>
+          {{if $.IsAdmin}}<td data-label="{{call $.T "user"}}">{{.Username}}</td>{{end}}
           <td data-label="{{call $.T "time"}}" class="col-time">
             <span class="timestamp">{{.FormattedTime}}</span>
             <span class="time-ago">({{.TimeAgo}})</span>
@@ -4187,8 +4241,10 @@ const hostsPageHTML = `<!DOCTYPE html>
       <div class="row" role="listitem">
         <div class="row-info">
           <span class="row-host">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
-          {{if .Active}}
-            <span class="row-active">{{call $.T "active"}} — {{.Remaining}} {{call $.T "remaining"}}</span>
+          {{if .ActiveUsers}}
+            {{range .ActiveUsers}}
+              <span class="row-active">{{if $.IsAdmin}}{{.Username}} — {{end}}{{.Remaining}} {{call $.T "remaining"}}</span>
+            {{end}}
           {{else}}
             <span class="row-sub">{{call $.T "no_active_session"}}</span>
           {{end}}

@@ -38,6 +38,7 @@
   "action": "Action",
   "host": "Host",
   "code": "Code",
+  "user": "User",
   "action_all": "Action (all)",
   "host_all": "Host (all)",
   "sort_by_time": "Sort by time",

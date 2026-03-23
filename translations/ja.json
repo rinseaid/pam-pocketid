@@ -38,6 +38,7 @@
   "action": "アクション",
   "host": "ホスト",
   "code": "コード",
+  "user": "ユーザー",
   "action_all": "アクション（すべて）",
   "host_all": "ホスト（すべて）",
   "sort_by_time": "時刻で並べ替え",

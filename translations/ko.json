@@ -38,6 +38,7 @@
   "action": "작업",
   "host": "호스트",
   "code": "코드",
+  "user": "사용자",
   "action_all": "작업 (전체)",
   "host_all": "호스트 (전체)",
   "sort_by_time": "시간순 정렬",

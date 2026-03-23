@@ -38,6 +38,7 @@
   "action": "操作",
   "host": "主机",
   "code": "代码",
+  "user": "用户",
   "action_all": "操作（全部）",
   "host_all": "主机（全部）",
   "sort_by_time": "按时间排序",

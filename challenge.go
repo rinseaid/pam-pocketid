@@ -602,6 +602,27 @@ func (s *ChallengeStore) UsersWithHostActivity(hostname string) []string {
 	return users
 }
 
+// ActiveSessionsForHost returns all users with active grace sessions on a host.
+func (s *ChallengeStore) ActiveSessionsForHost(hostname string) []GraceSession {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now()
+	var sessions []GraceSession
+	suffix := "@" + hostname
+	for key, expiry := range s.lastApproval {
+		if !now.Before(expiry) {
+			continue
+		}
+		if strings.HasSuffix(key, suffix) {
+			username := strings.TrimSuffix(key, suffix)
+			sessions = append(sessions, GraceSession{Username: username, Hostname: hostname, ExpiresAt: expiry})
+		} else if hostname == "" && !strings.Contains(key, "@") {
+			sessions = append(sessions, GraceSession{Username: key, Hostname: "", ExpiresAt: expiry})
+		}
+	}
+	return sessions
+}
+
 // KnownHosts returns unique hostnames from the action log for a given user, sorted alphabetically.
 func (s *ChallengeStore) KnownHosts(username string) []string {
 	s.mu.RLock()
