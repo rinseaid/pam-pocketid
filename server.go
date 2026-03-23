@@ -3350,13 +3350,13 @@ const dashboardHTML = `<!DOCTYPE html>
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn success">{{call .T "approve_all"}}</button>
+        <button type="submit" class="bulk-btn success" onclick="return confirm('Approve all pending requests?')">{{call .T "approve_all"}}</button>
       </form>
       <form method="POST" action="/api/challenges/reject-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn danger">{{call .T "reject_all"}}</button>
+        <button type="submit" class="bulk-btn danger" onclick="return confirm('Reject all pending requests?')">{{call .T "reject_all"}}</button>
       </form>
     </div>
     {{end}}
@@ -3377,7 +3377,7 @@ const dashboardHTML = `<!DOCTYPE html>
           {{if $.IsAdmin}}<input type="hidden" name="session_username" value="{{.Username}}">{{end}}
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="revoke-btn" aria-label="{{call $.T "revoke"}} {{.Hostname}}">{{call $.T "revoke"}}</button>
+          <button type="submit" class="revoke-btn" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
         </form>
       </div>
       {{end}}
@@ -3387,7 +3387,7 @@ const dashboardHTML = `<!DOCTYPE html>
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn danger">{{call .T "revoke_all"}}</button>
+        <button type="submit" class="bulk-btn danger" onclick="return confirm('Revoke all active sessions?')">{{call .T "revoke_all"}}</button>
       </form>
     </div>
     {{end}}
@@ -3787,7 +3787,7 @@ const hostsPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <input type="hidden" name="from" value="/hosts">
-          <button type="submit" class="revoke-btn">{{call $.T "revoke"}}</button>
+          <button type="submit" class="revoke-btn" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
         </form>
         {{else}}
         <form method="POST" action="/api/hosts/elevate" class="elevate-form">
@@ -3812,7 +3812,7 @@ const hostsPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="username" value="{{$.Username}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="rotate-btn">{{call $.T "rotate"}}</button>
+          <button type="submit" class="rotate-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
         </form>
         {{end}}
       </div>
@@ -3824,7 +3824,7 @@ const hostsPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn">{{call .T "rotate_all"}}</button>
+        <button type="submit" class="bulk-btn" onclick="return confirm('Request breakglass rotation on all hosts?')">{{call .T "rotate_all"}}</button>
       </form>
     </div>
     {{end}}
