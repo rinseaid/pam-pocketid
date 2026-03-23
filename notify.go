@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"text/template"
 	"time"
 )
 
@@ -236,49 +237,152 @@ func (s *Server) sendNotification(challenge *Challenge, approvalURL string, oneT
 	}()
 }
 
-// sendWebhookNotification sends a JSON POST to the configured webhook URL when
-// a new challenge is created. It is a no-op if no webhook URL is configured.
-func (s *Server) sendWebhookNotification(username, hostname, userCode, approvalURL, oneTapURL string, expiresIn int) {
-	if s.cfg.NotifyWebhookURL == "" {
-		return
-	}
+// webhookData holds all the fields available to webhook formatters.
+type webhookData struct {
+	Username    string
+	Hostname    string
+	UserCode    string
+	ApprovalURL string
+	OneTapURL   string
+	ExpiresIn   int
+	Timestamp   string
+}
 
-	payload := map[string]interface{}{
+// formatWebhookRaw returns a generic JSON payload with all challenge fields.
+func formatWebhookRaw(d webhookData) ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
 		"event":        "challenge_created",
-		"username":     username,
-		"hostname":     hostname,
-		"user_code":    userCode,
-		"approval_url": approvalURL,
-		"onetap_url":   oneTapURL,
-		"expires_in":   expiresIn,
-		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+		"username":     d.Username,
+		"hostname":     d.Hostname,
+		"user_code":    d.UserCode,
+		"approval_url": d.ApprovalURL,
+		"onetap_url":   d.OneTapURL,
+		"expires_in":   d.ExpiresIn,
+		"timestamp":    d.Timestamp,
+	})
+}
+
+// formatWebhookApprise returns a payload suitable for an Apprise API endpoint.
+func formatWebhookApprise(d webhookData) ([]byte, error) {
+	body := fmt.Sprintf("**User:** %s\n**Host:** %s\n**Code:** `%s`\n**Expires:** %ds\n\n[Approve](%s)",
+		d.Username, d.Hostname, d.UserCode, d.ExpiresIn, d.ApprovalURL)
+	return json.Marshal(map[string]interface{}{
+		"title":  "Sudo approval needed",
+		"body":   body,
+		"format": "markdown",
+	})
+}
+
+// formatWebhookDiscord returns a Discord webhook embed payload.
+func formatWebhookDiscord(d webhookData) ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"embeds": []map[string]interface{}{{
+			"title": "Sudo approval needed",
+			"color": 3447003, // blue
+			"fields": []map[string]interface{}{
+				{"name": "User", "value": d.Username, "inline": true},
+				{"name": "Host", "value": d.Hostname, "inline": true},
+				{"name": "Code", "value": "`" + d.UserCode + "`", "inline": false},
+				{"name": "Expires", "value": fmt.Sprintf("%ds", d.ExpiresIn), "inline": true},
+			},
+			"url": d.ApprovalURL,
+		}},
+	})
+}
+
+// formatWebhookSlack returns a Slack incoming-webhook payload.
+func formatWebhookSlack(d webhookData) ([]byte, error) {
+	text := fmt.Sprintf("*Sudo approval needed*\nUser: %s | Host: %s | Code: `%s` | Expires: %ds\n<%s|Approve>",
+		d.Username, d.Hostname, d.UserCode, d.ExpiresIn, d.ApprovalURL)
+	return json.Marshal(map[string]string{"text": text})
+}
+
+// formatWebhookNtfy returns a payload for an ntfy.sh server.
+func formatWebhookNtfy(d webhookData) ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"topic": "sudo",
+		"title": "Sudo approval needed",
+		"message": fmt.Sprintf("User: %s\nHost: %s\nCode: %s\nExpires: %ds",
+			d.Username, d.Hostname, d.UserCode, d.ExpiresIn),
+		"actions": []map[string]string{
+			{"action": "view", "label": "Approve", "url": d.ApprovalURL},
+		},
+	})
+}
+
+// formatWebhookCustom renders tmpl as a Go text/template with d as data and
+// returns the result as the raw HTTP body (must be valid JSON for most receivers).
+func formatWebhookCustom(d webhookData, tmpl string) ([]byte, error) {
+	t, err := template.New("webhook").Parse(tmpl)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, d); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// sendWebhookNotifications fires each configured webhook in its own goroutine.
+// It is a no-op when no webhooks are configured.
+func (s *Server) sendWebhookNotifications(d webhookData) {
+	for _, wh := range s.cfg.Webhooks {
+		go s.fireWebhook(wh, d)
+	}
+}
+
+// fireWebhook formats and delivers a single webhook. Errors are logged but
+// never returned — callers should not depend on delivery success.
+func (s *Server) fireWebhook(wh WebhookConfig, d webhookData) {
+	var (
+		body []byte
+		err  error
+	)
+
+	switch wh.Format {
+	case "apprise":
+		body, err = formatWebhookApprise(d)
+	case "discord":
+		body, err = formatWebhookDiscord(d)
+	case "slack":
+		body, err = formatWebhookSlack(d)
+	case "ntfy":
+		body, err = formatWebhookNtfy(d)
+	case "custom":
+		body, err = formatWebhookCustom(d, wh.Template)
+	default: // "raw" or unrecognised — fall back to raw
+		body, err = formatWebhookRaw(d)
 	}
 
-	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("ERROR: marshaling webhook payload: %v", err)
+		log.Printf("ERROR: formatting webhook (format=%q): %v", wh.Format, err)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.NotifyWebhookURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, wh.URL, bytes.NewReader(body))
 	if err != nil {
-		log.Printf("ERROR: creating webhook request: %v", err)
+		log.Printf("ERROR: creating webhook request (format=%q): %v", wh.Format, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range wh.Headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("ERROR: sending webhook notification: %v", err)
+		log.Printf("ERROR: webhook (format=%q) delivery failed: %v", wh.Format, err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		log.Printf("ERROR: webhook returned %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		log.Printf("ERROR: webhook (format=%q) returned %d: %s", wh.Format, resp.StatusCode, string(respBody))
 	}
 }
 

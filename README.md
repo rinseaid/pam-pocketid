@@ -53,6 +53,12 @@ Two components:
 - **Prometheus metrics** — `/metrics` exposes challenge, grace session, escrow, and notification counters
 - **Internationalization** — dashboard translated into 8 languages (en, es, fr, de, ja, zh, pt, ko)
 - **Graceful shutdown** — drains in-flight requests, waits for notifications, flushes session state
+- **Host groups** — tag hosts with a group label at registration; filter the Hosts tab by group
+- **Approval policies** — require a second admin approval for challenges from specific hosts via glob patterns
+- **Activity timeline** — 24-hour sparkline on the History tab; click a bar to filter by that hour
+- **Webhook notifications** — structured webhook delivery for Discord, Slack, ntfy, Apprise, and custom endpoints
+- **API keys for SIEM** — Bearer token auth on `/api/history/export` for log pipeline integration
+- **Confirmation dialogs** — all destructive actions (revoke, reject, remove host) prompt before executing
 
 ## Quick start
 
@@ -93,7 +99,7 @@ volumes:
   pam-pocketid-data:
 ```
 
-The Docker image is built on `debian:bookworm-slim` and includes: the `pam-pocketid` binary, Python 3 with `apprise`, the 1Password Python SDK, and `ca-certificates`. The server runs as a non-root user (`pampocketid`).
+The Docker image is built on `debian:bookworm-slim` and includes: the `pam-pocketid` binary, Python 3 with `apprise`, the 1Password Python SDK, and `ca-certificates`. The server runs as a non-root user (`pampocketid`). GitHub Actions publishes a fresh `:latest` image to `ghcr.io/rinseaid/pam-pocketid` on every push to `main`.
 
 ### 3. Install the PAM helper on Linux hosts
 
@@ -191,6 +197,10 @@ $ sudo systemctl restart nginx
 | `PAM_POCKETID_HOST_REGISTRY_FILE` | *(none)* | Path to JSON file for per-host secrets (auto-derived from `SESSION_STATE_FILE` if not set) |
 | `PAM_POCKETID_HISTORY_PAGE_SIZE` | `5` | Default entries per page on the History tab (valid: 5/10/25/50/100/500/1000) |
 | `PAM_POCKETID_ADMIN_GROUPS` | *(empty)* | Comma-separated OIDC group names with admin dashboard access |
+| `PAM_POCKETID_ADMIN_APPROVAL_HOSTS` | *(empty)* | Comma-separated glob patterns of hostnames that require a second admin approval before a challenge is granted |
+| `PAM_POCKETID_WEBHOOKS` | *(empty)* | JSON array of webhook configurations for structured notifications (see [Webhooks](#webhooks)) |
+| `PAM_POCKETID_WEBHOOKS_FILE` | *(empty)* | Path to a JSON file containing the webhook configuration array |
+| `PAM_POCKETID_API_KEYS` | *(empty)* | Comma-separated API keys for Bearer token auth on `/api/history/export` |
 | `PAM_POCKETID_NOTIFY_COMMAND` | *(empty)* | Shell command to run when a new challenge is created |
 | `PAM_POCKETID_NOTIFY_ENV` | *(empty)* | Comma-separated env var prefixes to pass to the notify command (e.g., `APPRISE_,TELEGRAM_`) |
 | `PAM_POCKETID_NOTIFY_USERS_FILE` | *(empty)* | Path to JSON file mapping usernames to per-user notification URLs |
@@ -231,7 +241,7 @@ Set in `/etc/pam-pocketid.conf` or as environment variables (env takes precedenc
 | `pam-pocketid serve` | Run the authentication server |
 | `pam-pocketid rotate-breakglass [--force]` | Rotate the break-glass password |
 | `pam-pocketid verify-breakglass` | Verify a break-glass password against the stored hash |
-| `pam-pocketid add-host <hostname> [--users user1,user2]` | Register a host with a generated per-host secret |
+| `pam-pocketid add-host <hostname> [--users user1,user2] [--group <group>]` | Register a host with a generated per-host secret; optionally assign to a group |
 | `pam-pocketid remove-host <hostname>` | Unregister a host |
 | `pam-pocketid list-hosts` | List all registered hosts |
 | `pam-pocketid rotate-host-secret <hostname>` | Generate a new secret for a registered host |
@@ -240,7 +250,7 @@ Set in `/etc/pam-pocketid.conf` or as environment variables (env takes precedenc
 
 ## Web dashboard
 
-Accessible at `PAM_POCKETID_EXTERNAL_URL`. Login is via Pocket ID OIDC (passkey). Real-time updates are pushed via Server-Sent Events — no polling or manual refresh required.
+Accessible at `PAM_POCKETID_EXTERNAL_URL`. Login is via Pocket ID OIDC (passkey). Real-time updates are pushed via Server-Sent Events — no polling or manual refresh required. All destructive actions (reject, revoke, remove host) show a confirmation dialog before executing.
 
 ### Sessions tab (`/`)
 
@@ -250,7 +260,7 @@ Accessible at `PAM_POCKETID_EXTERNAL_URL`. Login is via Pocket ID OIDC (passkey)
 
 ### History tab (`/history`)
 
-Full audit log with sortable columns, filter dropdowns, live search, configurable pagination (5–1000 entries/page), CSV/JSON export, and timezone-aware timestamps.
+Full audit log with sortable columns, filter dropdowns, live search, configurable pagination (5–1000 entries/page), CSV/JSON export, and timezone-aware timestamps. A 24-hour activity sparkline sits above the log: each bar represents one hour; clicking a bar filters the table to that hour. Hover over a bar for a rich tooltip with per-outcome counts. On small screens a collapsible filter toolbar keeps filters accessible without cluttering the view.
 
 ### Hosts tab (`/hosts`)
 
@@ -258,7 +268,7 @@ Full audit log with sortable columns, filter dropdowns, live search, configurabl
 - **Break-glass rotation** — signal a host or all hosts to rotate on next sudo
 - **Escrow status** — password age and whether it has exceeded the rotation interval
 - **Escrow links** — if `PAM_POCKETID_ESCROW_LINK_TEMPLATE` is set, a button links to the stored credential
-- **Host registry** — registered hosts, their per-host secrets, and authorized users
+- **Host registry** — registered hosts, their per-host secrets, and authorized users; each host displays its group badge if one was set at registration; a group filter dropdown narrows the list
 
 ### Info tab (`/info`)
 
@@ -309,6 +319,38 @@ environment:
 ```
 
 Set `APPRISE_URLS` to one or more Apprise service URLs (space-separated). Apprise is included in the Docker image.
+
+### Webhooks
+
+`PAM_POCKETID_WEBHOOKS` accepts a JSON array of webhook objects. Each object is delivered independently when a challenge is created. Supported formats:
+
+| Format | Description |
+|---|---|
+| `raw` | Plain HTTP POST with a JSON body of all `NOTIFY_*` fields |
+| `apprise` | Posts to an [Apprise API](https://github.com/caronc/apprise-api) endpoint |
+| `discord` | Discord webhook embed |
+| `slack` | Slack `blocks`-based message |
+| `ntfy` | ntfy.sh publish API |
+| `custom` | Arbitrary HTTP request with Go `text/template` body and configurable headers |
+
+```yaml
+environment:
+  PAM_POCKETID_WEBHOOKS: |
+    [
+      {"format": "discord", "url": "https://discord.com/api/webhooks/..."},
+      {"format": "ntfy",    "url": "https://ntfy.sh/my-topic"},
+      {"format": "slack",   "url": "https://hooks.slack.com/services/..."},
+      {
+        "format": "custom",
+        "url": "https://ingest.example.com/events",
+        "method": "POST",
+        "headers": {"Authorization": "Bearer token123"},
+        "body": "{\"user\":\"{{.Username}}\",\"host\":\"{{.Hostname}}\"}"
+      }
+    ]
+```
+
+Alternatively, store the array in a file and point `PAM_POCKETID_WEBHOOKS_FILE` at it. Webhook failures are logged but never block the challenge flow.
 
 ### Per-user routing
 
@@ -435,6 +477,33 @@ pam-pocketid remove-host web-prod-1
 
 Set `PAM_POCKETID_HOST_REGISTRY_FILE` to a persistent path (e.g., `/data/hosts.json`). If not set but `PAM_POCKETID_SESSION_STATE_FILE` is configured, the registry defaults to `hosts.json` in the same directory.
 
+## Approval policies
+
+`PAM_POCKETID_ADMIN_APPROVAL_HOSTS` is a comma-separated list of glob patterns matched against the requesting hostname. Challenges from matching hosts enter a **pending admin approval** state — they cannot be self-approved and must be explicitly approved by an admin before the challenge resolves. This is useful for production hosts or privileged systems where a second set of eyes is required.
+
+```yaml
+environment:
+  PAM_POCKETID_ADMIN_APPROVAL_HOSTS: "prod-*,db-*,*.critical.example.com"
+```
+
+Admins see a separate approval queue in the dashboard. The challenge TTL continues to count down while waiting — size it accordingly via `PAM_POCKETID_CHALLENGE_TTL`.
+
+## API keys
+
+`PAM_POCKETID_API_KEYS` is a comma-separated list of static API keys that authorize Bearer token access to `/api/history/export`. This allows log pipelines, SIEMs, and cron jobs to pull the full audit log without a browser OIDC session.
+
+```yaml
+environment:
+  PAM_POCKETID_API_KEYS: "key-abc123,key-def456"
+```
+
+```bash
+curl -H "Authorization: Bearer key-abc123" \
+  "https://sudo.example.com/api/history/export?format=json"
+```
+
+Keys are compared with constant-time comparison. Rotate by updating the env var and restarting the server.
+
 ## Token cache
 
 The PAM helper caches OIDC ID tokens locally to allow subsequent sudo invocations without a browser flow. When a cached token is valid, sudo is approved instantly.
@@ -476,6 +545,8 @@ The server can override the client-side setting via `PAM_POCKETID_CLIENT_TOKEN_C
 **Health check:** `GET /healthz` returns `ok` with HTTP 200.
 
 **Prometheus metrics:** `GET /metrics` — all metrics prefixed with `pam_pocketid_`.
+
+**Grafana dashboard:** a pre-built dashboard with 22 panels (challenge throughput, approval latency, grace session activity, break-glass events, notification outcomes, and host registry stats) is available for auto-provisioning via GitOps. Point Grafana's provisioning at the `grafana/` directory in this repo.
 
 | Metric | Type | Description |
 |---|---|---|

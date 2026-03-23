@@ -928,7 +928,17 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 
 	// Fire push notification asynchronously (no-op if not configured).
 	s.sendNotification(challenge, approvalURL, oneTapURL)
-	go s.sendWebhookNotification(challenge.Username, challenge.Hostname, challenge.UserCode, approvalURL, oneTapURL, int(s.cfg.ChallengeTTL.Seconds()))
+	// sendWebhookNotifications spawns one goroutine per configured webhook; no
+	// extra goroutine wrapper needed here.
+	s.sendWebhookNotifications(webhookData{
+		Username:    challenge.Username,
+		Hostname:    challenge.Hostname,
+		UserCode:    challenge.UserCode,
+		ApprovalURL: approvalURL,
+		OneTapURL:   oneTapURL,
+		ExpiresIn:   int(s.cfg.ChallengeTTL.Seconds()),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{

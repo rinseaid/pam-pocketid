@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
@@ -15,6 +16,16 @@ import (
 // clientConfigAllowNoServer allows LoadClientConfig to succeed without SERVER_URL.
 // Set to true by rotate-breakglass subcommand for local-only rotation.
 var clientConfigAllowNoServer bool
+
+// WebhookConfig describes a single webhook destination with its payload format
+// and optional per-request headers.
+type WebhookConfig struct {
+	URL      string            `json:"url"`
+	Format   string            `json:"format"` // "raw", "apprise", "discord", "slack", "ntfy", "custom"
+	Headers  map[string]string `json:"headers,omitempty"`
+	Template string            `json:"template,omitempty"` // for "custom" format
+	Tag      string            `json:"tag,omitempty"`      // apprise tag, ntfy topic, etc.
+}
 
 // DefaultConfigPath is the default location for the pam-pocketid config file.
 // The config file uses KEY=VALUE format (one per line, no export keyword).
@@ -51,7 +62,8 @@ type Config struct {
 	NotifyCommand        string   // Shell command to run when a new challenge is created
 	NotifyEnvPassthrough []string // Additional env var prefixes to pass to notify command (e.g., APPRISE_,TELEGRAM_)
 	NotifyUsersFile      string   // Path to JSON file mapping usernames to per-user notification URLs
-	NotifyWebhookURL     string   // URL for webhook notifications (POST JSON)
+	NotifyWebhookURL     string          // URL for webhook notifications (POST JSON) — legacy, superseded by Webhooks
+	Webhooks             []WebhookConfig // Multi-webhook destinations (parsed from PAM_POCKETID_WEBHOOKS / PAM_POCKETID_WEBHOOKS_FILE)
 
 	// Break-glass settings (server mode)
 	EscrowCommand          string    // Shell command to escrow break-glass passwords
@@ -195,6 +207,28 @@ func LoadServerConfig() (*Config, error) {
 	}
 
 	cfg.NotifyWebhookURL = os.Getenv("PAM_POCKETID_NOTIFY_WEBHOOK_URL")
+
+	// PAM_POCKETID_WEBHOOKS: inline JSON array of WebhookConfig objects.
+	if v := os.Getenv("PAM_POCKETID_WEBHOOKS"); v != "" {
+		if err := json.Unmarshal([]byte(v), &cfg.Webhooks); err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS: %w", err)
+		}
+	}
+	// PAM_POCKETID_WEBHOOKS_FILE: path to a JSON file containing a WebhookConfig array.
+	if v := os.Getenv("PAM_POCKETID_WEBHOOKS_FILE"); v != "" {
+		data, err := os.ReadFile(v)
+		if err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS_FILE: %w", err)
+		}
+		if err := json.Unmarshal(data, &cfg.Webhooks); err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS_FILE: %w", err)
+		}
+	}
+	// Backward compat: treat the legacy single-URL env var as a raw webhook
+	// when no explicit webhook list has been configured.
+	if cfg.NotifyWebhookURL != "" && len(cfg.Webhooks) == 0 {
+		cfg.Webhooks = append(cfg.Webhooks, WebhookConfig{URL: cfg.NotifyWebhookURL, Format: "raw"})
+	}
 
 	// Warn about likely misconfigurations: per-user file or env passthrough
 	// without a notify command means those settings have no effect.
