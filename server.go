@@ -149,6 +149,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.mux.HandleFunc("/api/sessions/revoke", s.handleRevokeSession)
 	s.mux.HandleFunc("/api/sessions/revoke-all", s.handleRevokeAll)
 	s.mux.HandleFunc("/api/sessions/extend", s.handleExtendSession)
+	s.mux.HandleFunc("/api/sessions/extend-all", s.handleExtendAll)
 	s.mux.HandleFunc("/api/history/export", s.handleHistoryExport)
 	s.mux.HandleFunc("/api/events", s.handleSSEEvents)
 	s.mux.HandleFunc("/approve/", s.handleApprovalPage)
@@ -656,6 +657,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
 				case "extended":
 					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
+				case "extended_all":
+					flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
 				case "expired":
 					flashes = append(flashes, t("session_expired_sign_in"))
 				}
@@ -1661,7 +1664,11 @@ func (s *Server) handleRevokeAll(w http.ResponseWriter, r *http.Request) {
 
 	s.broadcastSSE(username, "session_changed")
 	setFlashCookie(w, fmt.Sprintf("revoked_all:%d", count))
-	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+	dest := r.FormValue("from")
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+		dest = "/"
+	}
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+dest, http.StatusSeeOther)
 }
 
 // handleExtendSession extends an active grace session to the maximum allowed duration.
@@ -1705,6 +1712,40 @@ func (s *Server) handleExtendSession(w http.ResponseWriter, r *http.Request) {
 		dest = "/"
 	}
 	setFlashCookie(w, "extended:"+displayHostname)
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+dest, http.StatusSeeOther)
+}
+
+// handleExtendAll extends all active sessions for the authenticated user to the maximum duration.
+// POST /api/sessions/extend-all
+func (s *Server) handleExtendAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username := s.verifyFormAuth(w, r)
+	if username == "" {
+		return
+	}
+	sessions := s.store.ActiveSessions(username)
+	count := 0
+	for _, sess := range sessions {
+		hostname := sess.Hostname
+		if hostname == "(unknown)" {
+			hostname = ""
+		}
+		if s.store.ExtendGraceSession(username, hostname) > 0 {
+			s.store.LogAction(username, "extended", sess.Hostname, "")
+			count++
+		}
+	}
+	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions from %s", username, count, remoteAddr(r))
+	s.broadcastSSE(username, "session_changed")
+
+	setFlashCookie(w, fmt.Sprintf("extended_all:%d", count))
+	dest := r.FormValue("from")
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+		dest = "/"
+	}
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+dest, http.StatusSeeOther)
 }
 
@@ -2429,8 +2470,12 @@ func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
 					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
 				case "extended":
 					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
+				case "extended_all":
+					flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
 				case "revoked":
 					flashes = append(flashes, t("revoked_session_on")+" "+parts[1])
+				case "revoked_all":
+					flashes = append(flashes, fmt.Sprintf(t("revoked_n_sessions"), atoi(parts[1])))
 				case "rotated":
 					flashes = append(flashes, t("rotated_breakglass_on")+" "+parts[1])
 				case "rotated_all":
@@ -3505,7 +3550,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .host-btn.danger:hover { background: var(--danger-bg); }
     .host-btn.primary { border-color: var(--primary); color: var(--primary); }
     .host-btn.primary:hover { background: var(--info-bg); }
-    .bulk-actions { margin-top: 8px; text-align: left; }
+    .bulk-actions { margin-top: 8px; text-align: right; }
     .bulk-btn { display: inline-block; background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
     .bulk-btn.success { border-color: var(--success); color: var(--success); }
@@ -3659,6 +3704,13 @@ const dashboardHTML = `<!DOCTYPE html>
           {{if $.IsAdmin}}<span class="row-sub" style="color:var(--primary)">{{.Username}}</span>{{end}}
           <span class="row-sub">{{.Remaining}} {{call $.T "remaining"}}</span>
         </div>
+        <form method="POST" action="/api/sessions/extend" style="display:inline">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <button type="submit" class="host-btn primary" onclick="return confirm('Extend session on {{.Hostname}} to maximum?')">{{call $.T "extend"}}</button>
+        </form>
         <form method="POST" action="/api/sessions/revoke">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
@@ -3667,17 +3719,16 @@ const dashboardHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <button type="submit" class="host-btn danger" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
         </form>
-        <form method="POST" action="/api/sessions/extend" style="display:inline">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="host-btn primary" onclick="return confirm('Extend session on {{.Hostname}} to maximum?')">{{call $.T "extend"}}</button>
-        </form>
       </div>
       {{end}}
     </div>
     <div class="bulk-actions">
+      <form method="POST" action="/api/sessions/extend-all" style="display:inline">
+        <input type="hidden" name="username" value="{{.Username}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+        <button type="submit" class="bulk-btn primary" onclick="return confirm('Extend all active sessions to maximum?')">{{call .T "extend_all"}}</button>
+      </form>
       <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -4041,6 +4092,10 @@ const hostsPageHTML = `<!DOCTYPE html>
     .bulk-actions { margin: 16px 0 8px; text-align: right; }
     .bulk-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
+    .bulk-btn.primary { border-color: var(--primary); color: var(--primary); }
+    .bulk-btn.primary:hover { background: var(--info-bg); }
+    .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
+    .bulk-btn.danger:hover { background: var(--danger-bg); }
     .host-group { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--info-bg); color: var(--text-secondary); margin-left: 8px; vertical-align: middle; }
     .group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.813rem; }
     .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
@@ -4137,15 +4192,19 @@ const hostsPageHTML = `<!DOCTYPE html>
             <span class="row-sub">{{if .EscrowExpired}}{{call $.T "breakglass_expired"}} ({{call $.T "escrowed"}} {{.EscrowAge}} {{call $.T "ago"}}){{else}}{{call $.T "breakglass_escrowed"}} ({{.EscrowAge}} {{call $.T "ago"}}){{end}}</span>
           {{end}}
         </div>
-        {{if .Active}}
-        <form method="POST" action="/api/sessions/revoke">
+        {{if .Escrowed}}
+        {{if .EscrowLink}}
+        <a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>
+        {{end}}
+        <form method="POST" action="/api/hosts/rotate" style="display:inline">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <input type="hidden" name="from" value="/hosts">
-          <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+          <button type="submit" class="host-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
         </form>
+        {{end}}
+        {{if .Active}}
         <form method="POST" action="/api/sessions/extend" style="display:inline">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
@@ -4153,6 +4212,14 @@ const hostsPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <input type="hidden" name="from" value="/hosts">
           <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
+        </form>
+        <form method="POST" action="/api/sessions/revoke">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <input type="hidden" name="from" value="/hosts">
+          <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
         </form>
         {{else}}
         <form method="POST" action="/api/hosts/elevate" class="elevate-form">
@@ -4168,31 +4235,33 @@ const hostsPageHTML = `<!DOCTYPE html>
           <button type="submit" class="host-btn filled">{{call $.T "elevate"}}</button>
         </form>
         {{end}}
-        {{if .Escrowed}}
-        {{if .EscrowLink}}
-        <a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>
-        {{end}}
-        <form method="POST" action="/api/hosts/rotate" style="display:inline">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="host-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
-        </form>
-        {{end}}
       </div>
       {{end}}
     </div>
-    {{if .HasEscrowedHosts}}
     <div class="bulk-actions">
+      <form method="POST" action="/api/sessions/extend-all" style="display:inline">
+        <input type="hidden" name="username" value="{{.Username}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+        <input type="hidden" name="from" value="/hosts">
+        <button type="submit" class="bulk-btn primary" onclick="return confirm('Extend all active sessions to maximum?')">{{call .T "extend_all"}}</button>
+      </form>
+      <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
+        <input type="hidden" name="username" value="{{.Username}}">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
+        <input type="hidden" name="from" value="/hosts">
+        <button type="submit" class="bulk-btn danger" onclick="return confirm('Revoke all active sessions?')">{{call .T "revoke_all"}}</button>
+      </form>
+      {{if .HasEscrowedHosts}}
       <form method="POST" action="/api/hosts/rotate-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
         <button type="submit" class="bulk-btn" onclick="return confirm('Request breakglass rotation on all hosts?')">{{call .T "rotate_all"}}</button>
       </form>
+      {{end}}
     </div>
-    {{end}}
     {{else}}
     <p class="empty-state">{{call .T "no_known_hosts"}} {{call .T "hosts_appear_after_approve"}}</p>
     {{end}}
