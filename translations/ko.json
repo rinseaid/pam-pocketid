@@ -168,5 +168,7 @@
   "onetap_max_age": "원탭 최대 유효기간",
   "admin_groups": "관리자 그룹",
   "admin_approval_required": "이 호스트는 관리자 승인이 필요합니다.",
-  "admin_approval_hosts": "관리자 승인 필요 호스트"
+  "admin_approval_hosts": "관리자 승인 필요 호스트",
+  "filtered_to_one_hour": "특정 1시간의 이벤트를 표시 중입니다.",
+  "clear_time_filter": "시간 필터 해제"
 }

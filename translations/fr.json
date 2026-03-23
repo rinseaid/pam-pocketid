@@ -168,5 +168,7 @@
   "onetap_max_age": "Âge max. un clic",
   "admin_groups": "Groupes admin",
   "admin_approval_required": "Cet hôte nécessite l'approbation d'un administrateur.",
-  "admin_approval_hosts": "Hôtes avec approbation admin"
+  "admin_approval_hosts": "Hôtes avec approbation admin",
+  "filtered_to_one_hour": "Affichage des événements d'une seule heure.",
+  "clear_time_filter": "Effacer le filtre horaire"
 }

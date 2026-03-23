@@ -696,52 +696,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		history = history[:5]
 	}
 
-	// Build 24-hour activity timeline
-	type timelineEntry struct {
-		Hour   int
-		Count  int
-		Hosts  []string
-		IsNow  bool
-		Height int // bar height in pixels (2-40)
-	}
-
 	now := time.Now()
-	var timeline []timelineEntry
-	for i := 23; i >= 0; i-- {
-		hour := now.Add(-time.Duration(i) * time.Hour)
-		hourStart := hour.Truncate(time.Hour)
-		hourEnd := hourStart.Add(time.Hour)
-
-		count := 0
-		hostSet := make(map[string]bool)
-		for _, e := range allHistory {
-			if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
-				count++
-				if e.Hostname != "" {
-					hostSet[e.Hostname] = true
-				}
-			}
-		}
-		var hosts []string
-		for h := range hostSet {
-			hosts = append(hosts, h)
-		}
-		height := 2
-		if count > 0 {
-			height = count * 8
-			if height > 40 {
-				height = 40
-			}
-		}
-		timeline = append(timeline, timelineEntry{
-			Hour:   hourStart.Hour(),
-			Count:  count,
-			Hosts:  hosts,
-			IsNow:  i == 0,
-			Height: height,
-		})
-	}
-
 	csrfTs := fmt.Sprintf("%d", now.Unix())
 	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
 
@@ -817,7 +772,6 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"Sessions":       sessionViews,
 		"History":        history,
 		"HasMoreHistory": len(allHistory) > 5,
-		"Timeline":       timeline,
 		"CSRFToken":      csrfToken,
 		"CSRFTs":         csrfTs,
 		"ActivePage":     "sessions",
@@ -2100,6 +2054,89 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(hostOptions)
 
+	// Build 24-hour activity timeline from the full unfiltered history.
+	// This always shows the complete 24h view so users can see the overall pattern.
+	now := time.Now()
+	var timeline []timelineEntry
+	activeHoursAgo := -1 // which bar is currently active (-1 = none)
+	for i := 23; i >= 0; i-- {
+		hourStart := now.Add(-time.Duration(i+1) * time.Hour).Truncate(time.Hour)
+		hourEnd := hourStart.Add(time.Hour)
+		hoursAgo := i // bar at i=0 is the current (most recent) hour
+
+		count := 0
+		actionCounts := make(map[string][]string) // action -> hostnames
+		for _, e := range allHistory {
+			if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
+				count++
+				actionCounts[e.Action] = append(actionCounts[e.Action], e.Hostname)
+			}
+		}
+
+		// Build rich tooltip text
+		var detailParts []string
+		detailParts = append(detailParts, fmt.Sprintf("%d:00 – %d:00", hourStart.Hour(), hourEnd.Hour()))
+		// Sort action keys for deterministic ordering
+		var actionKeys []string
+		for a := range actionCounts {
+			actionKeys = append(actionKeys, a)
+		}
+		sort.Strings(actionKeys)
+		for _, action := range actionKeys {
+			hosts := actionCounts[action]
+			// Deduplicate hosts
+			seen := make(map[string]bool)
+			var unique []string
+			for _, h := range hosts {
+				if h != "" && !seen[h] {
+					seen[h] = true
+					unique = append(unique, h)
+				}
+			}
+			sort.Strings(unique)
+			hostStr := strings.Join(unique, ", ")
+			if hostStr != "" {
+				detailParts = append(detailParts, fmt.Sprintf("%d %s (%s)", len(hosts), t(action), hostStr))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("%d %s", len(hosts), t(action)))
+			}
+		}
+
+		height := 2
+		if count > 0 {
+			height = count * 8
+			if height > 40 {
+				height = 40
+			}
+		}
+		timeline = append(timeline, timelineEntry{
+			Hour:      hourStart.Hour(),
+			HourLabel: fmt.Sprintf("%d:00", hourStart.Hour()),
+			Count:     count,
+			Height:    height,
+			IsNow:     i == 0,
+			HoursAgo:  hoursAgo,
+			Details:   strings.Join(detailParts, "\n"),
+		})
+	}
+
+	// Parse hours_ago filter (applied before other filters so they can combine)
+	hoursAgoStr := r.URL.Query().Get("hours_ago")
+	if hoursAgoStr != "" {
+		if h, err := strconv.Atoi(hoursAgoStr); err == nil && h >= 0 && h < 24 {
+			activeHoursAgo = h
+			hourStart := now.Add(-time.Duration(h+1) * time.Hour).Truncate(time.Hour)
+			hourEnd := hourStart.Add(time.Hour)
+			var filtered []ActionLogEntry
+			for _, e := range allHistory {
+				if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
+					filtered = append(filtered, e)
+				}
+			}
+			allHistory = filtered
+		}
+	}
+
 	history := allHistory
 
 	// Filter by action type
@@ -2195,31 +2232,34 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := historyTmpl.Execute(w, map[string]interface{}{
-		"Username":       username,
-		"Initial":        strings.ToUpper(username[:1]),
-		"Avatar":         getAvatar(r),
-		"History":        viewEntries,
-		"Query":          query,
-		"ActionFilter":   actionFilter,
-		"HostFilter":     hostFilter,
-		"ActionOptions":  actionOptions,
-		"HostOptions":    hostOptions,
-		"ActivePage":     "history",
-		"Theme":          getTheme(r),
-		"Page":           page,
-		"TotalPages":     totalPages,
-		"HasPrev":        page > 1,
-		"HasNext":        page < totalPages,
-		"Sort":           sortField,
-		"Order":          sortOrder,
-		"PerPage":        perPage,
-		"PerPageOptions": perPageOptions,
-		"TZName":         tzName,
-		"Timezone":       tzName,
-		"CSPNonce":       r.Context().Value("csp-nonce"),
-		"T":              T(lang),
-		"Lang":           lang,
-		"Languages":      supportedLanguages,
+		"Username":        username,
+		"Initial":         strings.ToUpper(username[:1]),
+		"Avatar":          getAvatar(r),
+		"History":         viewEntries,
+		"Query":           query,
+		"ActionFilter":    actionFilter,
+		"HostFilter":      hostFilter,
+		"ActionOptions":   actionOptions,
+		"HostOptions":     hostOptions,
+		"ActivePage":      "history",
+		"Theme":           getTheme(r),
+		"Page":            page,
+		"TotalPages":      totalPages,
+		"HasPrev":         page > 1,
+		"HasNext":         page < totalPages,
+		"Sort":            sortField,
+		"Order":           sortOrder,
+		"PerPage":         perPage,
+		"PerPageOptions":  perPageOptions,
+		"TZName":          tzName,
+		"Timezone":        tzName,
+		"CSPNonce":        r.Context().Value("csp-nonce"),
+		"T":               T(lang),
+		"Lang":            lang,
+		"Languages":       supportedLanguages,
+		"Timeline":        timeline,
+		"HoursAgo":        hoursAgoStr,
+		"ActiveHoursAgo":  activeHoursAgo,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
@@ -3226,6 +3266,17 @@ type historyViewEntry struct {
 	TimeAgo       string
 }
 
+// timelineEntry represents one hour-slot in the 24-hour activity timeline.
+type timelineEntry struct {
+	Hour      int
+	HourLabel string // "14:00"
+	Count     int
+	Height    int // bar height in pixels (2-40)
+	IsNow     bool
+	HoursAgo  int    // offset from now (0 = current hour)
+	Details   string // rich tooltip text
+}
+
 // ActionOption represents a value/label pair for dropdown select options.
 type ActionOption struct {
 	Value string
@@ -3407,12 +3458,6 @@ const dashboardHTML = `<!DOCTYPE html>
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .view-all { display: block; text-align: left; margin-top: 8px; font-size: 0.813rem; color: var(--primary); text-decoration: none; font-weight: 600; }
     .view-all:hover { text-decoration: underline; }
-    .timeline { margin: 16px 0; padding: 12px 0; border-bottom: 1px solid var(--border); }
-    .timeline-bars { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
-    .timeline-bar { flex: 1; background: var(--primary); border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.5; transition: opacity 0.2s; }
-    .timeline-bar:hover { opacity: 1; }
-    .timeline-bar.now { background: var(--success); opacity: 0.8; }
-    .timeline-label { font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px; text-align: right; }
   </style>
   <script nonce="{{.CSPNonce}}">
   if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
@@ -3478,15 +3523,6 @@ const dashboardHTML = `<!DOCTYPE html>
     </nav>
 
     {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
-
-    {{if .Timeline}}
-    <div class="timeline">
-      <div class="timeline-bars">
-        {{range .Timeline}}<div class="timeline-bar{{if .IsNow}} now{{end}}" style="height:{{.Height}}px" title="{{.Hour}}:00 — {{.Count}} events"></div>{{end}}
-      </div>
-      <div class="timeline-label">24h</div>
-    </div>
-    {{end}}
 
     {{if .Pending}}
     <div class="section-label pending">{{call .T "pending_requests"}}</div>
@@ -3679,6 +3715,17 @@ const historyPageHTML = `<!DOCTYPE html>
       box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
     }
     .filter-toolbar { display: none; }
+    .timeline { margin: 16px 0 8px; }
+    .timeline-bars { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
+    .timeline-bar { flex: 1; background: var(--primary); border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.5; transition: opacity 0.15s, transform 0.15s; cursor: pointer; text-decoration: none; display: block; }
+    .timeline-bar:hover { opacity: 1; transform: scaleY(1.1); transform-origin: bottom; }
+    .timeline-bar.now { background: var(--success); opacity: 0.8; }
+    .timeline-bar.timeline-active { opacity: 1; outline: 2px solid var(--primary); outline-offset: 1px; }
+    .timeline-bar.timeline-active.now { outline-color: var(--success); }
+    .timeline-label { font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px; text-align: right; }
+    .time-filter-banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; background: var(--info-bg); border: 1px solid var(--border); margin-bottom: 12px; font-size: 0.813rem; color: var(--text-secondary); }
+    .time-filter-clear { color: var(--danger); text-decoration: none; font-weight: 600; margin-left: auto; font-size: 0.75rem; }
+    .time-filter-clear:hover { text-decoration: underline; }
     @media (max-width: 600px) {
       .history-table, .history-table thead, .history-table tbody, .history-table th, .history-table td, .history-table tr {
         display: block;
@@ -3757,12 +3804,29 @@ const historyPageHTML = `<!DOCTYPE html>
     </nav>
 
 
+    {{if .Timeline}}
+    <div class="timeline">
+      <div class="timeline-bars">
+        {{range .Timeline}}<a href="/history?hours_ago={{.HoursAgo}}&per_page={{$.PerPage}}" class="timeline-bar{{if .IsNow}} now{{end}}{{if eq .HoursAgo $.ActiveHoursAgo}} timeline-active{{end}}" style="height:{{.Height}}px" title="{{.Details}}"></a>{{end}}
+      </div>
+      <div class="timeline-label">24h</div>
+    </div>
+    {{end}}
+
+    {{if .HoursAgo}}
+    <div class="time-filter-banner">
+      <span>{{call .T "filtered_to_one_hour"}}</span>
+      <a href="/history?q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}" class="time-filter-clear">{{call .T "clear_time_filter"}}</a>
+    </div>
+    {{end}}
+
     <form method="GET" action="/history" class="search-bar">
       <input type="hidden" name="action" value="{{.ActionFilter}}">
       <input type="hidden" name="hostname" value="{{.HostFilter}}">
       <input type="hidden" name="sort" value="{{.Sort}}">
       <input type="hidden" name="order" value="{{.Order}}">
       <input type="hidden" name="per_page" value="{{.PerPage}}">
+      {{if .HoursAgo}}<input type="hidden" name="hours_ago" value="{{.HoursAgo}}">{{end}}
       <input type="text" name="q" value="{{.Query}}" placeholder="{{call .T "search"}}" aria-label="Search">
     </form>
     <div class="export-links">
