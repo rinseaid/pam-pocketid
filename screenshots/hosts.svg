@@ -35,14 +35,14 @@
   <text x="24" y="88" fill="#e2e8f0" font-size="15" font-weight="700">Hosts</text>
   <text x="24" y="108" fill="#94a3b8" font-size="13">Hosts registered with per-host secrets. Manage grace sessions and elevate access.</text>
 
-  <!-- ===== HOST CARD 1: docker — Active session ===== -->
+  <!-- ===== HOST CARD 1: web-prod-1 — Active session ===== -->
   <rect x="24" y="124" width="752" height="90" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
 
   <!-- Status indicator -->
   <circle cx="52" cy="169" r="7" fill="#34d399"/>
 
   <!-- Hostname -->
-  <text x="70" y="160" fill="#e2e8f0" font-size="16" font-weight="700">docker</text>
+  <text x="70" y="160" fill="#e2e8f0" font-size="16" font-weight="700">web-prod-1</text>
   <text x="70" y="178" fill="#34d399" font-size="12" font-weight="600">Active — 7h 23m remaining</text>
 
   <!-- Session badge -->
@@ -53,14 +53,14 @@
   <rect x="660" y="154" width="96" height="32" fill="#7f1d1d" rx="8"/>
   <text x="708" y="174" fill="#fca5a5" font-size="13" font-weight="600" text-anchor="middle">Revoke</text>
 
-  <!-- ===== HOST CARD 2: plex — No session ===== -->
+  <!-- ===== HOST CARD 2: app-server — No session ===== -->
   <rect x="24" y="226" width="752" height="100" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
 
   <!-- Status indicator -->
   <circle cx="52" cy="276" r="7" fill="#475569"/>
 
   <!-- Hostname -->
-  <text x="70" y="267" fill="#e2e8f0" font-size="16" font-weight="700">plex</text>
+  <text x="70" y="267" fill="#e2e8f0" font-size="16" font-weight="700">app-server</text>
   <text x="70" y="285" fill="#94a3b8" font-size="12">No active session</text>
 
   <!-- Duration dropdown -->
@@ -74,14 +74,14 @@
   <!-- Duration options hint -->
   <text x="70" y="308" fill="#64748b" font-size="11">Select duration and click Elevate to start a sudo session</text>
 
-  <!-- ===== HOST CARD 3: pvemsa2 — Escrowed ===== -->
+  <!-- ===== HOST CARD 3: db-primary — Escrowed ===== -->
   <rect x="24" y="338" width="752" height="100" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
 
   <!-- Status indicator -->
   <circle cx="52" cy="378" r="7" fill="#475569"/>
 
   <!-- Hostname -->
-  <text x="70" y="369" fill="#e2e8f0" font-size="16" font-weight="700">pvemsa2</text>
+  <text x="70" y="369" fill="#e2e8f0" font-size="16" font-weight="700">db-primary</text>
   <text x="70" y="387" fill="#94a3b8" font-size="12">No active session</text>
 
   <!-- Escrow badge -->

@@ -70,7 +70,7 @@
   <text x="44" y="192" fill="#64748b" font-size="11">12 min ago</text>
   <rect x="200" y="162" width="72" height="20" fill="#14532d" rx="4"/>
   <text x="236" y="176" fill="#34d399" font-size="11" font-weight="600" text-anchor="middle">Approved</text>
-  <text x="360" y="182" fill="#e2e8f0" font-size="13">docker</text>
+  <text x="360" y="182" fill="#e2e8f0" font-size="13">web-prod-1</text>
   <text x="530" y="182" fill="#60a5fa" font-size="12" font-family="monospace, monospace">ABCDEF-123456</text>
 
   <!-- Row 2 -->
@@ -80,7 +80,7 @@
   <text x="44" y="237" fill="#64748b" font-size="11">35 min ago</text>
   <rect x="200" y="207" width="64" height="20" fill="#7f1d1d" rx="4"/>
   <text x="232" y="221" fill="#f87171" font-size="11" font-weight="600" text-anchor="middle">Revoked</text>
-  <text x="360" y="227" fill="#e2e8f0" font-size="13">plex</text>
+  <text x="360" y="227" fill="#e2e8f0" font-size="13">app-server</text>
   <text x="530" y="227" fill="#60a5fa" font-size="12" font-family="monospace, monospace">MNOPQR-345678</text>
 
   <!-- Row 3 -->
@@ -90,7 +90,7 @@
   <text x="44" y="282" fill="#64748b" font-size="11">59 min ago</text>
   <rect x="200" y="252" width="96" height="20" fill="#1e3a5f" rx="4"/>
   <text x="248" y="266" fill="#60a5fa" font-size="11" font-weight="600" text-anchor="middle">Auto-approved</text>
-  <text x="360" y="272" fill="#e2e8f0" font-size="13">docker</text>
+  <text x="360" y="272" fill="#e2e8f0" font-size="13">web-prod-1</text>
   <text x="530" y="272" fill="#60a5fa" font-size="12" font-family="monospace, monospace">STUVWX-901234</text>
 
   <!-- Row 4 -->
@@ -100,7 +100,7 @@
   <text x="44" y="327" fill="#64748b" font-size="11">3h 21m ago</text>
   <rect x="200" y="297" width="72" height="20" fill="#14532d" rx="4"/>
   <text x="236" y="311" fill="#34d399" font-size="11" font-weight="600" text-anchor="middle">Approved</text>
-  <text x="360" y="317" fill="#e2e8f0" font-size="13">pvemsa2</text>
+  <text x="360" y="317" fill="#e2e8f0" font-size="13">db-primary</text>
   <text x="530" y="317" fill="#60a5fa" font-size="12" font-family="monospace, monospace">YZABCD-567890</text>
 
   <!-- Row 5 -->
@@ -110,7 +110,7 @@
   <text x="44" y="372" fill="#64748b" font-size="11">16h ago</text>
   <rect x="200" y="342" width="64" height="20" fill="#312e07" rx="4"/>
   <text x="232" y="356" fill="#facc15" font-size="11" font-weight="600" text-anchor="middle">Rejected</text>
-  <text x="360" y="362" fill="#e2e8f0" font-size="13">docker</text>
+  <text x="360" y="362" fill="#e2e8f0" font-size="13">web-prod-1</text>
   <text x="530" y="362" fill="#60a5fa" font-size="12" font-family="monospace, monospace">EFGHIJ-112233</text>
 
   <!-- Bottom border of table area -->

@@ -20,7 +20,7 @@
   <circle cx="88" cy="50" r="6" fill="#fbbf24"/>
   <circle cx="108" cy="50" r="6" fill="#34d399"/>
   <!-- Title -->
-  <text x="400" y="54" fill="#94a3b8" font-size="12" text-anchor="middle" class="mono">rinseaid@docker — bash</text>
+  <text x="400" y="54" fill="#94a3b8" font-size="12" text-anchor="middle" class="mono">alice@web-prod-1 — bash</text>
 
   <!-- Terminal content -->
   <!-- Prompt + command -->
@@ -31,7 +31,7 @@
   <text x="64" y="126" fill="#94a3b8" font-size="14" class="mono">  Sudo requires Pocket ID approval.</text>
 
   <text x="64" y="152" fill="#94a3b8" font-size="14" class="mono">  Approve at:</text>
-  <text x="168" y="152" fill="#60a5fa" font-size="14" class="mono">https://pam.rinseaid.org/approve/ABCDEF-123456</text>
+  <text x="168" y="152" fill="#60a5fa" font-size="14" class="mono">https://pam.alice.org/approve/ABCDEF-123456</text>
 
   <text x="64" y="178" fill="#94a3b8" font-size="14" class="mono">  Code:</text>
   <text x="126" y="178" fill="#fbbf24" font-size="14" class="mono">ABCDEF-123456</text>
@@ -47,7 +47,7 @@
   <text x="64" y="230" fill="#34d399" font-size="14" font-weight="700" class="mono">  Approved!</text>
 
   <!-- Root prompt -->
-  <text x="64" y="256" fill="#f87171" font-size="14" class="mono">root@docker</text>
+  <text x="64" y="256" fill="#f87171" font-size="14" class="mono">root@web-prod-1</text>
   <text x="156" y="256" fill="#e2e8f0" font-size="14" class="mono">:~#</text>
   <!-- Cursor -->
   <rect x="192" y="242" width="9" height="16" fill="#e2e8f0" opacity="0.8" rx="1"/>

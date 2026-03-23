@@ -49,7 +49,7 @@
   <rect x="24" y="102" width="752" height="90" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
   <!-- Hostname -->
   <text x="44" y="130" fill="#94a3b8" font-size="11">HOST</text>
-  <text x="44" y="150" fill="#e2e8f0" font-size="15" font-weight="600">docker</text>
+  <text x="44" y="150" fill="#e2e8f0" font-size="15" font-weight="600">web-prod-1</text>
   <!-- Code -->
   <text x="220" y="130" fill="#94a3b8" font-size="11">CODE</text>
   <text x="220" y="150" fill="#60a5fa" font-size="15" font-weight="600" font-family="monospace, monospace">ABCDEF-123456</text>
@@ -65,7 +65,7 @@
   <!-- Challenge card 2 -->
   <rect x="24" y="202" width="752" height="90" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
   <text x="44" y="230" fill="#94a3b8" font-size="11">HOST</text>
-  <text x="44" y="250" fill="#e2e8f0" font-size="15" font-weight="600">pvemsa2</text>
+  <text x="44" y="250" fill="#e2e8f0" font-size="15" font-weight="600">db-primary</text>
   <text x="220" y="230" fill="#94a3b8" font-size="11">CODE</text>
   <text x="220" y="250" fill="#60a5fa" font-size="15" font-weight="600" font-family="monospace, monospace">GHIJKL-789012</text>
   <text x="420" y="230" fill="#94a3b8" font-size="11">EXPIRES IN</text>
@@ -86,11 +86,11 @@
   <rect x="24" y="344" width="752" height="72" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
   <!-- Status dot -->
   <circle cx="52" cy="380" r="6" fill="#34d399"/>
-  <text x="70" y="373" fill="#e2e8f0" font-size="14" font-weight="600">docker</text>
+  <text x="70" y="373" fill="#e2e8f0" font-size="14" font-weight="600">web-prod-1</text>
   <text x="70" y="391" fill="#34d399" font-size="12">Active — 7h 23m remaining</text>
   <!-- User badge -->
   <rect x="330" y="366" width="68" height="22" fill="#1e3a5f" rx="6"/>
-  <text x="364" y="381" fill="#60a5fa" font-size="11" text-anchor="middle">rinseaid</text>
+  <text x="364" y="381" fill="#60a5fa" font-size="11" text-anchor="middle">alice</text>
   <!-- Revoke button -->
   <rect x="678" y="364" width="78" height="30" fill="#7f1d1d" rx="8"/>
   <text x="717" y="384" fill="#fca5a5" font-size="12" font-weight="600" text-anchor="middle">Revoke</text>
@@ -98,10 +98,10 @@
   <!-- Session row 2 -->
   <rect x="24" y="426" width="752" height="72" fill="#1e293b" rx="12" stroke="#334155" stroke-width="1"/>
   <circle cx="52" cy="462" r="6" fill="#34d399"/>
-  <text x="70" y="455" fill="#e2e8f0" font-size="14" font-weight="600">plex</text>
+  <text x="70" y="455" fill="#e2e8f0" font-size="14" font-weight="600">app-server</text>
   <text x="70" y="473" fill="#34d399" font-size="12">Active — 2h 51m remaining</text>
   <rect x="330" y="448" width="68" height="22" fill="#1e3a5f" rx="6"/>
-  <text x="364" y="463" fill="#60a5fa" font-size="11" text-anchor="middle">rinseaid</text>
+  <text x="364" y="463" fill="#60a5fa" font-size="11" text-anchor="middle">alice</text>
   <rect x="678" y="446" width="78" height="30" fill="#7f1d1d" rx="8"/>
   <text x="717" y="466" fill="#fca5a5" font-size="12" font-weight="600" text-anchor="middle">Revoke</text>
 
@@ -112,7 +112,7 @@
   <rect x="24" y="542" width="752" height="36" fill="#1e293b" rx="8" stroke="#334155" stroke-width="1"/>
   <rect x="40" y="553" width="64" height="18" fill="#14532d" rx="4"/>
   <text x="72" y="565" fill="#34d399" font-size="11" font-weight="600" text-anchor="middle">Approved</text>
-  <text x="130" y="565" fill="#e2e8f0" font-size="12">docker</text>
+  <text x="130" y="565" fill="#e2e8f0" font-size="12">web-prod-1</text>
   <text x="280" y="565" fill="#94a3b8" font-size="11" font-family="monospace, monospace">ABCDEF-123456</text>
   <text x="700" y="565" fill="#94a3b8" font-size="11" text-anchor="end">2 min ago</text>
 
@@ -120,7 +120,7 @@
   <rect x="24" y="582" width="752" height="36" fill="#1e293b" rx="8" stroke="#334155" stroke-width="1"/>
   <rect x="40" y="593" width="90" height="18" fill="#1e3a5f" rx="4"/>
   <text x="85" y="605" fill="#60a5fa" font-size="11" font-weight="600" text-anchor="middle">Auto-approved</text>
-  <text x="155" y="605" fill="#e2e8f0" font-size="12">plex</text>
+  <text x="155" y="605" fill="#e2e8f0" font-size="12">app-server</text>
   <text x="280" y="605" fill="#94a3b8" font-size="11" font-family="monospace, monospace">MNOPQR-345678</text>
   <text x="700" y="605" fill="#94a3b8" font-size="11" text-anchor="end">18 min ago</text>
 </svg>

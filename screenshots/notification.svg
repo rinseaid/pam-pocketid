@@ -37,10 +37,10 @@
 
   <!-- Message fields -->
   <text x="264" y="160" fill="#94a3b8" font-size="12">User</text>
-  <text x="370" y="160" fill="#e2e8f0" font-size="12" font-weight="600">rinseaid</text>
+  <text x="370" y="160" fill="#e2e8f0" font-size="12" font-weight="600">alice</text>
 
   <text x="264" y="182" fill="#94a3b8" font-size="12">Host</text>
-  <text x="370" y="182" fill="#e2e8f0" font-size="12" font-weight="600">docker</text>
+  <text x="370" y="182" fill="#e2e8f0" font-size="12" font-weight="600">web-prod-1</text>
 
   <text x="264" y="204" fill="#94a3b8" font-size="12">Code</text>
   <text x="370" y="204" fill="#fbbf24" font-size="12" font-weight="600" font-family="monospace, monospace">ABCDEF-123456</text>
