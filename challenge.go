@@ -119,6 +119,7 @@ type ChallengeStore struct {
 	actionLog              map[string][]ActionLogEntry // username -> last N action log entries
 	escrowedHosts          map[string]EscrowRecord // hostname -> escrow metadata
 	oneTapUsed         map[string]bool       // challenge ID -> whether one-tap was consumed
+	lastOIDCAuth       map[string]time.Time  // username -> last OIDC authentication time
 	ttl                time.Duration
 	gracePeriod        time.Duration
 	persistPath        string        // file path for persisted state (empty = no persistence)
@@ -134,6 +135,7 @@ type persistedState struct {
 	RotateBreakglassBefore map[string]time.Time        `json:"rotate_breakglass_before_hosts,omitempty"`
 	ActionLog              map[string][]ActionLogEntry  `json:"action_log,omitempty"`
 	EscrowedHosts          map[string]EscrowRecord      `json:"escrowed_hosts,omitempty"`
+	LastOIDCAuth           map[string]time.Time         `json:"last_oidc_auth,omitempty"`
 }
 
 // NewChallengeStore creates a new store with the given challenge TTL, grace period,
@@ -149,6 +151,7 @@ func NewChallengeStore(ttl, gracePeriod time.Duration, persistPath string) *Chal
 		actionLog:              make(map[string][]ActionLogEntry),
 		escrowedHosts:      make(map[string]EscrowRecord),
 		oneTapUsed:         make(map[string]bool),
+		lastOIDCAuth:       make(map[string]time.Time),
 		ttl:                ttl,
 		gracePeriod:        gracePeriod,
 		persistPath:        persistPath,
@@ -675,6 +678,20 @@ func (s *ChallengeStore) ConsumeOneTap(challengeID string) error {
 	return nil
 }
 
+// RecordOIDCAuth records the current time as the last OIDC authentication time for the user.
+func (s *ChallengeStore) RecordOIDCAuth(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastOIDCAuth[username] = time.Now()
+}
+
+// LastOIDCAuth returns the last OIDC authentication time for the user, or zero if never recorded.
+func (s *ChallengeStore) LastOIDCAuth(username string) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastOIDCAuth[username]
+}
+
 // reapLoop removes expired challenges periodically.
 func (s *ChallengeStore) reapLoop() {
 	defer func() {
@@ -742,6 +759,13 @@ func (s *ChallengeStore) reap() {
 	for host, record := range s.escrowedHosts {
 		if record.Timestamp.Before(escrowCutoff) {
 			delete(s.escrowedHosts, host)
+			pruned = true
+		}
+	}
+	// Prune stale OIDC auth timestamps (older than 30 days)
+	for user, ts := range s.lastOIDCAuth {
+		if ts.Before(cutoff) {
+			delete(s.lastOIDCAuth, user)
 			pruned = true
 		}
 	}
@@ -827,6 +851,9 @@ func (s *ChallengeStore) loadState() {
 	for host, ts := range state.RotateBreakglassBefore {
 		s.rotateBreakglassBefore[host] = ts
 	}
+	for user, ts := range state.LastOIDCAuth {
+		s.lastOIDCAuth[user] = ts
+	}
 	log.Printf("Loaded %d grace sessions, %d revocation entries, %d escrowed hosts from %s", len(s.lastApproval), len(s.revokeTokensBefore), len(s.escrowedHosts), s.persistPath)
 }
 
@@ -867,6 +894,12 @@ func (s *ChallengeStore) saveStateLocked() {
 		state.RotateBreakglassBefore = make(map[string]time.Time, len(s.rotateBreakglassBefore))
 		for host, ts := range s.rotateBreakglassBefore {
 			state.RotateBreakglassBefore[host] = ts
+		}
+	}
+	if len(s.lastOIDCAuth) > 0 {
+		state.LastOIDCAuth = make(map[string]time.Time, len(s.lastOIDCAuth))
+		for user, ts := range s.lastOIDCAuth {
+			state.LastOIDCAuth[user] = ts
 		}
 	}
 	data, err := json.Marshal(state)

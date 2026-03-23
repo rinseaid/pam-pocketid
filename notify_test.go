@@ -81,7 +81,7 @@ func TestNotifyCommandFired(t *testing.T) {
 		NotifyCommand: "echo \"$NOTIFY_USERNAME $NOTIFY_HOSTNAME $NOTIFY_USER_CODE $NOTIFY_APPROVAL_URL $NOTIFY_EXPIRES_IN\" > " + tmp.Name(),
 	})
 
-	_, userCode, verificationURL := createChallenge(t, ts.URL, "alice", "prod-1")
+	_, userCode, _ := createChallenge(t, ts.URL, "alice", "prod-1")
 
 	s.WaitForNotifications(5 * time.Second)
 
@@ -99,8 +99,10 @@ func TestNotifyCommandFired(t *testing.T) {
 	if !strings.Contains(output, userCode) {
 		t.Errorf("notify output missing user code %s, got: %s", userCode, output)
 	}
-	if !strings.Contains(output, verificationURL) {
-		t.Errorf("notify output missing approval URL, got: %s", output)
+	// NOTIFY_APPROVAL_URL is now set to the one-tap URL when one-tap is available,
+	// so it should contain the one-tap endpoint path.
+	if !strings.Contains(output, "/api/onetap/") {
+		t.Errorf("notify output NOTIFY_APPROVAL_URL missing one-tap URL, got: %s", output)
 	}
 	if !strings.Contains(output, "120") {
 		t.Errorf("notify output missing NOTIFY_EXPIRES_IN=120, got: %s", output)

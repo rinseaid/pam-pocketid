@@ -179,13 +179,20 @@ func (s *Server) sendNotification(challenge *Challenge, approvalURL string, oneT
 		// Minimal environment to avoid leaking server secrets, matching the
 		// escrow command pattern. Notification-specific env vars provide all
 		// the context the command needs.
+		//
+		// When a one-tap URL is available it handles both fresh and stale OIDC
+		// cases, so use it as the primary approval URL.
+		effectiveApprovalURL := approvalURL
+		if oneTapURL != "" {
+			effectiveApprovalURL = oneTapURL
+		}
 		cmdEnv := []string{
 			"PATH=" + os.Getenv("PATH"),
 			"HOME=" + os.Getenv("HOME"),
 			"NOTIFY_USERNAME=" + username,
 			"NOTIFY_HOSTNAME=" + hostname,
 			"NOTIFY_USER_CODE=" + userCode,
-			"NOTIFY_APPROVAL_URL=" + approvalURL,
+			"NOTIFY_APPROVAL_URL=" + effectiveApprovalURL,
 			"NOTIFY_EXPIRES_IN=" + fmt.Sprintf("%d", expiresIn),
 			"NOTIFY_USER_URLS=" + userURLs,
 			"NOTIFY_ONETAP_URL=" + oneTapURL,

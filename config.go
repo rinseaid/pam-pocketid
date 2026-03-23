@@ -34,6 +34,7 @@ type Config struct {
 	ChallengeTTL time.Duration // How long challenges stay valid (default 120s)
 	SharedSecret string        // Shared secret for PAM helper auth
 	GracePeriod  time.Duration // Skip re-auth if user approved within this window (default 0 = disabled)
+	OneTapMaxAge time.Duration // max time since last OIDC auth for one-tap to work without re-auth (default 24h)
 
 	// PAM helper settings (used by client mode)
 	ServerURL   string        // URL of the auth server
@@ -100,6 +101,8 @@ func LoadServerConfig() (*Config, error) {
 
 	graceSec := envOrDefaultInt("PAM_POCKETID_GRACE_PERIOD", 0)
 	cfg.GracePeriod = time.Duration(graceSec) * time.Second
+
+	cfg.OneTapMaxAge = time.Duration(envOrDefaultInt("PAM_POCKETID_ONETAP_MAX_AGE", 86400)) * time.Second // default 24h
 
 	if cfg.IssuerURL == "" {
 		return nil, fmt.Errorf("PAM_POCKETID_ISSUER_URL is required")

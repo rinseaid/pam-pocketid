@@ -1314,16 +1314,36 @@ func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Single-use check
-	if err := s.store.ConsumeOneTap(challengeID); err != nil {
-		revokeErrorPage(w, r, http.StatusConflict, "challenge_expired_or_resolved", "challenge_expired_or_resolved")
-		return
-	}
-
-	// Get challenge and verify it's still pending
+	// Get challenge and verify it's still pending (before consuming the one-tap token,
+	// so a stale-OIDC redirect doesn't permanently burn the single-use token).
 	challenge, ok := s.store.Get(challengeID)
 	if !ok || challenge.Status != StatusPending {
 		revokeErrorPage(w, r, http.StatusNotFound, "challenge_not_found", "challenge_expired_or_resolved")
+		return
+	}
+
+	// Check OIDC freshness. If the user's last OIDC login is too old (or never
+	// recorded), redirect to OIDC login and carry the token in a short-lived
+	// cookie so we can resume here after authentication.
+	lastAuth := s.store.LastOIDCAuth(challenge.Username)
+	oidcFresh := !lastAuth.IsZero() && time.Since(lastAuth) < s.cfg.OneTapMaxAge
+	if !oidcFresh {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "pam_onetap",
+			Value:    token,
+			Path:     "/",
+			MaxAge:   300, // 5 minutes
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		loginURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/sessions/login"
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
+		return
+	}
+
+	// OIDC is fresh — consume the single-use token and approve.
+	if err := s.store.ConsumeOneTap(challengeID); err != nil {
+		revokeErrorPage(w, r, http.StatusConflict, "challenge_expired_or_resolved", "challenge_expired_or_resolved")
 		return
 	}
 
@@ -1831,6 +1851,9 @@ func (s *Server) handleSessionsCallback(w http.ResponseWriter, r *http.Request) 
 
 	log.Printf("SESSIONS: user %q (role=%s) viewed sessions from %s", username, role, remoteAddr(r))
 
+	// Record OIDC authentication time for one-tap freshness checks.
+	s.store.RecordOIDCAuth(username)
+
 	// Set session cookie and avatar cookie, then redirect to dashboard.
 	s.setSessionCookie(w, username, role)
 	if claims.Picture != "" {
@@ -1843,6 +1866,20 @@ func (s *Server) handleSessionsCallback(w http.ResponseWriter, r *http.Request) 
 			SameSite: http.SameSiteLaxMode,
 		})
 	}
+
+	// Check for pending one-tap approval after OIDC login.
+	// If the pam_onetap cookie is present, the user was redirected here from
+	// handleOneTap because their OIDC auth was stale. Now that they've
+	// re-authenticated, resume the one-tap approval flow.
+	if onetapCookie, err := r.Cookie("pam_onetap"); err == nil && onetapCookie.Value != "" {
+		// Clear the cookie
+		http.SetCookie(w, &http.Cookie{Name: "pam_onetap", Value: "", Path: "/", MaxAge: -1})
+		// Redirect back to the one-tap endpoint — freshness check will now pass
+		onetapURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/onetap/" + onetapCookie.Value
+		http.Redirect(w, r, onetapURL, http.StatusSeeOther)
+		return
+	}
+
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
 }
 
