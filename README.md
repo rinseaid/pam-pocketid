@@ -7,19 +7,24 @@ Browser-based sudo elevation via [Pocket ID](https://github.com/pocket-id/pocket
 ## Screenshots
 
 ### Sessions
-![Sessions](screenshots/sessions.svg)
+| Dark | Light |
+|------|-------|
+| ![Sessions (dark)](screenshots/sessions.png) | ![Sessions (light)](screenshots/sessions-light.png) |
 
 ### History
-![History](screenshots/history.svg)
+| Dark | Light |
+|------|-------|
+| ![History (dark)](screenshots/history.png) | ![History (light)](screenshots/history-light.png) |
 
 ### Hosts
-![Hosts](screenshots/hosts.svg)
+| Dark | Light |
+|------|-------|
+| ![Hosts (dark)](screenshots/hosts.png) | ![Hosts (light)](screenshots/hosts-light.png) |
 
-### Terminal
-![Terminal](screenshots/terminal.svg)
-
-### Notification
-![Notification](screenshots/notification.svg)
+### Info
+| Dark | Light |
+|------|-------|
+| ![Info (dark)](screenshots/info.png) | ![Info (light)](screenshots/info-light.png) |
 
 ## How it works
 
