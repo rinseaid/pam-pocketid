@@ -1695,9 +1695,16 @@ func (s *Server) handleExtendSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	username := s.verifyFormAuth(w, r)
-	if username == "" {
+	actor := s.verifyFormAuth(w, r)
+	if actor == "" {
 		return
+	}
+	// Admin may extend another user's session via a "session_username" form field.
+	username := actor
+	if s.getSessionRole(r) == "admin" {
+		if su := r.FormValue("session_username"); su != "" && validUsername.MatchString(su) {
+			username = su
+		}
 	}
 	hostname := r.FormValue("hostname")
 	if hostname == "(unknown)" {
@@ -1720,7 +1727,7 @@ func (s *Server) handleExtendSession(w http.ResponseWriter, r *http.Request) {
 	if displayHostname == "" {
 		displayHostname = "(unknown)"
 	}
-	s.store.LogAction(username, "extended", displayHostname, "", username)
+	s.store.LogAction(username, "extended", displayHostname, "", actor)
 	log.Printf("EXTENDED: user %q host %q to %s from %s", username, displayHostname, remaining, remoteAddr(r))
 	s.broadcastSSE(username, "session_changed")
 
@@ -2028,8 +2035,8 @@ func (s *Server) handleSessionsCallback(w http.ResponseWriter, r *http.Request) 
 			Name:     "pam_avatar",
 			Value:    claims.Picture,
 			Path:     "/",
-			MaxAge:   1800,
-			HttpOnly: false, // needs to be readable for display
+			MaxAge:   2592000, // 30 days — outlasts session cookie so avatar persists
+			HttpOnly: false,   // needs to be readable for display
 			SameSite: http.SameSiteLaxMode,
 		})
 	}
@@ -3496,6 +3503,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 	type activeUserView struct {
 		Username  string
 		Remaining string
+		Hostname  string // for per-user action forms
 	}
 
 	type hostView struct {
@@ -3523,6 +3531,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 			activeUsers = append(activeUsers, activeUserView{
 				Username:  sess.Username,
 				Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+				Hostname:  h,
 			})
 		}
 		hv.ActiveUsers = activeUsers
@@ -4684,7 +4693,7 @@ const historyPageHTML = `<!DOCTYPE html>
     .time-ago { display: block; font-size: 0.75rem; color: var(--text-secondary); }
     .col-host { overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
     .col-code { font-family: monospace; font-size: 0.813rem; color: var(--text-secondary); white-space: nowrap; }
-    .col-filter-form { display: inline-flex; align-items: center; gap: 2px; margin: 0; padding: 0; text-transform: none; }
+    .col-filter-form { display: inline-flex; align-items: center; gap: 2px; margin: 0; padding: 0; text-transform: none; max-width: 100%; }
     .sort-btn { display: inline-block; padding: 4px 6px; margin-left: 4px; color: var(--border); text-decoration: none; font-size: 0.75rem; text-transform: none; border-radius: 4px; }
     .sort-btn:hover { color: var(--text); background: var(--info-bg); }
     .sort-btn.active { color: var(--primary); }
@@ -4698,7 +4707,8 @@ const historyPageHTML = `<!DOCTYPE html>
       background: var(--card-bg);
       color: var(--text);
       cursor: pointer;
-      max-width: 140px;
+      max-width: 120px;
+      width: auto;
       appearance: none;
       -webkit-appearance: none;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5'/%3E%3C/svg%3E");
@@ -5290,6 +5300,8 @@ const adminPageHTML = `<!DOCTYPE html>
     .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
     .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
     .elevate-form select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); cursor: pointer; }
+    .session-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; }
+    .session-actions { display: flex; gap: 4px; flex-shrink: 0; }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .history-action { font-weight: 600; }
     .history-action.approved { color: var(--success); }
@@ -5321,8 +5333,8 @@ const adminPageHTML = `<!DOCTYPE html>
     .time-ago { display: block; font-size: 0.75rem; color: var(--text-secondary); }
     .col-host { overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
     .col-code { font-family: monospace; font-size: 0.813rem; color: var(--text-secondary); white-space: nowrap; }
-    .col-filter-form { display: inline-flex; align-items: center; gap: 2px; margin: 0; padding: 0; text-transform: none; }
-    .col-filter-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.75rem; background: var(--card-bg); color: var(--text); cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; padding-right: 22px; }
+    .col-filter-form { display: inline-flex; align-items: center; gap: 2px; margin: 0; padding: 0; text-transform: none; max-width: 100%; }
+    .col-filter-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.75rem; background: var(--card-bg); color: var(--text); cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; padding-right: 22px; max-width: 120px; width: auto; }
     .col-filter-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
     .sort-btn { display: inline-block; padding: 4px 6px; margin-left: 4px; color: var(--border); text-decoration: none; font-size: 0.75rem; border-radius: 4px; }
     .sort-btn:hover { color: var(--text); background: var(--info-bg); }
@@ -5498,7 +5510,29 @@ const adminPageHTML = `<!DOCTYPE html>
           <span class="row-host">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
           {{if .ActiveUsers}}
             {{range .ActiveUsers}}
-              <span class="row-active">{{.Username}} — {{.Remaining}} {{call $.T "remaining"}}</span>
+              <div class="session-row">
+                <span class="row-active">{{.Username}} — {{.Remaining}} {{call $.T "remaining"}}</span>
+                <div class="session-actions">
+                  <form method="POST" action="/api/sessions/extend" style="display:inline">
+                    <input type="hidden" name="hostname" value="{{.Hostname}}">
+                    <input type="hidden" name="username" value="{{$.Username}}">
+                    <input type="hidden" name="session_username" value="{{.Username}}">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                    <input type="hidden" name="from" value="/admin/hosts">
+                    <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
+                  </form>
+                  <form method="POST" action="/api/sessions/revoke" style="display:inline">
+                    <input type="hidden" name="hostname" value="{{.Hostname}}">
+                    <input type="hidden" name="username" value="{{$.Username}}">
+                    <input type="hidden" name="session_username" value="{{.Username}}">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                    <input type="hidden" name="from" value="/admin/hosts">
+                    <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session for {{.Username}} on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+                  </form>
+                </div>
+              </div>
             {{end}}
           {{else}}
             <span class="row-sub">{{call $.T "no_active_session"}}</span>
@@ -5522,24 +5556,7 @@ const adminPageHTML = `<!DOCTYPE html>
           <button type="submit" class="host-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
         </form>
         {{end}}
-        {{if .Active}}
-        <form method="POST" action="/api/sessions/extend" style="display:inline">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <input type="hidden" name="from" value="/admin/hosts">
-          <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
-        </form>
-        <form method="POST" action="/api/sessions/revoke">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <input type="hidden" name="from" value="/admin/hosts">
-          <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
-        </form>
-        {{else}}
+        {{if not .Active}}
         <form method="POST" action="/api/hosts/elevate" class="elevate-form">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
