@@ -162,6 +162,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.mux.HandleFunc("/sessions/login", s.handleSessionsLogin)
 	s.mux.HandleFunc("/history", s.handleHistoryPage)
 	s.mux.HandleFunc("/admin", s.handleAdmin)
+	s.mux.HandleFunc("/admin/info", s.handleAdminInfo)
 	s.mux.HandleFunc("/admin/users", s.handleAdminUsers)
 	s.mux.HandleFunc("/admin/hosts", s.handleAdminHosts)
 	s.mux.HandleFunc("/admin/history", s.handleAdminHistory)
@@ -171,7 +172,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		http.Redirect(w, r, "/admin/hosts", http.StatusMovedPermanently)
 	})
 	s.mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin", http.StatusMovedPermanently)
+		http.Redirect(w, r, "/admin/info", http.StatusMovedPermanently)
 	})
 	s.mux.HandleFunc("/api/hosts/elevate", s.handleElevate)
 	s.mux.HandleFunc("/api/hosts/rotate", s.handleRotateHost)
@@ -3169,6 +3170,12 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // handleAdmin renders the admin overview page at /admin.
 // GET /admin
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/admin/history", http.StatusSeeOther)
+}
+
+// handleAdminInfo shows server configuration and system information.
+// GET /admin/info
+func (s *Server) handleAdminInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
