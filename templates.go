@@ -785,7 +785,7 @@ const historyPageHTML = `<!DOCTYPE html>
     {{if .Timeline}}
     <div class="timeline">
       <div class="timeline-bars">
-        {{range .Timeline}}<a href="/history?hours_ago={{.HoursAgo}}&per_page={{$.PerPage}}" class="timeline-bar{{if .IsNow}} now{{end}}{{if eqInt .HoursAgo $.ActiveHoursAgo}} timeline-active{{end}}" style="height:{{.Height}}px" title="{{.Details}}"></a>{{end}}
+        {{range .Timeline}}<a href="/history?hours_ago={{.HoursAgo}}&per_page={{$.PerPage}}" class="timeline-bar{{if .IsNow}} now{{end}}{{if eqInt .HoursAgo $.ActiveHoursAgo}} timeline-active{{end}}" style="height:{{.Height}}px" title="{{.Details}}" aria-label="{{.Details}}"></a>{{end}}
       </div>
       <div class="timeline-label">24h</div>
     </div>
@@ -829,8 +829,8 @@ const historyPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
-          <th class="col-time">{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th class="col-action"><form method="GET" action="/history" class="col-filter-form">
+          <th scope="col" class="col-time">{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col" class="col-action"><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="sort" value="{{.Sort}}">
@@ -841,8 +841,8 @@ const historyPageHTML = `<!DOCTYPE html>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
 </form><a href="/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}" title="{{call .T "sort_by_action"}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          {{if $.IsAdmin}}<th class="col-user">{{call .T "user"}}</th>{{end}}
-          <th class="col-host"><form method="GET" action="/history" class="col-filter-form">
+          {{if $.IsAdmin}}<th scope="col" class="col-user">{{call .T "user"}}</th>{{end}}
+          <th scope="col" class="col-host"><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="sort" value="{{.Sort}}">
@@ -853,7 +853,7 @@ const historyPageHTML = `<!DOCTYPE html>
     {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
 </form><a href="/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}" title="{{call .T "sort_by_host"}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th class="col-code">{{call .T "code"}} <a href="/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}" title="{{call .T "sort_by_code"}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col" class="col-code">{{call .T "code"}} <a href="/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}" title="{{call .T "sort_by_code"}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
         </tr>
       </thead>
       <tbody>
@@ -1128,11 +1128,11 @@ const adminPageHTML = `<!DOCTYPE html>
     <table class="users-table">
       <thead>
         <tr>
-          <th>{{call .T "user"}}</th>
-          <th>{{call .T "groups"}}</th>
-          <th>{{call .T "active_sessions_count"}}</th>
-          <th>{{call .T "last_active"}}</th>
-          <th></th>
+          <th scope="col">{{call .T "user"}}</th>
+          <th scope="col">{{call .T "groups"}}</th>
+          <th scope="col">{{call .T "active_sessions_count"}}</th>
+          <th scope="col">{{call .T "last_active"}}</th>
+          <th scope="col"></th>
         </tr>
       </thead>
       <tbody>
@@ -1304,8 +1304,8 @@ const adminPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
-          <th>{{call .T "time"}} <a href="/admin/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th><form method="GET" action="/admin/history" class="col-filter-form">
+          <th scope="col">{{call .T "time"}} <a href="/admin/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col"><form method="GET" action="/admin/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="user" value="{{.UserFilter}}">
@@ -1317,7 +1317,7 @@ const adminPageHTML = `<!DOCTYPE html>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
 </form><a href="/admin/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th><form method="GET" action="/admin/history" class="col-filter-form">
+          <th scope="col"><form method="GET" action="/admin/history" class="col-filter-form">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
@@ -1329,7 +1329,7 @@ const adminPageHTML = `<!DOCTYPE html>
     {{range .UserOptions}}<option value="{{.}}" {{if eq . $.UserFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
 </form><a href="/admin/history?sort=user&order={{if eq .Sort "user"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "user"}} active{{end}}">{{if and (eq .Sort "user") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th><form method="GET" action="/admin/history" class="col-filter-form">
+          <th scope="col"><form method="GET" action="/admin/history" class="col-filter-form">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="user" value="{{.UserFilter}}">
@@ -1341,7 +1341,7 @@ const adminPageHTML = `<!DOCTYPE html>
     {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
 </form><a href="/admin/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th>{{call .T "code"}} <a href="/admin/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col">{{call .T "code"}} <a href="/admin/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
         </tr>
       </thead>
       <tbody>
