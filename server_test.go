@@ -44,7 +44,6 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 	s.mux.HandleFunc("/sessions", s.handleSessionsRedirect)
 	s.mux.HandleFunc("/sessions/login", s.handleSessionsLogin)
 	s.mux.HandleFunc("/history", s.handleHistoryPage)
-	s.mux.HandleFunc("/hosts", s.handleHostsPage)
 	s.mux.HandleFunc("/api/hosts/elevate", s.handleElevate)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
 	s.mux.HandleFunc("/", s.handleDashboard)

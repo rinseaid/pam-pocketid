@@ -20,6 +20,7 @@ type PocketIDClient struct {
 	cachedData  *pocketIDData
 	cacheExpiry time.Time
 	cacheTTL    time.Duration
+	fetchMu     sync.Mutex // separate from cache mu; serializes fetches
 }
 
 type pocketIDData struct {
@@ -60,9 +61,15 @@ func NewPocketIDClient(baseURL, apiKey string) *PocketIDClient {
 		return nil
 	}
 	return &PocketIDClient{
-		baseURL:  baseURL,
-		apiKey:   apiKey,
-		client:   &http.Client{Timeout: 10 * time.Second},
+		baseURL: baseURL,
+		apiKey:  apiKey,
+		client: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: &http.Transport{Proxy: nil},
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		cacheTTL: 5 * time.Minute,
 	}
 }
@@ -73,6 +80,18 @@ func (c *PocketIDClient) GetUserPermissions() (map[string][]pocketIDGroupInfo, e
 	}
 
 	// Check cache
+	c.mu.RLock()
+	if c.cachedData != nil && time.Now().Before(c.cacheExpiry) {
+		data := c.cachedData.UserGroups
+		c.mu.RUnlock()
+		return data, nil
+	}
+	c.mu.RUnlock()
+
+	// Serialize concurrent fetches to prevent cache stampede.
+	c.fetchMu.Lock()
+	defer c.fetchMu.Unlock()
+	// Re-check cache under fetch lock (another goroutine may have just refreshed).
 	c.mu.RLock()
 	if c.cachedData != nil && time.Now().Before(c.cacheExpiry) {
 		data := c.cachedData.UserGroups

@@ -699,13 +699,20 @@ func (s *ChallengeStore) SetAllHostsRotateBefore(hostnames []string) {
 
 // ExtendGraceSession extends a grace session to the maximum allowed duration.
 // Returns the new remaining duration, or 0 if no session exists.
+// Extension is skipped if more than 75% of the grace period remains, preventing
+// repeated extension abuse (e.g. clicking extend every day to extend indefinitely).
 func (s *ChallengeStore) ExtendGraceSession(username, hostname string) time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := graceKey(username, hostname)
-	_, ok := s.lastApproval[key]
+	expiry, ok := s.lastApproval[key]
 	if !ok {
 		return 0
+	}
+	remaining := time.Until(expiry)
+	// Don't extend if more than 75% of grace period remains
+	if remaining > s.gracePeriod*3/4 {
+		return remaining
 	}
 	newExpiry := time.Now().Add(s.gracePeriod)
 	s.lastApproval[key] = newExpiry
@@ -791,10 +798,23 @@ func (s *ChallengeStore) AllUsers() []string {
 	return result
 }
 
-// RemoveUser removes all data for a user: grace sessions, action log, revocation timestamps.
+// RemoveUser removes all data for a user: grace sessions, action log, revocation timestamps,
+// and any pending challenges (cancelling them to free pending counters and byCode entries).
 func (s *ChallengeStore) RemoveUser(username string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Cancel pending challenges and clean up all challenge data for this user
+	for id, c := range s.challenges {
+		if c.Username == username {
+			if c.Status == StatusPending {
+				s.decPending(username)
+			}
+			delete(s.byCode, c.UserCode)
+			delete(s.challenges, id)
+			delete(s.oneTapUsed, id)
+		}
+	}
+	delete(s.pendingByUser, username)
 	// Revoke all grace sessions for this user
 	prefix := username + "@"
 	for key := range s.lastApproval {
@@ -975,6 +995,7 @@ func (s *ChallengeStore) loadState() {
 		s.lastOIDCAuth[user] = ts
 	}
 	log.Printf("Loaded %d grace sessions, %d revocation entries, %d escrowed hosts from %s", len(s.lastApproval), len(s.revokeTokensBefore), len(s.escrowedHosts), s.persistPath)
+	graceSessions.Set(float64(len(s.lastApproval)))
 }
 
 // saveStateLocked writes the current grace sessions and revocation timestamps to the

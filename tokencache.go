@@ -184,6 +184,11 @@ func (tc *TokenCache) Write(username, rawIDToken string) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("writing temp file: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("syncing token cache: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("closing temp file: %w", err)

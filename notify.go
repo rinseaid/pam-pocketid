@@ -306,12 +306,11 @@ func formatWebhookSlack(d webhookData) ([]byte, error) {
 }
 
 // formatWebhookNtfy returns a payload for an ntfy.sh server.
+// The topic is read from the URL path (e.g., https://ntfy.sh/mytopic), not the body.
 func formatWebhookNtfy(d webhookData) ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
-		"topic": "sudo",
-		"title": "Sudo approval needed",
-		"message": fmt.Sprintf("User: %s\nHost: %s\nCode: %s\nExpires: %ds",
-			d.Username, d.Hostname, d.UserCode, d.ExpiresIn),
+		"title":   "Sudo approval needed",
+		"message": fmt.Sprintf("User: %s\nHost: %s\nCode: %s\nExpires: %ds", d.Username, d.Hostname, d.UserCode, d.ExpiresIn),
 		"actions": []map[string]string{
 			{"action": "view", "label": "Approve", "url": d.BestApprovalURL()},
 		},
@@ -332,11 +331,26 @@ func formatWebhookCustom(d webhookData, tmpl string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// webhookClient is a hardened HTTP client for webhook delivery:
+// no proxy (prevents SSRF via proxy env vars) and no redirect following
+// (prevents redirect-based SSRF to internal hosts).
+var webhookClient = &http.Client{
+	Timeout:   10 * time.Second,
+	Transport: &http.Transport{Proxy: nil},
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 // sendWebhookNotifications fires each configured webhook in its own goroutine.
 // It is a no-op when no webhooks are configured.
 func (s *Server) sendWebhookNotifications(d webhookData) {
 	for _, wh := range s.cfg.Webhooks {
-		go s.fireWebhook(wh, d)
+		s.notifyWg.Add(1)
+		go func(wh WebhookConfig) {
+			defer s.notifyWg.Done()
+			s.fireWebhook(wh, d)
+		}(wh)
 	}
 }
 
@@ -381,7 +395,7 @@ func (s *Server) fireWebhook(wh WebhookConfig, d webhookData) {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webhookClient.Do(req)
 	if err != nil {
 		log.Printf("ERROR: webhook (format=%q) delivery failed: %v", wh.Format, err)
 		return

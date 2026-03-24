@@ -39,7 +39,6 @@ var templateFuncMap = template.FuncMap{
 	"formatDuration": formatDuration,
 	"timeAgo":        timeAgo,
 	"formatTime":     formatTime,
-	"actionLabel":    actionLabel,
 	"eq":             func(a, b string) bool { return a == b },
 	"eqInt":          func(a, b int) bool { return a == b },
 	"add":            func(a, b int) int { return a + b },
@@ -54,13 +53,15 @@ var (
 	adminTmpl            = template.Must(template.New("admin").Funcs(templateFuncMap).Parse(adminPageHTML))
 	dashboardTmpl        = template.Must(template.New("dashboard").Funcs(templateFuncMap).Parse(dashboardHTML))
 	historyTmpl          = template.Must(template.New("history").Funcs(templateFuncMap).Parse(historyPageHTML))
-	hostsTmpl            = template.Must(template.New("hosts").Funcs(templateFuncMap).Parse(hostsPageHTML))
-	infoTmpl             = template.Must(template.New("info").Funcs(templateFuncMap).Parse(infoPageHTML))
-	loginPageTmpl        = template.Must(template.New("login").Parse(loginPageHTML))
 )
 
 // escrowTimeout limits how long we wait for the escrow command to complete.
 const escrowTimeout = 30 * time.Second
+
+// sseAdminKey is the SSE channel key for admin subscribers. It uses a NUL byte
+// prefix which cannot appear in valid usernames (^[a-zA-Z0-9._-]), preventing
+// collision between a username "__admin__" and the admin broadcast channel.
+const sseAdminKey = "\x00admin"
 
 // escrowMaxOutput caps the amount of stdout/stderr we read from the escrow
 // command to prevent memory exhaustion from a verbose or malicious command.
@@ -219,7 +220,7 @@ func (s *Server) unregisterSSE(username string, ch chan string) {
 }
 
 // broadcastSSE sends an event string to all SSE channels registered for username,
-// and also to the "__admin__" channel so admins see all events.
+// and also to the sseAdminKey channel so admins see all events.
 func (s *Server) broadcastSSE(username, event string) {
 	s.sseMu.Lock()
 	defer s.sseMu.Unlock()
@@ -230,7 +231,7 @@ func (s *Server) broadcastSSE(username, event string) {
 		}
 	}
 	// Also broadcast to admin subscribers
-	for _, ch := range s.sseClients["__admin__"] {
+	for _, ch := range s.sseClients[sseAdminKey] {
 		select {
 		case ch <- event:
 		default:
@@ -258,10 +259,10 @@ func (s *Server) handleSSEEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
 
-	// Admin users subscribe to the "__admin__" channel to see all users' events.
+	// Admin users subscribe to the sseAdminKey channel to see all users' events.
 	sseKey := username
 	if s.getSessionRole(r) == "admin" {
-		sseKey = "__admin__"
+		sseKey = sseAdminKey
 	}
 	ch := s.registerSSE(sseKey)
 	defer s.unregisterSSE(sseKey, ch)
@@ -897,8 +898,8 @@ func (s *Server) handleCreateChallenge(w http.ResponseWriter, r *http.Request) {
 	// Build client_config if any server-side client overrides are set
 	clientCfg := s.buildClientConfig()
 
-	// Auto-approve if within grace period
-	if s.store.WithinGracePeriod(req.Username, req.Hostname) {
+	// Auto-approve if within grace period, but only for hosts that don't require admin approval.
+	if s.store.WithinGracePeriod(req.Username, req.Hostname) && !s.requiresAdminApproval(req.Hostname) {
 		if err := s.store.AutoApprove(challenge.ID); err == nil {
 			challengesAutoApproved.Inc()
 			activeChallenges.Dec()
@@ -1346,6 +1347,11 @@ func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.cfg.SharedSecret == "" {
+		revokeErrorPage(w, r, http.StatusForbidden, "invalid_request", "invalid_csrf")
+		return
+	}
+
 	token := strings.TrimPrefix(r.URL.Path, "/api/onetap/")
 	if token == "" {
 		revokeErrorPage(w, r, http.StatusBadRequest, "invalid_request", "missing_fields")
@@ -1404,6 +1410,7 @@ func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 	lastAuth := s.store.LastOIDCAuth(challenge.Username)
 	oidcFresh := !lastAuth.IsZero() && time.Since(lastAuth) < s.cfg.OneTapMaxAge
 	if !oidcFresh {
+		secure := strings.HasPrefix(s.cfg.ExternalURL, "https://")
 		http.SetCookie(w, &http.Cookie{
 			Name:     "pam_onetap",
 			Value:    token,
@@ -1411,6 +1418,7 @@ func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 			MaxAge:   300, // 5 minutes
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
+			Secure:   secure,
 		})
 		loginURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/sessions/login"
 		http.Redirect(w, r, loginURL, http.StatusSeeOther)
@@ -1437,6 +1445,7 @@ func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 		hostname = "(unknown)"
 	}
 	s.store.LogAction(challenge.Username, "approved", hostname, challenge.UserCode, challenge.Username)
+	s.broadcastSSE(challenge.Username, "challenge_resolved")
 	log.Printf("ONETAP_APPROVED: sudo for user %q on host %q (challenge %s) from %s", challenge.Username, hostname, challengeID[:8], remoteAddr(r))
 
 	// Render a simple success page
@@ -1754,20 +1763,26 @@ func (s *Server) handleExtendAll(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		return
 	}
-	sessions := s.store.ActiveSessions(username)
+	targetUser := username
+	if s.getSessionRole(r) == "admin" {
+		if su := r.FormValue("session_username"); su != "" && validUsername.MatchString(su) {
+			targetUser = su
+		}
+	}
+	sessions := s.store.ActiveSessions(targetUser)
 	count := 0
 	for _, sess := range sessions {
 		hostname := sess.Hostname
 		if hostname == "(unknown)" {
 			hostname = ""
 		}
-		if s.store.ExtendGraceSession(username, hostname) > 0 {
-			s.store.LogAction(username, "extended", sess.Hostname, "", username)
+		if s.store.ExtendGraceSession(targetUser, hostname) > 0 {
+			s.store.LogAction(targetUser, "extended", sess.Hostname, "", username)
 			count++
 		}
 	}
-	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions from %s", username, count, remoteAddr(r))
-	s.broadcastSSE(username, "session_changed")
+	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions for %q from %s", username, count, targetUser, remoteAddr(r))
+	s.broadcastSSE(targetUser, "session_changed")
 
 	setFlashCookie(w, fmt.Sprintf("extended_all:%d", count))
 	dest := r.FormValue("from")
@@ -2050,12 +2065,17 @@ func (s *Server) handleSessionsCallback(w http.ResponseWriter, r *http.Request) 
 	// handleOneTap because their OIDC auth was stale. Now that they've
 	// re-authenticated, resume the one-tap approval flow.
 	if onetapCookie, err := r.Cookie("pam_onetap"); err == nil && onetapCookie.Value != "" {
-		// Clear the cookie
 		http.SetCookie(w, &http.Cookie{Name: "pam_onetap", Value: "", Path: "/", MaxAge: -1})
-		// Redirect back to the one-tap endpoint — freshness check will now pass
-		onetapURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/onetap/" + onetapCookie.Value
-		http.Redirect(w, r, onetapURL, http.StatusSeeOther)
-		return
+		// Verify the one-tap token's challenge belongs to the authenticated user
+		parts := strings.SplitN(onetapCookie.Value, ".", 3)
+		if len(parts) == 3 {
+			if challenge, ok := s.store.Get(parts[0]); ok && challenge.Username == username {
+				onetapURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/api/onetap/" + onetapCookie.Value
+				http.Redirect(w, r, onetapURL, http.StatusSeeOther)
+				return
+			}
+		}
+		// Token invalid or challenge not for this user — fall through to dashboard
 	}
 
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
@@ -2482,265 +2502,6 @@ func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleHostsPage renders the known hosts page with grace status and elevate controls.
-// GET /hosts
-func (s *Server) handleHostsPage(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Handle language change via query param
-	if setLanguageCookie(w, r) {
-		return
-	}
-	lang := detectLanguage(r)
-	t := T(lang)
-
-	username := s.getSessionUser(r)
-	if username == "" {
-		setFlashCookie(w, "expired:")
-		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
-		return
-	}
-	s.setSessionCookie(w, username, s.getSessionRole(r))
-
-	// Parse flash messages from cookie
-	var flashes []string
-	if flashParam := getAndClearFlash(w, r); flashParam != "" {
-		for _, f := range strings.Split(flashParam, ",") {
-			parts := strings.SplitN(f, ":", 2)
-			if len(parts) == 2 {
-				switch parts[0] {
-				case "elevated":
-					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
-				case "extended":
-					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
-				case "extended_all":
-					flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
-				case "revoked":
-					flashes = append(flashes, t("revoked_session_on")+" "+parts[1])
-				case "revoked_all":
-					flashes = append(flashes, fmt.Sprintf(t("revoked_n_sessions"), atoi(parts[1])))
-				case "rotated":
-					flashes = append(flashes, t("rotated_breakglass_on")+" "+parts[1])
-				case "rotated_all":
-					flashes = append(flashes, fmt.Sprintf(t("rotated_n_hosts"), atoi(parts[1])))
-				}
-			}
-		}
-	}
-
-	hosts := s.store.KnownHosts(username)
-	escrowed := s.store.EscrowedHosts()
-
-	// Merge escrowed hosts into the known hosts list
-	escrowedSet := make(map[string]bool)
-	for h := range escrowed {
-		// Skip escrowed hosts the user is not authorized for
-		if s.hostRegistry.IsEnabled() && !s.hostRegistry.IsUserAuthorized(h, username) {
-			continue
-		}
-		escrowedSet[h] = true
-		// Add escrowed hosts that aren't already known from action history
-		found := false
-		for _, kh := range hosts {
-			if kh == h {
-				found = true
-				break
-			}
-		}
-		if !found {
-			hosts = append(hosts, h)
-		}
-	}
-	sort.Strings(hosts)
-
-	// Default rotation days for escrow validity
-	rotationDays := 90
-	if s.cfg.ClientBreakglassRotationDays > 0 {
-		rotationDays = s.cfg.ClientBreakglassRotationDays
-	}
-
-	// Merge registered hosts into the known hosts list
-	if s.hostRegistry.IsEnabled() {
-		for _, rh := range s.hostRegistry.HostsForUser(username) {
-			found := false
-			for _, kh := range hosts {
-				if kh == rh {
-					found = true
-					break
-				}
-			}
-			if !found {
-				hosts = append(hosts, rh)
-			}
-		}
-		sort.Strings(hosts)
-	}
-
-	type activeUserView struct {
-		Username  string
-		Remaining string
-	}
-
-	type hostView struct {
-		Hostname        string
-		Active          bool
-		ActiveUsers     []activeUserView
-		Escrowed        bool
-		EscrowAge       string
-		EscrowExpired   bool
-		EscrowLink      string
-		Registered      bool
-		AuthorizedUsers []string
-		Group           string
-	}
-
-	isAdmin := s.getSessionRole(r) == "admin"
-
-	// Collect all group names for the filter dropdown
-	groupFilter := r.URL.Query().Get("group")
-	groupSet := make(map[string]struct{})
-
-	var hostViews []hostView
-	for _, h := range hosts {
-		hv := hostView{Hostname: h}
-		var activeUsers []activeUserView
-		if isAdmin {
-			for _, sess := range s.store.ActiveSessionsForHost(h) {
-				activeUsers = append(activeUsers, activeUserView{
-					Username:  sess.Username,
-					Remaining: formatDuration(time.Until(sess.ExpiresAt)),
-				})
-			}
-		} else {
-			rem := s.store.GraceRemaining(username, h)
-			if rem > 0 {
-				activeUsers = append(activeUsers, activeUserView{
-					Username:  username,
-					Remaining: formatDuration(rem),
-				})
-			}
-		}
-		hv.ActiveUsers = activeUsers
-		hv.Active = len(activeUsers) > 0
-		if escrowRecord, ok := escrowed[h]; ok {
-			hv.Escrowed = true
-			hv.EscrowAge = formatDuration(time.Since(escrowRecord.Timestamp))
-			hv.EscrowExpired = time.Since(escrowRecord.Timestamp) > time.Duration(rotationDays)*24*time.Hour
-			if s.cfg.EscrowLinkTemplate != "" {
-				link := strings.ReplaceAll(s.cfg.EscrowLinkTemplate, "{hostname}", h)
-				if escrowRecord.ItemID != "" {
-					link = strings.ReplaceAll(link, "{item_id}", escrowRecord.ItemID)
-				}
-				hv.EscrowLink = link
-			}
-		}
-		if users, group, _, ok := s.hostRegistry.GetHost(h); ok {
-			hv.Registered = true
-			hv.AuthorizedUsers = users
-			hv.Group = group
-		}
-		if hv.Group != "" {
-			groupSet[hv.Group] = struct{}{}
-		}
-		// Apply group filter if set
-		if groupFilter != "" && hv.Group != groupFilter {
-			continue
-		}
-		hostViews = append(hostViews, hv)
-	}
-
-	// Build sorted list of all known groups for the filter dropdown
-	var allGroups []string
-	for g := range groupSet {
-		allGroups = append(allGroups, g)
-	}
-	sort.Strings(allGroups)
-
-	now := time.Now()
-	csrfTs := fmt.Sprintf("%d", now.Unix())
-	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
-
-	// Build duration options, filtering to those <= GracePeriod
-	type durationOption struct {
-		Value    int
-		Label    string
-		Selected bool
-	}
-	allDurations := []durationOption{
-		{3600, t("1_hour"), false},
-		{14400, t("4_hours"), false},
-		{28800, t("8_hours"), true},
-		{86400, t("1_day"), false},
-	}
-	var durations []durationOption
-	graceSec := int(s.cfg.GracePeriod.Seconds())
-	if graceSec <= 0 {
-		graceSec = 86400 // default cap if grace period is not configured
-	}
-	for _, d := range allDurations {
-		if d.Value <= graceSec {
-			d.Selected = false // reset
-			durations = append(durations, d)
-		}
-	}
-	if len(durations) > 0 {
-		durations[len(durations)-1].Selected = true
-	}
-	// If no durations fit (GracePeriod < 1h), add a single option for the configured grace period
-	if len(durations) == 0 && s.cfg.GracePeriod > 0 {
-		durations = append(durations, durationOption{
-			Value:    int(s.cfg.GracePeriod.Seconds()),
-			Label:    formatDuration(s.cfg.GracePeriod),
-			Selected: true,
-		})
-	}
-
-	// Read timezone from cookie for profile dropdown display
-	hostsTZ := "UTC"
-	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
-		if _, err := time.LoadLocation(c.Value); err == nil {
-			hostsTZ = c.Value
-		}
-	}
-
-	hasEscrowed := false
-	for _, hv := range hostViews {
-		if hv.Escrowed {
-			hasEscrowed = true
-			break
-		}
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if err := hostsTmpl.Execute(w, map[string]interface{}{
-		"Username":         username,
-		"Initial":          strings.ToUpper(username[:1]),
-		"Avatar":           getAvatar(r),
-		"Timezone":         hostsTZ,
-		"Flashes":          flashes,
-		"Hosts":            hostViews,
-		"CSRFToken":        csrfToken,
-		"CSRFTs":           csrfTs,
-		"Durations":        durations,
-		"ActivePage":       "hosts",
-		"Theme":            getTheme(r),
-		"CSPNonce":         r.Context().Value("csp-nonce"),
-		"T":                T(lang),
-		"Lang":             lang,
-		"Languages":        supportedLanguages,
-		"EscrowLinkLabel":  s.cfg.EscrowLinkLabel,
-		"HasEscrowedHosts": hasEscrowed,
-		"AllGroups":        allGroups,
-		"GroupFilter":      groupFilter,
-		"IsAdmin":          isAdmin,
-	}); err != nil {
-		log.Printf("ERROR: template execution: %v", err)
-	}
-}
-
 // handleElevate creates a grace session for a host manually.
 // POST /api/hosts/elevate
 func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
@@ -2751,6 +2512,11 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 
 	username := s.verifyFormAuth(w, r)
 	if username == "" {
+		return
+	}
+
+	if s.getSessionRole(r) != "admin" {
+		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "not_authorized_message")
 		return
 	}
 
@@ -3040,126 +2806,6 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// handleInfoPage renders the server configuration and system info page.
-// GET /info
-func (s *Server) handleInfoPage(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Handle language change via query param
-	if setLanguageCookie(w, r) {
-		return
-	}
-	lang := detectLanguage(r)
-	t := T(lang)
-
-	username := s.getSessionUser(r)
-	if username == "" {
-		setFlashCookie(w, "expired:")
-		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
-		return
-	}
-	s.setSessionCookie(w, username, s.getSessionRole(r))
-
-	// Server configuration values
-	gracePeriod := formatDuration(s.cfg.GracePeriod)
-	challengeTTL := formatDuration(s.cfg.ChallengeTTL)
-
-	breakglassType := s.cfg.ClientBreakglassPasswordType
-	if breakglassType == "" {
-		breakglassType = t("not_configured")
-	}
-
-	breakglassRotation := t("not_configured")
-	if s.cfg.ClientBreakglassRotationDays > 0 {
-		breakglassRotation = fmt.Sprintf("%d %s", s.cfg.ClientBreakglassRotationDays, t("days"))
-	}
-
-	tokenCache := t("disabled")
-	if s.cfg.ClientTokenCacheEnabled != nil && *s.cfg.ClientTokenCacheEnabled {
-		tokenCache = t("enabled")
-	}
-
-	escrowConfigured := t("not_configured")
-	if s.cfg.EscrowCommand != "" {
-		escrowConfigured = t("configured")
-	}
-
-	notifyConfigured := t("not_configured")
-	if s.cfg.NotifyCommand != "" {
-		notifyConfigured = t("configured")
-	}
-
-	hostRegistryEnabled := s.hostRegistry.IsEnabled()
-	hostRegistryStatus := t("host_registry_global_secret")
-	if hostRegistryEnabled {
-		hostRegistryStatus = fmt.Sprintf(t("enabled_n_hosts"), len(s.hostRegistry.RegisteredHosts()))
-	}
-
-	sessionPersistence := t("disabled")
-	if s.cfg.SessionStateFile != "" {
-		sessionPersistence = s.cfg.SessionStateFile
-	}
-
-	// System info
-	uptime := time.Since(serverStartTime)
-	uptimeStr := formatDuration(uptime)
-
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-	allocMB := float64(memStats.Alloc) / 1024 / 1024
-	sysMB := float64(memStats.Sys) / 1024 / 1024
-	memUsage := fmt.Sprintf("%.1f MB alloc / %.1f MB sys", allocMB, sysMB)
-
-	// Active grace sessions for the current user
-	activeSessions := len(s.store.ActiveSessions(username))
-
-	// Read timezone from cookie for profile dropdown display
-	infoTZ := "UTC"
-	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
-		if _, err := time.LoadLocation(c.Value); err == nil {
-			infoTZ = c.Value
-		}
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if err := infoTmpl.Execute(w, map[string]interface{}{
-		"Username":            username,
-		"Initial":             strings.ToUpper(username[:1]),
-		"Avatar":              getAvatar(r),
-		"Timezone":            infoTZ,
-		"ActivePage":          "info",
-		"Theme":               getTheme(r),
-		"CSPNonce":            r.Context().Value("csp-nonce"),
-		"T":                   T(lang),
-		"Lang":                lang,
-		"Languages":           supportedLanguages,
-		"Version":             version,
-		"GracePeriod":         gracePeriod,
-		"ChallengeTTL":        challengeTTL,
-		"BreakglassType":      breakglassType,
-		"BreakglassRotation":  breakglassRotation,
-		"TokenCache":          tokenCache,
-		"DefaultPageSize":     s.cfg.DefaultHistoryPageSize,
-		"EscrowConfigured":    escrowConfigured,
-		"NotifyConfigured":    notifyConfigured,
-		"HostRegistry":        hostRegistryStatus,
-		"SessionPersistence":  sessionPersistence,
-		"OneTapMaxAge":        formatDuration(s.cfg.OneTapMaxAge),
-		"AdminGroups":         func() string { if len(s.cfg.AdminGroups) == 0 { return t("not_configured") }; return strings.Join(s.cfg.AdminGroups, ", ") }(),
-		"AdminApprovalHosts":  func() string { if len(s.cfg.AdminApprovalHosts) == 0 { return t("not_configured") }; return strings.Join(s.cfg.AdminApprovalHosts, ", ") }(),
-		"Uptime":              uptimeStr,
-		"GoVersion":           runtime.Version(),
-		"OSArch":              runtime.GOOS + "/" + runtime.GOARCH,
-		"Goroutines":          runtime.NumGoroutine(),
-		"MemUsage":            memUsage,
-		"ActiveSessionsCount": activeSessions,
-	}); err != nil {
-		log.Printf("ERROR: template execution: %v", err)
-	}
-}
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
@@ -4036,8 +3682,8 @@ func (s *Server) handleRemoveUser(w http.ResponseWriter, r *http.Request) {
 		s.hostRegistry.RemoveUserFromAllHosts(targetUser)
 	}
 
-	s.store.RemoveUser(targetUser)
 	s.store.LogAction(targetUser, "user_removed", "", "", adminUser)
+	s.store.RemoveUser(targetUser)
 	log.Printf("USER_REMOVED: admin %q removed user %q from %s", adminUser, targetUser, remoteAddr(r))
 
 	setFlashCookie(w, "removed_user:"+targetUser)
@@ -4225,25 +3871,6 @@ func formatTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02 15:04") + " UTC"
 }
 
-// actionLabel maps action strings to human-readable display labels.
-func actionLabel(action string) string {
-	switch action {
-	case "auto_approved":
-		return "Auto-approved"
-	case "approved":
-		return "Approved"
-	case "revoked":
-		return "Revoked"
-	case "rejected":
-		return "Rejected"
-	case "elevated":
-		return "Elevated"
-	case "extended":
-		return "Extended"
-	default:
-		return action
-	}
-}
 
 // timeAgo formats a time as a human-readable relative string like "2m ago" or "1h ago".
 func timeAgo(t time.Time) string {
@@ -4339,55 +3966,10 @@ type ActionOption struct {
 	Label string
 }
 
-const loginPageHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <title>pam-pocketid</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>` + sharedCSS + `
-    .icon-info {
-      background: var(--info-bg);
-      border: 2px solid var(--info-border);
-      color: var(--primary);
-    }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--primary);
-      color: var(--primary-text);
-      padding: 12px 32px;
-      border-radius: 10px;
-      text-decoration: none;
-      font-size: 0.938rem;
-      font-weight: 600;
-      border: none;
-      cursor: pointer;
-      transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
-      width: 100%;
-      max-width: 320px;
-      margin-top: 16px;
-    }
-    .btn:hover { background: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
-    .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-    .btn:active { transform: translateY(0); }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="icon icon-info" aria-hidden="true">&#x1f511;</div>
-    <h2>pam-pocketid</h2>
-    {{range .Flashes}}<div style="background:var(--warning-bg);border:1px solid var(--warning-border);color:var(--warning);padding:10px 16px;border-radius:8px;margin-bottom:12px;font-size:0.875rem;" role="alert">{{.}}</div>{{end}}
-    <p>Sign in with Pocket ID to manage your sudo sessions.</p>
-    <a href="{{.LoginURL}}" class="btn" role="button">Sign in with Pocket ID</a>
-  </div>
-</body>
-</html>`
 
 // navCSS is the shared navigation bar styles used across dashboard, history, and hosts pages.
 const navCSS = `
-    .nav { display: flex; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); justify-content: center; align-items: center; }
+    .nav { display: flex; gap: 8px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); justify-content: center; align-items: center; flex-wrap: wrap; }
     .nav a { color: var(--text-secondary); text-decoration: none; font-size: 0.875rem; font-weight: 500; padding: 4px 8px; border-radius: 6px; }
     .nav a:hover { color: var(--text); background: var(--info-bg); }
     .nav a.active { color: var(--primary); font-weight: 700; }
@@ -4419,7 +4001,7 @@ const navCSS = `
     }
     .profile-dropdown-item:hover { background: var(--info-bg); }
     .profile-dropdown-divider { border-top: 1px solid var(--border); margin: 8px 0; }
-    .admin-pill { display: inline-block; font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; background: var(--primary); color: #fff; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; vertical-align: middle; margin-left: 6px; }
+    .admin-pill { display: inline-block; font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; background: #1d4ed8; color: #fff; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; vertical-align: middle; margin-left: 6px; }
     .profile-dropdown-label {
       padding: 4px 16px; font-size: 0.75rem; color: var(--text-secondary);
       font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
@@ -4533,6 +4115,21 @@ const dashboardHTML = `<!DOCTYPE html>
     document.querySelectorAll('.tz-select').forEach(function(sel){
       for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===tz){sel.selectedIndex=i;break;}}
     });
+    // Profile dropdown toggle
+    document.querySelectorAll('.profile-btn').forEach(function(btn){
+      btn.addEventListener('click',function(e){
+        var menu=btn.closest('.profile-menu');
+        var dropdown=menu.querySelector('.profile-dropdown');
+        var expanded=dropdown.style.display==='block';
+        dropdown.style.display=expanded?'none':'block';
+        btn.setAttribute('aria-expanded',!expanded);
+        e.stopPropagation();
+      });
+    });
+    document.addEventListener('click',function(){
+      document.querySelectorAll('.profile-dropdown').forEach(function(d){d.style.display='none';});
+      document.querySelectorAll('.profile-btn').forEach(function(b){b.setAttribute('aria-expanded','false');});
+    });
   });
   var es = new EventSource('/api/events');
   es.addEventListener('update', function(e) {
@@ -4554,7 +4151,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
+        <button class="profile-btn" type="button" aria-label="User menu" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
           <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span class="admin-pill">{{call .T "admin"}}</span>{{end}}</div>
           <div class="profile-dropdown-divider"></div>
@@ -4655,6 +4252,7 @@ const dashboardHTML = `<!DOCTYPE html>
         <form method="POST" action="/api/sessions/extend" style="display:inline">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
+          {{if $.IsAdmin}}<input type="hidden" name="session_username" value="{{.Username}}">{{end}}
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <button type="submit" class="host-btn primary" onclick="return confirm('Extend session on {{.Hostname}} to maximum?')">{{call $.T "extend"}}</button>
@@ -4844,6 +4442,21 @@ const historyPageHTML = `<!DOCTYPE html>
         });
       });
     }
+    // Profile dropdown toggle
+    document.querySelectorAll('.profile-btn').forEach(function(btn){
+      btn.addEventListener('click',function(e){
+        var menu=btn.closest('.profile-menu');
+        var dropdown=menu.querySelector('.profile-dropdown');
+        var expanded=dropdown.style.display==='block';
+        dropdown.style.display=expanded?'none':'block';
+        btn.setAttribute('aria-expanded',!expanded);
+        e.stopPropagation();
+      });
+    });
+    document.addEventListener('click',function(){
+      document.querySelectorAll('.profile-dropdown').forEach(function(d){d.style.display='none';});
+      document.querySelectorAll('.profile-btn').forEach(function(b){b.setAttribute('aria-expanded','false');});
+    });
   });
   </script>
 </head>
@@ -4856,7 +4469,7 @@ const historyPageHTML = `<!DOCTYPE html>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
+        <button class="profile-btn" type="button" aria-label="User menu" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
           <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span class="admin-pill">{{call .T "admin"}}</span>{{end}}</div>
           <div class="profile-dropdown-divider"></div>
@@ -4999,337 +4612,7 @@ const historyPageHTML = `<!DOCTYPE html>
 </body>
 </html>`
 
-const hostsPageHTML = `<!DOCTYPE html>
-<html lang="{{.Lang}}" class="{{if eq .Theme "dark"}}theme-dark{{else if eq .Theme "light"}}theme-light{{end}}">
-<head>
-  <title>Hosts - pam-pocketid</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>` + sharedCSS + navCSS + `
-    body { align-items: flex-start; padding-top: 32px; }
-    .section-label {
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-secondary);
-      margin: 24px 0 8px;
-      text-align: left;
-    }
-    .list { text-align: left; margin: 0 0 8px; }
-    .row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; }
-    .row-info { min-width: 0; flex: 1; }
-    .row-host { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .row-sub { color: var(--text-secondary); font-size: 0.813rem; display: block; }
-    .row-active { color: var(--success); font-size: 0.813rem; font-weight: 600; display: block; }
-    .banner { padding: 10px 16px; border-radius: 8px; margin-bottom: 12px; font-size: 0.875rem; font-weight: 600; text-align: left; }
-    .banner-success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success); }
-    .host-btn { display: inline-block; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; white-space: nowrap; border: 1px solid var(--border); background: none; color: var(--text-secondary); text-decoration: none; text-align: center; line-height: 1.4; }
-    .host-btn:hover { background: var(--info-bg); color: var(--text); }
-    .host-btn.danger { border-color: var(--danger); color: var(--danger); }
-    .host-btn.danger:hover { background: var(--danger-bg); }
-    .host-btn.primary { border-color: var(--primary); color: var(--primary); }
-    .host-btn.primary:hover { background: var(--info-bg); }
-    .host-btn.filled { background: var(--primary); border-color: var(--primary); color: #fff; }
-    .host-btn.filled:hover { background: var(--primary-hover); }
-    .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-    .elevate-form select {
-      padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.813rem;
-      background: var(--card-bg);
-      color: var(--text);
-      cursor: pointer;
-    }
-    .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
-    .bulk-actions { margin: 16px 0 8px; text-align: right; }
-    .bulk-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; }
-    .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
-    .bulk-btn.primary { border-color: var(--primary); color: var(--primary); }
-    .bulk-btn.primary:hover { background: var(--info-bg); }
-    .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
-    .bulk-btn.danger:hover { background: var(--danger-bg); }
-    .host-group { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--info-bg); color: var(--text-secondary); margin-left: 8px; vertical-align: middle; }
-    .group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.813rem; }
-    .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
-  </style>
-  <script nonce="{{.CSPNonce}}">
-  if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
-    var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if(tz){var d=new Date();d.setTime(d.getTime()+86400000);document.cookie='pam_tz='+tz+';path=/;expires='+d.toUTCString()+';SameSite=Lax';}
-  }
-  document.addEventListener('DOMContentLoaded',function(){
-    var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
-    document.querySelectorAll('.col-filter-select,.page-size-select,.tz-select,.lang-select').forEach(function(el){el.addEventListener('change',function(){this.form.submit();});});
-    // Select the detected TZ in all tz-select dropdowns
-    document.querySelectorAll('.tz-select').forEach(function(sel){
-      for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===tz){sel.selectedIndex=i;break;}}
-    });
-  });
-  var es = new EventSource('/api/events');
-  es.addEventListener('update', function(e) {
-    location.reload();
-  });
-  es.onerror = function() {
-    // Reconnect happens automatically via EventSource
-    // Fallback: reload after 60s if disconnected
-    setTimeout(function() { if (es.readyState === 2) location.reload(); }, 60000);
-  };
-  </script>
-</head>
-<body class="wide">
-  <div class="card">
-    <h2>{{call .T "app_name"}}</h2>
 
-    <nav class="nav">
-      <a href="/">{{call .T "sessions"}}</a>
-      <a href="/history">{{call .T "history"}}</a>
-      <a href="/hosts" class="{{if eq .ActivePage "hosts"}}active{{end}}">{{call .T "hosts"}}</a>
-      <a href="/info">{{call .T "info"}}</a>
-      <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
-        <div class="profile-dropdown">
-          <div class="profile-dropdown-label">{{.Username}}</div>
-          <div class="profile-dropdown-divider"></div>
-          <div class="profile-dropdown-label">{{call .T "language"}}</div>
-          <form method="GET" action="/hosts">
-            <select name="lang" class="lang-select" aria-label="Language">
-              {{range .Languages}}<option value="{{.Code}}" {{if eq .Code $.Lang}}selected{{end}}>{{.Name}}</option>{{end}}
-            </select>
-          </form>
-          <div class="profile-dropdown-divider"></div>
-          <div class="profile-dropdown-label">{{call .T "timezone"}}</div>
-          <form method="GET" action="/hosts">
-            <select name="tz" class="tz-select" aria-label="Timezone">` + tzOptionsHTML + `
-            </select>
-          </form>
-          <div class="profile-dropdown-divider"></div>
-          <div class="profile-dropdown-label">{{call .T "theme"}}</div>
-          <div class="theme-options">
-            <a href="/theme?set=system&from=/hosts" class="theme-option{{if eq .Theme ""}} active{{end}}">{{call .T "theme_system"}}</a>
-            <a href="/theme?set=dark&from=/hosts" class="theme-option{{if eq .Theme "dark"}} active{{end}}">{{call .T "theme_dark"}}</a>
-            <a href="/theme?set=light&from=/hosts" class="theme-option{{if eq .Theme "light"}} active{{end}}">{{call .T "theme_light"}}</a>
-          </div>
-          <div class="profile-dropdown-divider"></div>
-          <a href="/signout" class="profile-dropdown-item" style="color:var(--danger)">{{call .T "sign_out"}}</a>
-        </div>
-      </div>
-    </nav>
-
-    {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
-
-    {{if .AllGroups}}
-    <div class="group-filter">
-      <form method="GET" action="/hosts">
-        <select name="group" class="col-filter-select" aria-label="Filter by group">
-          <option value="">All groups</option>
-          {{range .AllGroups}}<option value="{{.}}" {{if eq . $.GroupFilter}}selected{{end}}>{{.}}</option>{{end}}
-        </select>
-      </form>
-      {{if .GroupFilter}}<a href="/hosts" style="font-size:0.813rem;color:var(--text-secondary)">clear filter</a>{{end}}
-    </div>
-    {{end}}
-
-    {{if .Hosts}}
-    <div class="list" role="list" aria-label="{{call .T "known_hosts"}}">
-      {{range .Hosts}}
-      <div class="row" role="listitem">
-        <div class="row-info">
-          <span class="row-host">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
-          {{if .ActiveUsers}}
-            {{range .ActiveUsers}}
-              <span class="row-active">{{if $.IsAdmin}}{{.Username}} — {{end}}{{.Remaining}} {{call $.T "remaining"}}</span>
-            {{end}}
-          {{else}}
-            <span class="row-sub">{{call $.T "no_active_session"}}</span>
-          {{end}}
-          {{if .Escrowed}}
-            <span class="row-sub">{{if .EscrowExpired}}{{call $.T "breakglass_expired"}} ({{call $.T "escrowed"}} {{.EscrowAge}} {{call $.T "ago"}}){{else}}{{call $.T "breakglass_escrowed"}} ({{.EscrowAge}} {{call $.T "ago"}}){{end}}</span>
-          {{end}}
-        </div>
-        {{if .Escrowed}}
-        {{if .EscrowLink}}
-        <a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>
-        {{end}}
-        <form method="POST" action="/api/hosts/rotate" style="display:inline">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="host-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
-        </form>
-        {{end}}
-        {{if .Active}}
-        <form method="POST" action="/api/sessions/extend" style="display:inline">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <input type="hidden" name="from" value="/hosts">
-          <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
-        </form>
-        <form method="POST" action="/api/sessions/revoke">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <input type="hidden" name="from" value="/hosts">
-          <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
-        </form>
-        {{else}}
-        <form method="POST" action="/api/hosts/elevate" class="elevate-form">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          {{if $.Durations}}
-          <select name="duration" aria-label="Duration">
-            {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
-          </select>
-          {{end}}
-          <button type="submit" class="host-btn filled">{{call $.T "elevate"}}</button>
-        </form>
-        {{end}}
-      </div>
-      {{end}}
-    </div>
-    <div class="bulk-actions">
-      {{if .HasEscrowedHosts}}
-      <form method="POST" action="/api/hosts/rotate-all" style="display:inline">
-        <input type="hidden" name="username" value="{{.Username}}">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn" onclick="return confirm('Request breakglass rotation on all hosts?')">{{call .T "rotate_all"}}</button>
-      </form>
-      {{end}}
-      <form method="POST" action="/api/sessions/extend-all" style="display:inline">
-        <input type="hidden" name="username" value="{{.Username}}">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <input type="hidden" name="from" value="/hosts">
-        <button type="submit" class="bulk-btn primary" onclick="return confirm('Extend all active sessions to maximum?')">{{call .T "extend_all"}}</button>
-      </form>
-      <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
-        <input type="hidden" name="username" value="{{.Username}}">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <input type="hidden" name="from" value="/hosts">
-        <button type="submit" class="bulk-btn danger" onclick="return confirm('Revoke all active sessions?')">{{call .T "revoke_all"}}</button>
-      </form>
-    </div>
-    {{else}}
-    <p class="empty-state">{{call .T "no_known_hosts"}} {{call .T "hosts_appear_after_approve"}}</p>
-    {{end}}
-  </div>
-</body>
-</html>`
-
-const infoPageHTML = `<!DOCTYPE html>
-<html lang="{{.Lang}}" class="{{if eq .Theme "dark"}}theme-dark{{else if eq .Theme "light"}}theme-light{{end}}">
-<head>
-  <title>Info - pam-pocketid</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="240">
-  <style>` + sharedCSS + navCSS + `
-    body { align-items: flex-start; padding-top: 32px; }
-    .info-section { margin-bottom: 24px; }
-    .info-section h3 { font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 12px; }
-    .info-table { width: 100%; border-collapse: collapse; }
-    .info-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
-    .info-label { color: var(--text-secondary); width: 40%; }
-    .info-value-yes { color: var(--success); }
-    .info-value-no { color: var(--text-secondary); }
-  </style>
-  <script nonce="{{.CSPNonce}}">
-  if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
-    var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if(tz){var d=new Date();d.setTime(d.getTime()+86400000);document.cookie='pam_tz='+tz+';path=/;expires='+d.toUTCString()+';SameSite=Lax';}
-  }
-  document.addEventListener('DOMContentLoaded',function(){
-    var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
-    document.querySelectorAll('.col-filter-select,.page-size-select,.tz-select,.lang-select').forEach(function(el){el.addEventListener('change',function(){this.form.submit();});});
-    // Select the detected TZ in all tz-select dropdowns
-    document.querySelectorAll('.tz-select').forEach(function(sel){
-      for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===tz){sel.selectedIndex=i;break;}}
-    });
-  });
-  </script>
-</head>
-<body class="wide">
-  <div class="card">
-    <h2>{{call .T "app_name"}}</h2>
-
-    <nav class="nav">
-      <a href="/">{{call .T "sessions"}}</a>
-      <a href="/history">{{call .T "history"}}</a>
-      <a href="/hosts">{{call .T "hosts"}}</a>
-      <a href="/info" class="{{if eq .ActivePage "info"}}active{{end}}">{{call .T "info"}}</a>
-      <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
-        <div class="profile-dropdown">
-          <div class="profile-dropdown-label">{{.Username}}</div>
-          <div class="profile-dropdown-divider"></div>
-          <div class="profile-dropdown-label">{{call .T "language"}}</div>
-          <form method="GET" action="/info">
-            <select name="lang" class="lang-select" aria-label="Language">
-              {{range .Languages}}<option value="{{.Code}}" {{if eq .Code $.Lang}}selected{{end}}>{{.Name}}</option>{{end}}
-            </select>
-          </form>
-          <div class="profile-dropdown-divider"></div>
-          <div class="profile-dropdown-label">{{call .T "timezone"}}</div>
-          <form method="GET" action="/info">
-            <select name="tz" class="tz-select" aria-label="Timezone">` + tzOptionsHTML + `
-            </select>
-          </form>
-          <div class="profile-dropdown-divider"></div>
-          <div class="profile-dropdown-label">{{call .T "theme"}}</div>
-          <div class="theme-options">
-            <a href="/theme?set=system&from=/info" class="theme-option{{if eq .Theme ""}} active{{end}}">{{call .T "theme_system"}}</a>
-            <a href="/theme?set=dark&from=/info" class="theme-option{{if eq .Theme "dark"}} active{{end}}">{{call .T "theme_dark"}}</a>
-            <a href="/theme?set=light&from=/info" class="theme-option{{if eq .Theme "light"}} active{{end}}">{{call .T "theme_light"}}</a>
-          </div>
-          <div class="profile-dropdown-divider"></div>
-          <a href="/signout" class="profile-dropdown-item" style="color:var(--danger)">{{call .T "sign_out"}}</a>
-        </div>
-      </div>
-    </nav>
-
-    <div class="info-section">
-      <h3>{{call .T "server_config"}}</h3>
-      <table class="info-table">
-        <tr><td class="info-label">{{call .T "version"}}</td><td>{{.Version}}</td></tr>
-        <tr><td class="info-label">{{call .T "grace_period"}}</td><td>{{.GracePeriod}}</td></tr>
-        <tr><td class="info-label">{{call .T "onetap_max_age"}}</td><td>{{.OneTapMaxAge}}</td></tr>
-        <tr><td class="info-label">{{call .T "challenge_ttl"}}</td><td>{{.ChallengeTTL}}</td></tr>
-        <tr><td class="info-label">{{call .T "breakglass_type"}}</td><td>{{.BreakglassType}}</td></tr>
-        <tr><td class="info-label">{{call .T "breakglass_rotation_days"}}</td><td>{{.BreakglassRotation}}</td></tr>
-        <tr><td class="info-label">{{call .T "token_cache"}}</td><td>{{.TokenCache}}</td></tr>
-        <tr><td class="info-label">{{call .T "default_page_size"}}</td><td>{{.DefaultPageSize}}</td></tr>
-        <tr><td class="info-label">{{call .T "escrow_configured"}}</td><td>{{.EscrowConfigured}}</td></tr>
-        <tr><td class="info-label">{{call .T "notifications_configured"}}</td><td>{{.NotifyConfigured}}</td></tr>
-        <tr><td class="info-label">{{call .T "host_registry"}}</td><td>{{.HostRegistry}}</td></tr>
-        <tr><td class="info-label">{{call .T "session_persistence"}}</td><td>{{.SessionPersistence}}</td></tr>
-        <tr><td class="info-label">{{call .T "admin_groups"}}</td><td>{{.AdminGroups}}</td></tr>
-        <tr><td class="info-label">{{call .T "admin_approval_hosts"}}</td><td>{{.AdminApprovalHosts}}</td></tr>
-      </table>
-    </div>
-
-    <div class="info-section">
-      <h3>{{call .T "system_info"}}</h3>
-      <table class="info-table">
-        <tr><td class="info-label">{{call .T "uptime"}}</td><td>{{.Uptime}}</td></tr>
-        <tr><td class="info-label">{{call .T "go_version"}}</td><td>{{.GoVersion}}</td></tr>
-        <tr><td class="info-label">{{call .T "os_arch"}}</td><td>{{.OSArch}}</td></tr>
-        <tr><td class="info-label">{{call .T "goroutines"}}</td><td>{{.Goroutines}}</td></tr>
-        <tr><td class="info-label">{{call .T "memory_usage"}}</td><td>{{.MemUsage}}</td></tr>
-        <tr><td class="info-label">{{call .T "active_sessions"}}</td><td>{{.ActiveSessionsCount}}</td></tr>
-      </table>
-    </div>
-  </div>
-</body>
-</html>`
 
 const adminPageHTML = `<!DOCTYPE html>
 <html lang="{{.Lang}}" class="{{if eq .Theme "dark"}}theme-dark{{else if eq .Theme "light"}}theme-light{{end}}">
@@ -5340,7 +4623,7 @@ const adminPageHTML = `<!DOCTYPE html>
   <meta http-equiv="refresh" content="240">
   <style>` + sharedCSS + navCSS + `
     body { align-items: flex-start; padding-top: 32px; }
-    .admin-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); justify-content: center; }
+    .admin-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); justify-content: center; flex-wrap: wrap; }
     .admin-tabs a { padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; color: var(--text-secondary); text-decoration: none; }
     .admin-tabs a:hover { background: var(--info-bg); color: var(--text); }
     .admin-tabs a.active { background: var(--primary); color: #fff; font-weight: 600; }
@@ -5429,6 +4712,15 @@ const adminPageHTML = `<!DOCTYPE html>
     .sudo-detail { font-size: 0.65rem; color: var(--text-secondary); margin-top: 2px; }
     .user-actions { white-space: nowrap; text-align: right; }
     .user-actions form { display: inline; }
+    @media (max-width: 600px) {
+      .users-table, .users-table thead, .users-table tbody, .users-table th, .users-table td, .users-table tr {
+        display: block; width: 100%;
+      }
+      .users-table thead { display: none; }
+      .users-table tr { padding: 12px 0; border-bottom: 1px solid var(--border); }
+      .users-table td { padding: 4px 0; border: none; }
+      .user-actions { text-align: left; margin-top: 8px; }
+    }
   </style>
   <script nonce="{{.CSPNonce}}">
   if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
@@ -5451,6 +4743,21 @@ const adminPageHTML = `<!DOCTYPE html>
         });
       });
     }
+    // Profile dropdown toggle
+    document.querySelectorAll('.profile-btn').forEach(function(btn){
+      btn.addEventListener('click',function(e){
+        var menu=btn.closest('.profile-menu');
+        var dropdown=menu.querySelector('.profile-dropdown');
+        var expanded=dropdown.style.display==='block';
+        dropdown.style.display=expanded?'none':'block';
+        btn.setAttribute('aria-expanded',!expanded);
+        e.stopPropagation();
+      });
+    });
+    document.addEventListener('click',function(){
+      document.querySelectorAll('.profile-dropdown').forEach(function(d){d.style.display='none';});
+      document.querySelectorAll('.profile-btn').forEach(function(b){b.setAttribute('aria-expanded','false');});
+    });
   });
   </script>
 </head>
@@ -5463,7 +4770,7 @@ const adminPageHTML = `<!DOCTYPE html>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       <a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>
       <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
+        <button class="profile-btn" type="button" aria-label="User menu" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
           <div class="profile-dropdown-label">{{.Username}} <span class="admin-pill">{{call .T "admin"}}</span></div>
           <div class="profile-dropdown-divider"></div>

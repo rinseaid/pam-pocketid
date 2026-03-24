@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -220,7 +221,22 @@ func LoadServerConfig() (*Config, error) {
 	}
 	// PAM_POCKETID_WEBHOOKS_FILE: path to a JSON file containing a WebhookConfig array.
 	if v := os.Getenv("PAM_POCKETID_WEBHOOKS_FILE"); v != "" {
-		data, err := os.ReadFile(v)
+		f, err := os.OpenFile(v, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS_FILE: %w", err)
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS_FILE: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS_FILE: not a regular file")
+		}
+		if info.Size() > 65536 {
+			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS_FILE: file too large (max 64KB)")
+		}
+		data, err := io.ReadAll(io.LimitReader(f, 65536))
 		if err != nil {
 			return nil, fmt.Errorf("PAM_POCKETID_WEBHOOKS_FILE: %w", err)
 		}
@@ -358,6 +374,8 @@ func LoadServerConfig() (*Config, error) {
 	// returning the values and removes them from child process inheritance.
 	os.Unsetenv("PAM_POCKETID_SHARED_SECRET")
 	os.Unsetenv("PAM_POCKETID_CLIENT_SECRET")
+	os.Unsetenv("PAM_POCKETID_POCKETID_API_KEY")
+	os.Unsetenv("PAM_POCKETID_API_KEYS")
 
 	return cfg, nil
 }

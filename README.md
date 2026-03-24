@@ -66,7 +66,7 @@ Two components:
 
 Create a new OIDC client in Pocket ID:
 - **Redirect URI**: `https://sudo.example.com/callback`
-- **Scopes**: `openid`, `profile`, `email`
+- **Scopes**: `openid`, `profile`, `email`, `groups`
 
 Note the client ID and secret.
 
@@ -200,14 +200,17 @@ $ sudo systemctl restart nginx
 | `PAM_POCKETID_ADMIN_APPROVAL_HOSTS` | *(empty)* | Comma-separated glob patterns of hostnames that require a second admin approval before a challenge is granted |
 | `PAM_POCKETID_WEBHOOKS` | *(empty)* | JSON array of webhook configurations for structured notifications (see [Webhooks](#webhooks)) |
 | `PAM_POCKETID_WEBHOOKS_FILE` | *(empty)* | Path to a JSON file containing the webhook configuration array |
+| `PAM_POCKETID_NOTIFY_WEBHOOK_URL` | *(empty)* | (legacy, use WEBHOOKS instead) Single webhook URL for structured notifications |
 | `PAM_POCKETID_API_KEYS` | *(empty)* | Comma-separated API keys for Bearer token auth on `/api/history/export` |
+| `PAM_POCKETID_POCKETID_API_KEY` | *(empty)* | Pocket ID API key for server-side Pocket ID API calls |
+| `PAM_POCKETID_POCKETID_API_URL` | *(empty)* | Pocket ID API base URL for server-side Pocket ID API calls |
 | `PAM_POCKETID_NOTIFY_COMMAND` | *(empty)* | Shell command to run when a new challenge is created |
 | `PAM_POCKETID_NOTIFY_ENV` | *(empty)* | Comma-separated env var prefixes to pass to the notify command (e.g., `APPRISE_,TELEGRAM_`) |
 | `PAM_POCKETID_NOTIFY_USERS_FILE` | *(empty)* | Path to JSON file mapping usernames to per-user notification URLs |
 | `PAM_POCKETID_ESCROW_COMMAND` | *(empty)* | Shell command to escrow break-glass passwords (receives plaintext on stdin) |
 | `PAM_POCKETID_ESCROW_ENV` | *(empty)* | Comma-separated env var prefixes to pass to the escrow command (e.g., `AWS_,VAULT_,OP_`) |
 | `PAM_POCKETID_ESCROW_LINK_TEMPLATE` | *(empty)* | URL template for viewing escrowed credentials (`{hostname}` and `{item_id}` placeholders) |
-| `PAM_POCKETID_ESCROW_LINK_LABEL` | `View credentials` | Label for escrow link button on the Hosts tab |
+| `PAM_POCKETID_ESCROW_LINK_LABEL` | `View password` | Label for escrow link button on the Hosts tab |
 | `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` | *(empty)* | RFC3339 timestamp; clients with hash files older than this will rotate on next sudo |
 | `PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE` | *(none)* | Server-side override: client break-glass password type (`random`/`passphrase`/`alphanumeric`) |
 | `PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS` | *(none)* | Server-side override: client break-glass rotation interval (days) |
@@ -262,7 +265,7 @@ Accessible at `PAM_POCKETID_EXTERNAL_URL`. Login is via Pocket ID OIDC (passkey)
 
 Full audit log with sortable columns, filter dropdowns, live search, configurable pagination (5–1000 entries/page), CSV/JSON export, and timezone-aware timestamps. A 24-hour activity sparkline sits above the log: each bar represents one hour; clicking a bar filters the table to that hour. Hover over a bar for a rich tooltip with per-outcome counts. On small screens a collapsible filter toolbar keeps filters accessible without cluttering the view.
 
-### Hosts tab (`/hosts`)
+### Hosts tab (`/hosts` → redirects to `/admin/hosts`)
 
 - **Manual elevation** — create a grace session for a host without a sudo invocation (1h/4h/8h/1d, capped to configured grace period)
 - **Break-glass rotation** — signal a host or all hosts to rotate on next sudo
@@ -270,7 +273,7 @@ Full audit log with sortable columns, filter dropdowns, live search, configurabl
 - **Escrow links** — if `PAM_POCKETID_ESCROW_LINK_TEMPLATE` is set, a button links to the stored credential
 - **Host registry** — registered hosts, their per-host secrets, and authorized users; each host displays its group badge if one was set at registration; a group filter dropdown narrows the list
 
-### Info tab (`/info`)
+### Info tab (`/info` → redirects to `/admin/info`)
 
 Read-only view of server configuration and runtime info: version, grace period, challenge TTL, break-glass settings, escrow/notification status, host registry status, session persistence path, uptime, Go version, OS/arch, goroutines, and memory.
 
@@ -343,9 +346,8 @@ environment:
       {
         "format": "custom",
         "url": "https://ingest.example.com/events",
-        "method": "POST",
         "headers": {"Authorization": "Bearer token123"},
-        "body": "{\"user\":\"{{.Username}}\",\"host\":\"{{.Hostname}}\"}"
+        "template": "{\"user\":\"{{.Username}}\",\"host\":\"{{.Hostname}}\"}"
       }
     ]
 ```
@@ -374,7 +376,7 @@ Grace sessions can also be created manually from the Hosts tab, up to the config
 
 ## Break-glass authentication
 
-Break-glass activates on **network-level failures** only — connection refused, host unreachable, DNS failure, and reverse proxy gateway errors (502, 503, 504). It does not activate on HTTP errors or request timeouts.
+Break-glass activates on **network-level failures** only — connection refused, host unreachable, DNS failure, and reverse proxy gateway errors (404, 502, 503, 504). It does not activate on HTTP errors or request timeouts.
 
 ### Setup
 
@@ -416,7 +418,7 @@ The server can signal clients to rotate via `PAM_POCKETID_BREAKGLASS_ROTATE_BEFO
 
 ### Rate limiting
 
-After 3 consecutive failed attempts, exponential backoff kicks in: 1s, 2s, 4s, ... up to 300s. The failure counter is stored in `/var/run/pam-pocketid-breakglass-failures` (resets on reboot) and cleared on success.
+After 3 consecutive failed attempts, exponential backoff kicks in: 1s, 2s, 4s, ... up to 256s. The failure counter is stored in `/var/run/pam-pocketid-breakglass-failures` (resets on reboot) and cleared on success.
 
 ### Escrow
 
@@ -535,7 +537,7 @@ The server can override the client-side setting via `PAM_POCKETID_CLIENT_TOKEN_C
 
 ### Disaster recovery
 
-- **Server down** — Break-glass activates automatically on network-level failures and gateway errors (502/503/504).
+- **Server down** — Break-glass activates automatically on network-level failures and gateway errors (404/502/503/504).
 - **OIDC provider down** — Challenges can be created but not approved; break-glass activates if the server itself becomes unreachable.
 - **Server restart** — In-flight challenges are lost; users re-run sudo. Grace sessions persist if `SESSION_STATE_FILE` is configured.
 - **Break-glass password lost** — Run `pam-pocketid rotate-breakglass --force` on the affected host.
@@ -546,7 +548,7 @@ The server can override the client-side setting via `PAM_POCKETID_CLIENT_TOKEN_C
 
 **Prometheus metrics:** `GET /metrics` — all metrics prefixed with `pam_pocketid_`.
 
-**Grafana dashboard:** [`pam-pocketid-dashboard.json`](pam-pocketid-dashboard.json) provides a pre-built dashboard with 22 panels across 6 rows:
+**Grafana dashboard:** [`pam-pocketid-dashboard.json`](pam-pocketid-dashboard.json) provides a pre-built dashboard with 23 panels across 6 rows:
 
 | Row | Panels |
 |-----|--------|
