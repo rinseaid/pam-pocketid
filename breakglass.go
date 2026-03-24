@@ -335,6 +335,11 @@ func readFailureCounter() (count int, lastFail time.Time) {
 		return 0, time.Time{}
 	}
 	fmt.Sscanf(parts[0], "%d", &count)
+	// Support both Unix timestamp (new format) and RFC3339 (legacy format)
+	var ts int64
+	if _, err := fmt.Sscanf(parts[1], "%d", &ts); err == nil && ts > 0 {
+		return count, time.Unix(ts, 0)
+	}
 	t, _ := time.Parse(time.RFC3339, parts[1])
 	return count, t
 }
@@ -360,12 +365,18 @@ func checkBreakglassRateLimit() error {
 
 // recordBreakglassFailure increments the failure counter.
 // The file is created root-owned with 0600 permissions.
+// Uses O_NOFOLLOW to prevent symlink attacks on the rate-limit counter file.
 func recordBreakglassFailure() {
 	count, _ := readFailureCounter()
 	count++
-	// Write atomically to prevent partial reads
-	content := []byte(fmt.Sprintf("%d %s", count, time.Now().Format(time.RFC3339)))
-	os.WriteFile(breakglassFailurePath, content, 0600)
+	content := []byte(fmt.Sprintf("%d %d", count, time.Now().Unix()))
+	// Use O_NOFOLLOW to prevent symlink attacks
+	f, err := os.OpenFile(breakglassFailurePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return // can't write counter — fail open (rate limiting unavailable)
+	}
+	f.Write(content)
+	f.Close()
 }
 
 // clearBreakglassFailures resets the counter on successful authentication.

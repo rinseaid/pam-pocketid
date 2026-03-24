@@ -1067,7 +1067,10 @@ func (s *ChallengeStore) saveStateLocked() {
 		}
 		data, err = json.Marshal(state)
 		if err != nil {
-			log.Printf("ERROR: re-marshaling session state after prune: %v", err)
+			// Rotation already happened but re-marshal failed.
+			// Restore the live file from the .1 archive to prevent data loss.
+			os.Rename(s.persistPath+".1", s.persistPath)
+			log.Printf("ERROR: re-marshaling session state after prune: %v (restored from archive)", err)
 			return
 		}
 	}

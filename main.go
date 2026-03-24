@@ -184,7 +184,7 @@ func runRotateBreakglass() {
 		}
 	}
 
-	// Security: strip PAM_POCKETID_* and proxy env vars (same as PAM helper)
+	// Security: strip PAM_POCKETID_* and proxy/dynamic linker env vars (same as PAM helper)
 	// to prevent env-based config injection when run via cron or wrapper scripts.
 	for _, env := range os.Environ() {
 		if strings.HasPrefix(env, "PAM_POCKETID_") {
@@ -195,6 +195,8 @@ func runRotateBreakglass() {
 	for _, key := range []string{
 		"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
 		"NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+		"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+		"LD_BIND_NOW", "LD_DEBUG", "LD_PROFILE",
 	} {
 		os.Unsetenv(key)
 	}
@@ -220,7 +222,7 @@ func runRotateBreakglass() {
 }
 
 func runVerifyBreakglass() {
-	// Security: strip PAM_POCKETID_* and proxy env vars (same as other subcommands)
+	// Security: strip PAM_POCKETID_* and proxy/dynamic linker env vars (same as other subcommands)
 	for _, env := range os.Environ() {
 		if strings.HasPrefix(env, "PAM_POCKETID_") {
 			key, _, _ := strings.Cut(env, "=")
@@ -230,6 +232,8 @@ func runVerifyBreakglass() {
 	for _, key := range []string{
 		"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
 		"NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+		"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+		"LD_BIND_NOW", "LD_DEBUG", "LD_PROFILE",
 	} {
 		os.Unsetenv(key)
 	}
@@ -294,13 +298,16 @@ func runPAMHelper() {
 		}
 	}
 
-	// Security: strip proxy env vars that could redirect HTTP requests through
-	// an attacker-controlled proxy, leaking the shared secret (X-Shared-Secret header)
-	// and break-glass passwords (escrow POST body), or enabling auth bypass by
-	// making the server appear unreachable (triggering break-glass fallback).
+	// Security: strip proxy and dynamic linker env vars.
+	// Proxy vars could redirect HTTP requests through an attacker-controlled proxy,
+	// leaking the shared secret and break-glass passwords, or enabling auth bypass.
+	// Dynamic linker vars (LD_PRELOAD, LD_LIBRARY_PATH, etc.) could inject arbitrary
+	// code into this process or child processes.
 	for _, key := range []string{
 		"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
 		"NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+		"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+		"LD_BIND_NOW", "LD_DEBUG", "LD_PROFILE",
 	} {
 		os.Unsetenv(key)
 	}

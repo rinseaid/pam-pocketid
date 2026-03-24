@@ -1341,6 +1341,13 @@ func (s *Server) handleBulkApprove(w http.ResponseWriter, r *http.Request) {
 
 // handleOneTap processes a one-tap approval link from a notification.
 // GET /api/onetap/{token}
+//
+// NOTE: One-tap URLs are GET requests that approve challenges. Link previewers
+// (Slack, Discord, iMessage) may fetch these URLs automatically. When OIDC is
+// fresh (within OneTapMaxAge), this results in auto-approval without user
+// interaction. Operators should ensure notification channels are trusted and
+// consider reducing OneTapMaxAge to minimize the window. A POST-based
+// confirmation step would eliminate this risk but degrade the one-tap UX.
 func (s *Server) handleOneTap(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -2575,6 +2582,10 @@ func (s *Server) handleRotateHost(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		return
 	}
+	if s.getSessionRole(r) != "admin" {
+		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "not_authorized_message")
+		return
+	}
 	hostname := r.FormValue("hostname")
 	if hostname == "" {
 		revokeErrorPage(w, r, http.StatusBadRequest, "invalid_request", "missing_fields")
@@ -2601,6 +2612,10 @@ func (s *Server) handleRotateAllHosts(w http.ResponseWriter, r *http.Request) {
 	}
 	username := s.verifyFormAuth(w, r)
 	if username == "" {
+		return
+	}
+	if s.getSessionRole(r) != "admin" {
+		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "not_authorized_message")
 		return
 	}
 	// Get all known hosts for this user
@@ -3768,6 +3783,7 @@ const sharedCSS = `
         --code-border: #475569;
         --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 24px rgba(0,0,0,0.2);
       }
+      .approve-btn { color: #022c22; }
     }
     .theme-light {
       --bg: #f3f4f6;
@@ -3819,6 +3835,7 @@ const sharedCSS = `
       --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 24px rgba(0,0,0,0.2);
       --focus-ring: 0 0 0 3px rgba(96,165,250,0.4);
     }
+    .theme-dark .approve-btn { color: #022c22; }
     *, *::before, *::after { box-sizing: border-box; }
     @media (min-width: 768px) {
       body.wide { max-width: 960px; }

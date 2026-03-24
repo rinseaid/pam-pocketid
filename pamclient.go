@@ -142,14 +142,15 @@ func (p *PAMClient) Authenticate(username string) error {
 			// Check server for revocation and grace period (best-effort, 2s timeout)
 			graceStatus := p.queryGraceStatus(username)
 
-			// If the server reports a revocation that postdates our cache, invalidate it
+			// If the server reports a revocation that postdates our cache, invalidate it.
+			// Fail-closed: if we can't read the mtime OR if the mtime is before
+			// revocation time, treat as revoked (delete cache and re-authenticate).
 			if graceStatus.revoked {
-				if mtime, err := p.tokenCache.ModTime(username); err == nil {
-					if mtime.Before(graceStatus.revokeTime) {
-						p.tokenCache.Delete(username)
-						// Fall through to device flow
-						goto deviceFlow
-					}
+				mtime, err := p.tokenCache.ModTime(username)
+				if err != nil || mtime.Before(graceStatus.revokeTime) {
+					p.tokenCache.Delete(username)
+					// Fall through to device flow
+					goto deviceFlow
 				}
 			}
 

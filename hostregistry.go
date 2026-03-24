@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -238,6 +239,18 @@ func (r *HostRegistry) load() {
 func (r *HostRegistry) saveLocked() {
 	if r.filePath == "" {
 		return
+	}
+	// Acquire an advisory exclusive lock to prevent a concurrent CLI invocation
+	// (add-host, remove-host, rotate-host-secret) from racing with the server's
+	// in-memory writes. The lock is held for the duration of the write+rename.
+	lockPath := r.filePath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err == nil {
+		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX)
+		defer func() {
+			syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+			lockFile.Close()
+		}()
 	}
 	data, err := json.MarshalIndent(r.hosts, "", "  ")
 	if err != nil {
