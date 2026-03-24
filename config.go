@@ -124,7 +124,7 @@ func LoadServerConfig() (*Config, error) {
 	graceSec := envOrDefaultInt("PAM_POCKETID_GRACE_PERIOD", 0)
 	cfg.GracePeriod = time.Duration(graceSec) * time.Second
 
-	cfg.OneTapMaxAge = time.Duration(envOrDefaultInt("PAM_POCKETID_ONETAP_MAX_AGE", 86400)) * time.Second // default 24h
+	cfg.OneTapMaxAge = time.Duration(envOrDefaultInt("PAM_POCKETID_ONETAP_MAX_AGE", 7200)) * time.Second // default 2h
 
 	if cfg.IssuerURL == "" {
 		return nil, fmt.Errorf("PAM_POCKETID_ISSUER_URL is required")
@@ -447,7 +447,11 @@ func LoadClientConfig() (*Config, error) {
 	}
 
 	// Break-glass settings
-	cfg.BreakglassEnabled = configValueBool("PAM_POCKETID_BREAKGLASS_ENABLED", fileVars, true)
+	breakglassEnabled, err := configValueBool("PAM_POCKETID_BREAKGLASS_ENABLED", fileVars, true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.BreakglassEnabled = breakglassEnabled
 	cfg.BreakglassFile = configValue("PAM_POCKETID_BREAKGLASS_FILE", fileVars)
 	if cfg.BreakglassFile == "" {
 		cfg.BreakglassFile = "/etc/pam-pocketid-breakglass"
@@ -478,7 +482,11 @@ func LoadClientConfig() (*Config, error) {
 	}
 
 	// Token cache settings
-	cfg.TokenCacheEnabled = configValueBool("PAM_POCKETID_TOKEN_CACHE", fileVars, true)
+	tokenCacheEnabled, err := configValueBool("PAM_POCKETID_TOKEN_CACHE", fileVars, true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TokenCacheEnabled = tokenCacheEnabled
 	cfg.TokenCacheDir = configValue("PAM_POCKETID_TOKEN_CACHE_DIR", fileVars)
 	if cfg.TokenCacheDir == "" {
 		cfg.TokenCacheDir = "/run/pocketid"
@@ -595,15 +603,22 @@ func configValueInt(key string, fileVars map[string]string, def int) int {
 }
 
 // configValueBool returns the env var as bool if set, otherwise the config file
-// value as bool, otherwise the default. Accepts "true"/"1" as true, "false"/"0" as false.
-func configValueBool(key string, fileVars map[string]string, def bool) bool {
-	if v := os.Getenv(key); v != "" {
-		return v == "true" || v == "1"
+// value as bool, otherwise the default.
+// Accepts "true", "1", "yes", "on" as true and "false", "0", "no", "off", "" as false.
+// Returns an error for any other value.
+func configValueBool(key string, fileVars map[string]string, def bool) (bool, error) {
+	v := configValue(key, fileVars)
+	if v == "" {
+		return def, nil
 	}
-	if v, ok := fileVars[key]; ok {
-		return v == "true" || v == "1"
+	switch strings.ToLower(v) {
+	case "true", "1", "yes", "on":
+		return true, nil
+	case "false", "0", "no", "off":
+		return false, nil
+	default:
+		return def, fmt.Errorf("%s: unrecognized boolean value %q (use true/false/yes/no/1/0)", key, v)
 	}
-	return def
 }
 
 func envOrDefault(key, def string) string {

@@ -55,12 +55,33 @@ fi
 # Download
 URL="https://github.com/$REPO/releases/download/$VERSION/pam-pocketid-$SUFFIX"
 echo "Downloading $URL..."
-TMP=$(mktemp)
-trap 'rm -f "$TMP"' EXIT
-curl -fsSL -o "$TMP" "$URL"
+TMP_BIN="/tmp/pam-pocketid-$SUFFIX"
+TMP_SUMS="/tmp/pam-pocketid-checksums"
+trap 'rm -f "$TMP_BIN" "$TMP_SUMS"' EXIT
+curl -fsSL -o "$TMP_BIN" "$URL"
+
+# Download checksum file
+curl -fsSL -o "$TMP_SUMS" \
+  "https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
+
+# Verify
+cd /tmp
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c --ignore-missing pam-pocketid-checksums || {
+    echo "ERROR: checksum verification failed"
+    exit 1
+  }
+elif command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 -c --ignore-missing pam-pocketid-checksums || {
+    echo "ERROR: checksum verification failed"
+    exit 1
+  }
+else
+  echo "WARNING: no sha256sum or shasum available, skipping checksum verification"
+fi
 
 # Install binary
-install -m 755 "$TMP" "$INSTALL_DIR/pam-pocketid"
+install -m 755 "$TMP_BIN" "$INSTALL_DIR/pam-pocketid"
 echo "Installed $INSTALL_DIR/pam-pocketid ($VERSION)"
 
 # Install systemd timer (if systemd is available)

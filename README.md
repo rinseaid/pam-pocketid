@@ -192,7 +192,7 @@ $ sudo systemctl restart nginx
 | `PAM_POCKETID_LISTEN` | `:8090` | Listen address |
 | `PAM_POCKETID_CHALLENGE_TTL` | `120` | Challenge lifetime in seconds (10–600) |
 | `PAM_POCKETID_GRACE_PERIOD` | `0` | Skip re-auth per-host within this many seconds (0 = disabled, max 86400) |
-| `PAM_POCKETID_ONETAP_MAX_AGE` | `86400` | Max OIDC session age in seconds for one-tap approval without re-login |
+| `PAM_POCKETID_ONETAP_MAX_AGE` | `7200` | Max OIDC session age in seconds for one-tap approval without re-login |
 | `PAM_POCKETID_SESSION_STATE_FILE` | *(none)* | Path to JSON file for persisting grace sessions and history across restarts |
 | `PAM_POCKETID_HOST_REGISTRY_FILE` | *(none)* | Path to JSON file for per-host secrets (auto-derived from `SESSION_STATE_FILE` if not set) |
 | `PAM_POCKETID_HISTORY_PAGE_SIZE` | `5` | Default entries per page on the History tab (valid: 5/10/25/50/100/500/1000) |
