@@ -632,6 +632,16 @@ make docker   # build container image
 |------|-------|
 | ![Info (dark)](screenshots/info.png) | ![Info (light)](screenshots/info-light.png) |
 
+### Admin — History
+| Dark | Light |
+|------|-------|
+| ![Admin History (dark)](screenshots/admin-history.png) | ![Admin History (light)](screenshots/admin-history-light.png) |
+
+### Admin — Users
+| Dark | Light |
+|------|-------|
+| ![Admin Users (dark)](screenshots/admin-users.png) | ![Admin Users (light)](screenshots/admin-users-light.png) |
+
 ### Terminal
 ![Terminal](screenshots/terminal.png)
 
