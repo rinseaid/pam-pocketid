@@ -1091,7 +1091,7 @@ const adminPageHTML = `<!DOCTYPE html>
 
     {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
 
-    {{if eq .AdminTab "overview"}}
+    {{if eq .AdminTab "info"}}
     <div class="info-section">
       <h3>{{call .T "server_config"}}</h3>
       <table class="info-table">
@@ -1249,9 +1249,10 @@ const adminPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          {{if gt (len .AuthorizedUsers) 1}}
+          {{$users := .AuthorizedUsers}}{{if not $users}}{{$users = $.AllUsers}}{{end}}
+          {{if gt (len $users) 1}}
           <select name="target_user" aria-label="{{call $.T "user"}}">
-            {{range .AuthorizedUsers}}<option value="{{.}}">{{.}}</option>{{end}}
+            {{range $users}}<option value="{{.}}">{{.}}</option>{{end}}
           </select>
           {{else}}
           <input type="hidden" name="target_user" value="{{$.Username}}">

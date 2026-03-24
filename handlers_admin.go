@@ -568,6 +568,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		"HasEscrowedHosts": hasEscrowed,
 		"AllGroups":        allGroups,
 		"GroupFilter":      groupFilter,
+		"AllUsers":         s.store.AllUsers(),
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
