@@ -422,24 +422,70 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		sort.Strings(hosts)
 	}
 
-	type activeUserView struct {
+	type hostUserView struct {
 		Username  string
+		Active    bool
 		Remaining string
-		Hostname  string // for per-user action forms
+		Hostname  string
 	}
 
 	type hostView struct {
-		Hostname        string
-		Active          bool
-		ActiveUsers     []activeUserView
-		Escrowed        bool
-		EscrowAge       string
-		EscrowExpired   bool
-		EscrowLink      string
-		Registered      bool
-		AuthorizedUsers []string
-		Group           string
+		Hostname      string
+		HostUsers     []hostUserView
+		Escrowed      bool
+		EscrowAge     string
+		EscrowExpired bool
+		EscrowLink    string
+		Group         string
 	}
+
+	// usersForHost returns sorted usernames with sudo access to hostname from Pocket ID claims.
+	// Falls back to allUsers if userPerms is empty.
+	usersForHost := func(hostname string, userPerms map[string][]pocketIDGroupInfo, allUsers []string) []string {
+		if len(userPerms) == 0 {
+			return allUsers
+		}
+		seen := make(map[string]bool)
+		var result []string
+		for u, groups := range userPerms {
+			for _, g := range groups {
+				h := strings.TrimSpace(g.SudoHosts)
+				if h == "" {
+					continue
+				}
+				if h == "ALL" {
+					if !seen[u] {
+						seen[u] = true
+						result = append(result, u)
+					}
+					break
+				}
+				for _, part := range strings.Split(h, ",") {
+					if strings.TrimSpace(part) == hostname {
+						if !seen[u] {
+							seen[u] = true
+							result = append(result, u)
+						}
+						break
+					}
+				}
+			}
+		}
+		sort.Strings(result)
+		return result
+	}
+
+	// Fetch group permissions from Pocket ID for per-host user lists
+	var userPerms map[string][]pocketIDGroupInfo
+	if s.pocketIDClient != nil {
+		perms, err := s.pocketIDClient.GetUserPermissions()
+		if err != nil {
+			log.Printf("WARNING: fetching Pocket ID permissions for hosts: %v", err)
+		} else {
+			userPerms = perms
+		}
+	}
+	allKnownUsers := s.store.AllUsers()
 
 	// Collect all group names for the filter dropdown
 	groupFilter := r.URL.Query().Get("group")
@@ -448,16 +494,24 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 	var hostViews []hostView
 	for _, h := range hosts {
 		hv := hostView{Hostname: h}
-		var activeUsers []activeUserView
+
+		// Build active session map for this host
+		activeMap := make(map[string]string) // username -> remaining
 		for _, sess := range s.store.ActiveSessionsForHost(h) {
-			activeUsers = append(activeUsers, activeUserView{
-				Username:  sess.Username,
-				Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+			activeMap[sess.Username] = formatDuration(time.Until(sess.ExpiresAt))
+		}
+
+		// Build per-user rows from Pocket ID claims (or fallback to all known users)
+		for _, u := range usersForHost(h, userPerms, allKnownUsers) {
+			remaining, active := activeMap[u]
+			hv.HostUsers = append(hv.HostUsers, hostUserView{
+				Username:  u,
+				Active:    active,
+				Remaining: remaining,
 				Hostname:  h,
 			})
 		}
-		hv.ActiveUsers = activeUsers
-		hv.Active = len(activeUsers) > 0
+
 		if escrowRecord, ok := escrowed[h]; ok {
 			hv.Escrowed = true
 			hv.EscrowAge = formatDuration(time.Since(escrowRecord.Timestamp))
@@ -470,9 +524,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 				hv.EscrowLink = link
 			}
 		}
-		if users, group, _, ok := s.hostRegistry.GetHost(h); ok {
-			hv.Registered = true
-			hv.AuthorizedUsers = users
+		if _, group, _, ok := s.hostRegistry.GetHost(h); ok {
 			hv.Group = group
 		}
 		if hv.Group != "" {
@@ -568,7 +620,6 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		"HasEscrowedHosts": hasEscrowed,
 		"AllGroups":        allGroups,
 		"GroupFilter":      groupFilter,
-		"AllUsers":         s.store.AllUsers(),
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}

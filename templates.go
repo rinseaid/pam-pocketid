@@ -1196,40 +1196,48 @@ const adminPageHTML = `<!DOCTYPE html>
       <div class="row" role="listitem">
         <div class="row-info">
           <span class="row-host">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
-          {{if .ActiveUsers}}
-            {{range .ActiveUsers}}
-              <div class="session-row">
-                <span class="row-active">{{.Username}} — {{.Remaining}} {{call $.T "remaining"}}</span>
-                <div class="session-actions">
-                  <form method="POST" action="/api/sessions/extend" style="display:inline">
-                    <input type="hidden" name="hostname" value="{{.Hostname}}">
-                    <input type="hidden" name="username" value="{{$.Username}}">
-                    <input type="hidden" name="session_username" value="{{.Username}}">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-                    <input type="hidden" name="from" value="/admin/hosts">
-                    <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
-                  </form>
-                  <form method="POST" action="/api/sessions/revoke" style="display:inline">
-                    <input type="hidden" name="hostname" value="{{.Hostname}}">
-                    <input type="hidden" name="username" value="{{$.Username}}">
-                    <input type="hidden" name="session_username" value="{{.Username}}">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-                    <input type="hidden" name="from" value="/admin/hosts">
-                    <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_session_user") .Username .Hostname}}')">{{call $.T "revoke"}}</button>
-                  </form>
-                </div>
+          {{range .HostUsers}}
+            <div class="session-row">
+              <span class="{{if .Active}}row-active{{else}}row-sub{{end}}">{{.Username}}{{if .Active}} — {{.Remaining}} {{call $.T "remaining"}}{{else}} — {{call $.T "no_active_session"}}{{end}}</span>
+              <div class="session-actions">
+                {{if .Active}}
+                <form method="POST" action="/api/sessions/extend" style="display:inline">
+                  <input type="hidden" name="hostname" value="{{.Hostname}}">
+                  <input type="hidden" name="username" value="{{$.Username}}">
+                  <input type="hidden" name="session_username" value="{{.Username}}">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                  <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                  <input type="hidden" name="from" value="/admin/hosts">
+                  <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
+                </form>
+                <form method="POST" action="/api/sessions/revoke" style="display:inline">
+                  <input type="hidden" name="hostname" value="{{.Hostname}}">
+                  <input type="hidden" name="username" value="{{$.Username}}">
+                  <input type="hidden" name="session_username" value="{{.Username}}">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                  <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                  <input type="hidden" name="from" value="/admin/hosts">
+                  <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_session_user") .Username .Hostname}}')">{{call $.T "revoke"}}</button>
+                </form>
+                {{else}}
+                <form method="POST" action="/api/hosts/elevate" class="elevate-form" style="display:inline-flex;gap:0.4rem;align-items:center">
+                  <input type="hidden" name="hostname" value="{{.Hostname}}">
+                  <input type="hidden" name="target_user" value="{{.Username}}">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                  <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                  {{if $.Durations}}
+                  <select name="duration" aria-label="{{call $.T "aria_duration"}}">
+                    {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+                  </select>
+                  {{end}}
+                  <button type="submit" class="host-btn filled">{{call $.T "elevate"}}</button>
+                </form>
+                {{end}}
               </div>
-            {{end}}
-          {{else}}
-            <span class="row-sub">{{call $.T "no_active_session"}}</span>
+            </div>
           {{end}}
           {{if .Escrowed}}
             <span class="row-sub">{{if .EscrowExpired}}{{call $.T "breakglass_expired"}} ({{call $.T "escrowed"}} {{.EscrowAge}} {{call $.T "ago"}}){{else}}{{call $.T "breakglass_escrowed"}} ({{.EscrowAge}} {{call $.T "ago"}}){{end}}</span>
-          {{end}}
-          {{if .AuthorizedUsers}}
-            <span class="row-sub" style="font-size:0.75rem">{{call $.T "users"}}: {{range $i,$u := .AuthorizedUsers}}{{if $i}}, {{end}}{{$u}}{{end}}</span>
           {{end}}
         </div>
         {{if .Escrowed}}
@@ -1242,27 +1250,6 @@ const adminPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <button type="submit" class="host-btn" onclick="return confirm('{{printf (call $.T "confirm_rotate_host") .Hostname}}')">{{call $.T "rotate"}}</button>
-        </form>
-        {{end}}
-        {{if not .Active}}
-        <form method="POST" action="/api/hosts/elevate" class="elevate-form">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          {{$users := .AuthorizedUsers}}{{if not $users}}{{$users = $.AllUsers}}{{end}}
-          {{if gt (len $users) 1}}
-          <select name="target_user" aria-label="{{call $.T "user"}}">
-            {{range $users}}<option value="{{.}}">{{.}}</option>{{end}}
-          </select>
-          {{else}}
-          <input type="hidden" name="target_user" value="{{$.Username}}">
-          {{end}}
-          {{if $.Durations}}
-          <select name="duration" aria-label="{{call $.T "aria_duration"}}">
-            {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
-          </select>
-          {{end}}
-          <button type="submit" class="host-btn filled">{{call $.T "elevate"}}</button>
         </form>
         {{end}}
       </div>
