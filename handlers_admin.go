@@ -449,11 +449,12 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		var result []string
 		for u, groups := range userPerms {
 			for _, g := range groups {
-				h := strings.TrimSpace(g.SudoHosts)
-				if h == "" {
+				if g.SudoCommands == "" {
 					continue
 				}
-				if h == "ALL" {
+				h := strings.TrimSpace(g.SudoHosts)
+				// Empty SudoHosts means no host restriction — treat as ALL
+				if h == "" || h == "ALL" {
 					if !seen[u] {
 						seen[u] = true
 						result = append(result, u)
