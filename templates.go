@@ -1222,6 +1222,7 @@ const adminPageHTML = `<!DOCTYPE html>
                 {{else}}
                 <form method="POST" action="/api/hosts/elevate" class="elevate-form" style="display:inline-flex;gap:0.4rem;align-items:center">
                   <input type="hidden" name="hostname" value="{{.Hostname}}">
+                  <input type="hidden" name="username" value="{{$.Username}}">
                   <input type="hidden" name="target_user" value="{{.Username}}">
                   <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                   <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
