@@ -503,7 +503,9 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Build per-user rows from Pocket ID claims (or fallback to all known users)
+		seen := make(map[string]bool)
 		for _, u := range usersForHost(h, userPerms, allKnownUsers) {
+			seen[u] = true
 			remaining, active := activeMap[u]
 			hv.HostUsers = append(hv.HostUsers, hostUserView{
 				Username:  u,
@@ -512,6 +514,18 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 				Hostname:  h,
 			})
 		}
+		// Always include users with active sessions, even if no longer in Pocket ID claims
+		for u, remaining := range activeMap {
+			if !seen[u] {
+				hv.HostUsers = append(hv.HostUsers, hostUserView{
+					Username:  u,
+					Active:    true,
+					Remaining: remaining,
+					Hostname:  h,
+				})
+			}
+		}
+		sort.Slice(hv.HostUsers, func(i, j int) bool { return hv.HostUsers[i].Username < hv.HostUsers[j].Username })
 
 		if escrowRecord, ok := escrowed[h]; ok {
 			hv.Escrowed = true
