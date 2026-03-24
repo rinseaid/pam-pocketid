@@ -569,8 +569,18 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify user is authorized for this host
-	if s.hostRegistry.IsEnabled() && !s.hostRegistry.IsUserAuthorized(hostname, username) {
+	// Admin may elevate a different user; fall back to self if not specified.
+	targetUser := r.FormValue("target_user")
+	if targetUser == "" {
+		targetUser = username
+	}
+	if !validUsername.MatchString(targetUser) {
+		revokeErrorPage(w, r, http.StatusBadRequest, "invalid_request", "invalid_format")
+		return
+	}
+
+	// Verify target user is authorized for this host
+	if s.hostRegistry.IsEnabled() && !s.hostRegistry.IsUserAuthorized(hostname, targetUser) {
 		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "not_authorized_message")
 		return
 	}
@@ -593,10 +603,10 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 		duration = 24 * time.Hour
 	}
 
-	s.store.CreateGraceSession(username, hostname, duration)
-	s.store.LogAction(username, "elevated", hostname, "", username)
-	log.Printf("ELEVATED: user %q host %q duration %s from %s", username, hostname, duration, remoteAddr(r))
-	s.broadcastSSE(username, "session_changed")
+	s.store.CreateGraceSession(targetUser, hostname, duration)
+	s.store.LogAction(targetUser, "elevated", hostname, "", username)
+	log.Printf("ELEVATED: user %q host %q duration %s by %q from %s", targetUser, hostname, duration, username, remoteAddr(r))
+	s.broadcastSSE(targetUser, "session_changed")
 
 	setFlashCookie(w, "elevated:"+hostname)
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/admin/hosts", http.StatusSeeOther)

@@ -119,7 +119,7 @@ func (s *Server) handleAdminInfo(w http.ResponseWriter, r *http.Request) {
 		"Avatar":              getAvatar(r),
 		"Timezone":            adminTZ,
 		"ActivePage":          "admin",
-		"AdminTab":            "overview",
+		"AdminTab":            "info",
 		"Theme":               getTheme(r),
 		"CSPNonce":            r.Context().Value("csp-nonce"),
 		"T":                   T(lang),

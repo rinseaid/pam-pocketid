@@ -1086,7 +1086,7 @@ const adminPageHTML = `<!DOCTYPE html>
       <a href="/admin/history" class="{{if eq .AdminTab "history"}}active{{end}}">{{call .T "history"}}</a>
       <a href="/admin/users" class="{{if eq .AdminTab "users"}}active{{end}}">{{call .T "users"}}</a>
       <a href="/admin/hosts" class="{{if eq .AdminTab "hosts"}}active{{end}}">{{call .T "hosts"}}</a>
-      <a href="/admin" class="{{if eq .AdminTab "overview"}}active{{end}}">{{call .T "info"}}</a>
+      <a href="/admin/info" class="{{if eq .AdminTab "info"}}active{{end}}">{{call .T "info"}}</a>
     </div>
 
     {{range .Flashes}}<div class="banner banner-success" role="alert">{{.}}</div>{{end}}
@@ -1247,9 +1247,15 @@ const adminPageHTML = `<!DOCTYPE html>
         {{if not .Active}}
         <form method="POST" action="/api/hosts/elevate" class="elevate-form">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          {{if gt (len .AuthorizedUsers) 1}}
+          <select name="target_user" aria-label="{{call $.T "user"}}">
+            {{range .AuthorizedUsers}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+          {{else}}
+          <input type="hidden" name="target_user" value="{{$.Username}}">
+          {{end}}
           {{if $.Durations}}
           <select name="duration" aria-label="{{call $.T "aria_duration"}}">
             {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
