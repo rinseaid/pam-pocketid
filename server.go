@@ -3376,6 +3376,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		LastActive     string
 		LastActiveAgo  string
 		Groups         []pocketIDGroupInfo
+		SudoSummary    string
 	}
 
 	now := time.Now()
@@ -3405,7 +3406,38 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			LastActive:     lastActive,
 			LastActiveAgo:  lastActiveAgo,
 		}
-		uv.Groups = userPerms[u]
+		// Filter to only sudo-relevant groups (those with sudoCommands claim)
+		var sudoGroups []pocketIDGroupInfo
+		for _, g := range userPerms[u] {
+			if g.SudoCommands != "" {
+				sudoGroups = append(sudoGroups, g)
+			}
+		}
+		uv.Groups = sudoGroups
+		// Build deduplicated sudo summary
+		var sudoRules []string
+		seenRules := make(map[string]bool)
+		for _, g := range uv.Groups {
+			rule := g.SudoCommands
+			if g.SudoHosts != "" && g.SudoHosts != "ALL" {
+				rule += " on " + g.SudoHosts
+			}
+			if g.SudoRunAs != "" && g.SudoRunAs != "root" {
+				rule += " as " + g.SudoRunAs
+			}
+			if !seenRules[rule] {
+				sudoRules = append(sudoRules, rule)
+				seenRules[rule] = true
+			}
+		}
+		if len(sudoRules) > 0 {
+			uv.SudoSummary = "Effective: " + strings.Join(sudoRules, "; ")
+		}
+		// Skip users with no sudo groups AND no pam-pocketid activity
+		hasPamActivity := uv.ActiveSessions > 0 || uv.LastActive != ""
+		if len(uv.Groups) == 0 && !hasPamActivity {
+			continue
+		}
 		userViews = append(userViews, uv)
 	}
 
@@ -5388,12 +5420,15 @@ const adminPageHTML = `<!DOCTYPE html>
     .sort-btn { display: inline-block; padding: 4px 6px; margin-left: 4px; color: var(--border); text-decoration: none; font-size: 0.75rem; border-radius: 4px; }
     .sort-btn:hover { color: var(--text); background: var(--info-bg); }
     .sort-btn.active { color: var(--primary); }
-    .users-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
-    .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
-    .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-    .user-permissions { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-    .group-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: var(--info-bg); color: var(--text-secondary); }
-    .perm-detail { font-size: 0.7rem; color: var(--text-secondary); }
+    .users-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; }
+    .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .user-name { font-weight: 600; }
+    .user-groups { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 2px; }
+    .group-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; }
+    .sudo-detail { font-size: 0.65rem; color: var(--text-secondary); margin-top: 2px; }
+    .user-actions { white-space: nowrap; text-align: right; }
+    .user-actions form { display: inline; }
   </style>
   <script nonce="{{.CSPNonce}}">
   if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
@@ -5504,6 +5539,7 @@ const adminPageHTML = `<!DOCTYPE html>
       <thead>
         <tr>
           <th>{{call .T "user"}}</th>
+          <th>Groups</th>
           <th>{{call .T "active_sessions_count"}}</th>
           <th>{{call .T "last_active"}}</th>
           <th></th>
@@ -5512,22 +5548,21 @@ const adminPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .Users}}
         <tr>
+          <td><span class="user-name">{{.Username}}</span></td>
           <td>
-            <strong>{{.Username}}</strong>
             {{if .Groups}}
-            <div class="user-permissions">
-              {{range .Groups}}
-              <span class="group-badge">{{.Name}}</span>
-              {{if .SudoCommands}}<span class="perm-detail">sudo: {{.SudoCommands}}{{if and .SudoHosts (ne .SudoHosts "ALL")}} on {{.SudoHosts}}{{end}}</span>{{end}}
-              {{end}}
+            <div class="user-groups">
+              {{range .Groups}}<span class="group-badge">{{.Name}}</span>{{end}}
             </div>
             {{end}}
+            {{if .SudoSummary}}<div class="sudo-detail">{{.SudoSummary}}</div>{{end}}
           </td>
           <td>{{.ActiveSessions}}</td>
-          <td>{{if .LastActive}}{{.LastActive}} <span style="color:var(--text-secondary);font-size:0.75rem">({{.LastActiveAgo}})</span>{{else}}—{{end}}</td>
-          <td style="text-align:right">
+          <td>{{if .LastActiveAgo}}{{.LastActiveAgo}}{{else}}—{{end}}</td>
+          <td class="user-actions">
             <a href="/admin/history?user={{.Username}}" class="host-btn" style="margin-right:4px">{{call $.T "history"}}</a>
-            <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
+            {{if gt .ActiveSessions 0}}
+            <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
               <input type="hidden" name="username" value="{{$.Username}}">
               <input type="hidden" name="session_username" value="{{.Username}}">
               <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
@@ -5535,6 +5570,7 @@ const adminPageHTML = `<!DOCTYPE html>
               <input type="hidden" name="from" value="/admin/users">
               <button type="submit" class="host-btn danger" onclick="return confirm('Revoke all sessions for {{.Username}}?')">{{call $.T "revoke_all"}}</button>
             </form>
+            {{end}}
             <form method="POST" action="/api/users/remove" style="display:inline">
               <input type="hidden" name="target_user" value="{{.Username}}">
               <input type="hidden" name="username" value="{{$.Username}}">
