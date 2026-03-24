@@ -87,6 +87,10 @@ type Config struct {
 	// API access (server mode)
 	APIKeys []string // Bearer tokens for programmatic API access
 
+	// Pocket ID API (server mode)
+	PocketIDAPIKey string // Pocket ID admin API key for fetching user/group data
+	PocketIDAPIURL string // Pocket ID API base URL (defaults to IssuerURL)
+
 	// Session persistence (server mode)
 	SessionStateFile string // Path to JSON file for persisting grace sessions across restarts
 
@@ -299,6 +303,12 @@ func LoadServerConfig() (*Config, error) {
 				cfg.APIKeys = append(cfg.APIKeys, k)
 			}
 		}
+	}
+
+	cfg.PocketIDAPIKey = os.Getenv("PAM_POCKETID_POCKETID_API_KEY")
+	cfg.PocketIDAPIURL = os.Getenv("PAM_POCKETID_POCKETID_API_URL")
+	if cfg.PocketIDAPIURL == "" {
+		cfg.PocketIDAPIURL = cfg.IssuerURL // same host
 	}
 
 	if v := os.Getenv("PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE"); v != "" {

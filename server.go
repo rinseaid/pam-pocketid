@@ -83,6 +83,7 @@ type Server struct {
 	sessionNonceMu sync.Mutex
 	sseClients     map[string][]chan string // username -> list of SSE channels
 	sseMu          sync.Mutex
+	pocketIDClient *PocketIDClient
 }
 
 // validUsername restricts usernames to safe characters, preventing log injection
@@ -138,6 +139,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessionNonces: make(map[string]time.Time),
 		sseClients:    make(map[string][]chan string),
 	}
+
+	s.pocketIDClient = NewPocketIDClient(cfg.PocketIDAPIURL, cfg.PocketIDAPIKey)
 
 	s.mux.HandleFunc("/api/challenge", s.handleCreateChallenge)
 	s.mux.HandleFunc("/api/challenge/", s.handlePollChallenge)
@@ -3334,11 +3337,38 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 
 	users := s.store.AllUsers()
 
+	// Fetch group permissions from Pocket ID (cached)
+	var userPerms map[string][]pocketIDGroupInfo
+	if s.pocketIDClient != nil {
+		perms, err := s.pocketIDClient.GetUserPermissions()
+		if err != nil {
+			log.Printf("WARNING: fetching Pocket ID permissions: %v", err)
+		} else {
+			userPerms = perms
+		}
+	}
+
+	// Merge Pocket ID users that haven't yet used pam-pocketid
+	if userPerms != nil {
+		userSet := make(map[string]bool, len(users))
+		for _, u := range users {
+			userSet[u] = true
+		}
+		for uname := range userPerms {
+			if !userSet[uname] {
+				users = append(users, uname)
+				userSet[uname] = true
+			}
+		}
+		sort.Strings(users)
+	}
+
 	type userView struct {
 		Username       string
 		ActiveSessions int
 		LastActive     string
 		LastActiveAgo  string
+		Groups         []pocketIDGroupInfo
 	}
 
 	now := time.Now()
@@ -3362,12 +3392,14 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			lastActive = latest.Format("2006-01-02 15:04")
 			lastActiveAgo = timeAgoI18n(latest, t)
 		}
-		userViews = append(userViews, userView{
+		uv := userView{
 			Username:       u,
 			ActiveSessions: len(sessions),
 			LastActive:     lastActive,
 			LastActiveAgo:  lastActiveAgo,
-		})
+		}
+		uv.Groups = userPerms[u]
+		userViews = append(userViews, uv)
 	}
 
 	adminTZ := "UTC"
@@ -5352,6 +5384,9 @@ const adminPageHTML = `<!DOCTYPE html>
     .users-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
     .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
     .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .user-permissions { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .group-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: var(--info-bg); color: var(--text-secondary); }
+    .perm-detail { font-size: 0.7rem; color: var(--text-secondary); }
   </style>
   <script nonce="{{.CSPNonce}}">
   if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
@@ -5470,7 +5505,17 @@ const adminPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .Users}}
         <tr>
-          <td><strong>{{.Username}}</strong></td>
+          <td>
+            <strong>{{.Username}}</strong>
+            {{if .Groups}}
+            <div class="user-permissions">
+              {{range .Groups}}
+              <span class="group-badge">{{.Name}}</span>
+              {{if .SudoCommands}}<span class="perm-detail">sudo: {{.SudoCommands}}{{if and .SudoHosts (ne .SudoHosts "ALL")}} on {{.SudoHosts}}{{end}}</span>{{end}}
+              {{end}}
+            </div>
+            {{end}}
+          </td>
           <td>{{.ActiveSessions}}</td>
           <td>{{if .LastActive}}{{.LastActive}} <span style="color:var(--text-secondary);font-size:0.75rem">({{.LastActiveAgo}})</span>{{else}}—{{end}}</td>
           <td style="text-align:right">
