@@ -1,0 +1,788 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io"
+	"log"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// handleThemeToggle sets the theme preference cookie based on the "set" query
+// param and redirects back.
+// GET /theme?set=dark|light|system&from=/path
+func (s *Server) handleThemeToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	target := r.URL.Query().Get("set")
+	switch target {
+	case "dark":
+		http.SetCookie(w, &http.Cookie{Name: "pam_theme", Value: "dark", Path: "/", MaxAge: 31536000, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	case "light":
+		http.SetCookie(w, &http.Cookie{Name: "pam_theme", Value: "light", Path: "/", MaxAge: 31536000, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	default: // "system" or anything else — delete cookie
+		http.SetCookie(w, &http.Cookie{Name: "pam_theme", Value: "", Path: "/", MaxAge: -1})
+	}
+
+	dest := r.URL.Query().Get("from")
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+		dest = "/"
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// handleSignOut clears the session cookie and redirects to OIDC login.
+// GET /signout
+func (s *Server) handleSignOut(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: "pam_session", Value: "", Path: "/", MaxAge: -1})
+	loginURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/sessions/login"
+	http.Redirect(w, r, loginURL, http.StatusSeeOther)
+}
+
+// handleDashboard renders the main dashboard page.
+// GET /
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	// The "/" pattern is a catch-all in Go's ServeMux. Only handle exact "/" path.
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Handle language change via query param
+	if setLanguageCookie(w, r) {
+		return
+	}
+	lang := detectLanguage(r)
+	t := T(lang)
+
+	// Read and clear flash BEFORE auth check so login page can show flash messages.
+	var flashes []string
+	if flashParam := getAndClearFlash(w, r); flashParam != "" {
+		for _, f := range strings.Split(flashParam, ",") {
+			parts := strings.SplitN(f, ":", 2)
+			if len(parts) == 2 {
+				switch parts[0] {
+				case "approved":
+					flashes = append(flashes, t("approved_sudo_on")+" "+parts[1])
+				case "revoked":
+					flashes = append(flashes, t("revoked_session_on")+" "+parts[1])
+				case "approved_all":
+					flashes = append(flashes, fmt.Sprintf(t("approved_n_requests"), atoi(parts[1])))
+				case "revoked_all":
+					flashes = append(flashes, fmt.Sprintf(t("revoked_n_sessions"), atoi(parts[1])))
+				case "rejected":
+					flashes = append(flashes, t("rejected_sudo_on")+" "+parts[1])
+				case "rejected_all":
+					flashes = append(flashes, fmt.Sprintf(t("rejected_n_requests"), atoi(parts[1])))
+				case "elevated":
+					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
+				case "extended":
+					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
+				case "extended_all":
+					flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
+				case "expired":
+					flashes = append(flashes, t("session_expired_sign_in"))
+				}
+			}
+		}
+	}
+
+	username := s.getSessionUser(r)
+	if username == "" {
+		// Auto-redirect to OIDC login — no intermediate page
+		loginURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/sessions/login"
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
+		return
+	}
+
+	// Refresh session cookie on every dashboard page load (sliding 30-min window).
+	s.setSessionCookie(w, username, s.getSessionRole(r))
+
+	// Determine if this user has admin role
+	isAdmin := s.getSessionRole(r) == "admin"
+
+	// Sessions tab always shows current user's own data (admin-wide view is in /admin).
+	pending := s.store.PendingChallenges(username)
+	sessions := s.store.ActiveSessions(username)
+	var allHistoryWithUsers []ActionLogEntryWithUser
+	for _, e := range s.store.ActionHistory(username) {
+		allHistoryWithUsers = append(allHistoryWithUsers, ActionLogEntryWithUser{
+			Username:  username,
+			Actor:     e.Actor,
+			Timestamp: e.Timestamp,
+			Action:    e.Action,
+			Hostname:  e.Hostname,
+			Code:      e.Code,
+		})
+	}
+	// Limit dashboard to most recent 5 entries
+	dashHistory := allHistoryWithUsers
+	if len(dashHistory) > 5 {
+		dashHistory = dashHistory[:5]
+	}
+
+	now := time.Now()
+	csrfTs := fmt.Sprintf("%d", now.Unix())
+	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
+
+	type pendingView struct {
+		ID            string
+		Username      string
+		Hostname      string
+		Code          string
+		ExpiresIn     string
+		AdminRequired bool
+	}
+	// Sort pending challenges by expiry (most urgent first)
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[i].ExpiresAt.Before(pending[j].ExpiresAt)
+	})
+
+	var pendingViews []pendingView
+	for _, c := range pending {
+		hostname := c.Hostname
+		if hostname == "" {
+			hostname = t("unknown_host")
+		}
+		pendingViews = append(pendingViews, pendingView{
+			ID:            c.ID,
+			Username:      c.Username,
+			Hostname:      hostname,
+			Code:          c.UserCode,
+			ExpiresIn:     formatDuration(time.Until(c.ExpiresAt)),
+			AdminRequired: s.requiresAdminApproval(c.Hostname),
+		})
+	}
+
+	type sessionView struct {
+		Username  string
+		Hostname  string
+		Remaining string
+		ExpiresAt time.Time
+	}
+	var sessionViews []sessionView
+	for _, sess := range sessions {
+		sessHostname := sess.Hostname
+		if sessHostname == "(unknown)" {
+			sessHostname = t("unknown_host")
+		}
+		sessionViews = append(sessionViews, sessionView{
+			Username:  sess.Username,
+			Hostname:  sessHostname,
+			Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+			ExpiresAt: sess.ExpiresAt,
+		})
+	}
+	// Sort sessions by expiry (least time remaining first)
+	sort.Slice(sessionViews, func(i, j int) bool {
+		return sessionViews[i].ExpiresAt.Before(sessionViews[j].ExpiresAt)
+	})
+
+	// Read timezone from cookie for profile dropdown display
+	dashTZ := "UTC"
+	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if _, err := time.LoadLocation(c.Value); err == nil {
+			dashTZ = c.Value
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := dashboardTmpl.Execute(w, map[string]interface{}{
+		"Username":       username,
+		"Initial":        strings.ToUpper(username[:1]),
+		"Avatar":         getAvatar(r),
+		"Timezone":       dashTZ,
+		"Flashes":        flashes,
+		"Pending":        pendingViews,
+		"Sessions":       sessionViews,
+		"History":        dashHistory,
+		"HasMoreHistory": len(allHistoryWithUsers) > 5,
+		"CSRFToken":      csrfToken,
+		"CSRFTs":         csrfTs,
+		"ActivePage":     "sessions",
+		"Theme":          getTheme(r),
+		"CSPNonce":       r.Context().Value("csp-nonce"),
+		"T":              T(lang),
+		"Lang":           lang,
+		"Languages":      supportedLanguages,
+		"IsAdmin":        isAdmin,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
+}
+
+// handleSessionsRedirect redirects /sessions to the dashboard.
+func (s *Server) handleSessionsRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+}
+
+// handleApprovalPage validates the code and redirects to OIDC login.
+// After OIDC, the user lands on the dashboard where they can approve or reject.
+// GET /approve/{user_code}
+func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	code := strings.TrimPrefix(r.URL.Path, "/approve/")
+	if code == "" {
+		http.Error(w, "code required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate user code format to prevent injection (e.g., ABCDEF-123456)
+	if len(code) != 13 || code[6] != '-' {
+		http.Error(w, "invalid code format", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("ACCESS: GET /approve/ from %s (code=%s...)", remoteAddr(r), code[:6])
+
+	challenge, ok := s.store.GetByCode(code)
+	if !ok {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusNotFound)
+		if err := approvalExpiredTmpl.Execute(w, map[string]string{
+			"Theme": getTheme(r),
+			"Lang":  detectLanguage(r),
+		}); err != nil {
+			log.Printf("ERROR: template execution: %v", err)
+		}
+		return
+	}
+
+	if challenge.Status != StatusPending {
+		w.Header().Set("Content-Type", "text/html")
+		status := string(challenge.Status)
+		if len(status) > 0 {
+			status = strings.ToUpper(status[:1]) + status[1:]
+		}
+		if err := approvalAlreadyTmpl.Execute(w, map[string]string{
+			"Status": status,
+			"Theme":  getTheme(r),
+			"Lang":   detectLanguage(r),
+		}); err != nil {
+			log.Printf("ERROR: template execution: %v", err)
+		}
+		return
+	}
+
+	// Redirect to OIDC login — after authentication the user lands on the
+	// dashboard where they can explicitly approve or reject the pending challenge.
+	loginURL := strings.TrimRight(s.cfg.ExternalURL, "/") + "/sessions/login"
+	http.Redirect(w, r, loginURL, http.StatusSeeOther)
+}
+
+// revokeErrorPage renders a styled error page for revoke failures.
+// titleKey and messageKey are i18n translation keys.
+func revokeErrorPage(w http.ResponseWriter, r *http.Request, status int, titleKey, messageKey string) {
+	lang := detectLanguage(r)
+	t := T(lang)
+	theme := getTheme(r)
+	title := t(titleKey)
+	message := t(messageKey)
+	themeClass := ""
+	if theme == "dark" {
+		themeClass = ` class="theme-dark"`
+	} else if theme == "light" {
+		themeClass = ` class="theme-light"`
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(status)
+	io.WriteString(w, `<!DOCTYPE html>
+<html lang="`+lang+`"`+themeClass+`>
+<head>
+  <title>`+template.HTMLEscapeString(title)+`</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>`+sharedCSS+`
+    .icon-warning { background: var(--warning-bg); border: 2px solid var(--warning-border); color: var(--warning); }
+    h2 { color: var(--warning); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon icon-warning" aria-hidden="true">&#x26a0;</div>
+    <h2>`+template.HTMLEscapeString(title)+`</h2>
+    <p>`+template.HTMLEscapeString(message)+`</p>
+    <p style="margin-top:16px"><a href="/" style="color:var(--primary);text-decoration:underline">`+template.HTMLEscapeString(t("back_to_dashboard"))+`</a></p>
+  </div>
+</body>
+</html>`)
+}
+
+// revokeErrorPageWithLink renders a styled error page with an optional action link.
+// titleKey, messageKey, and linkTextKey are i18n translation keys.
+func revokeErrorPageWithLink(w http.ResponseWriter, r *http.Request, status int, titleKey, messageKey, linkURL, linkTextKey string) {
+	lang := detectLanguage(r)
+	t := T(lang)
+	theme := getTheme(r)
+	title := t(titleKey)
+	message := t(messageKey)
+	linkText := t(linkTextKey)
+	themeClass := ""
+	if theme == "dark" {
+		themeClass = ` class="theme-dark"`
+	} else if theme == "light" {
+		themeClass = ` class="theme-light"`
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(status)
+	linkHTML := ""
+	if linkURL != "" && linkText != "" {
+		linkHTML = `<p style="margin-top:16px"><a href="` + template.HTMLEscapeString(linkURL) + `" style="color:var(--primary);text-decoration:underline;font-weight:600">` + template.HTMLEscapeString(linkText) + `</a></p>`
+	}
+	io.WriteString(w, `<!DOCTYPE html>
+<html lang="`+lang+`"`+themeClass+`>
+<head>
+  <title>`+template.HTMLEscapeString(title)+`</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>`+sharedCSS+`
+    .icon-warning { background: var(--warning-bg); border: 2px solid var(--warning-border); color: var(--warning); }
+    h2 { color: var(--warning); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon icon-warning" aria-hidden="true">&#x26a0;</div>
+    <h2>`+template.HTMLEscapeString(title)+`</h2>
+    <p>`+template.HTMLEscapeString(message)+`</p>`+linkHTML+`
+    <p style="margin-top:16px"><a href="/" style="color:var(--primary);text-decoration:underline">`+template.HTMLEscapeString(t("back_to_dashboard"))+`</a></p>
+  </div>
+</body>
+</html>`)
+}
+
+// handleHistoryPage renders the full action history with search and filter.
+// GET /history
+func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Handle language change via query param
+	if setLanguageCookie(w, r) {
+		return
+	}
+	lang := detectLanguage(r)
+
+	username := s.getSessionUser(r)
+	if username == "" {
+		setFlashCookie(w, "expired:")
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+	s.setSessionCookie(w, username, s.getSessionRole(r))
+
+	// Timezone handling: set cookie if tz param provided, then read from cookie
+	tzName := "UTC"
+	if tzParam := r.URL.Query().Get("tz"); tzParam != "" {
+		if loc, err := time.LoadLocation(tzParam); err == nil {
+			_ = loc
+			tzName = tzParam
+			http.SetCookie(w, &http.Cookie{
+				Name:     "pam_tz",
+				Value:    tzParam,
+				Path:     "/",
+				MaxAge:   86400,
+				HttpOnly: false, // must be readable by JS for auto-detection
+				SameSite: http.SameSiteLaxMode,
+			})
+		}
+	} else if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if loc, err := time.LoadLocation(c.Value); err == nil {
+			_ = loc
+			tzName = c.Value
+		}
+	}
+	tzLoc, _ := time.LoadLocation(tzName)
+
+	query := r.URL.Query().Get("q")
+	actionFilter := r.URL.Query().Get("action")
+	hostFilter := r.URL.Query().Get("hostname")
+
+	// Parse sort and order params
+	sortField := r.URL.Query().Get("sort")
+	switch sortField {
+	case "timestamp", "action", "hostname", "code":
+		// valid
+	default:
+		sortField = "timestamp"
+	}
+	sortOrder := r.URL.Query().Get("order")
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+
+	page := 1
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
+		page = p
+	}
+
+	// Parse per_page with validation
+	perPage := s.cfg.DefaultHistoryPageSize
+	if pp, err := strconv.Atoi(r.URL.Query().Get("per_page")); err == nil {
+		validSizes := map[int]bool{5: true, 10: true, 25: true, 50: true, 100: true, 500: true, 1000: true}
+		if validSizes[pp] {
+			perPage = pp
+		}
+	}
+
+	isAdmin := s.getSessionRole(r) == "admin"
+
+	// History tab always shows current user's own history (all-users is at /admin/history).
+	var allHistory []ActionLogEntryWithUser
+	for _, e := range s.store.ActionHistory(username) {
+		allHistory = append(allHistory, ActionLogEntryWithUser{
+			Username:  username,
+			Actor:     e.Actor,
+			Timestamp: e.Timestamp,
+			Action:    e.Action,
+			Hostname:  e.Hostname,
+			Code:      e.Code,
+		})
+	}
+
+	// Collect unique action types and hostnames from the FULL unfiltered history
+	actionSet := make(map[string]bool)
+	hostSet := make(map[string]bool)
+	for _, e := range allHistory {
+		actionSet[e.Action] = true
+		if e.Hostname != "" {
+			hostSet[e.Hostname] = true
+		}
+	}
+
+	// Build ActionOptions
+	t := T(lang)
+	var actionOptions []ActionOption
+	actionOrder := []string{"approved", "auto_approved", "rejected", "revoked", "elevated", "extended", "rotated_breakglass"}
+	for _, a := range actionOrder {
+		if actionSet[a] {
+			actionOptions = append(actionOptions, ActionOption{Value: a, Label: t(a)})
+		}
+	}
+	// Include any action types not in the predefined order
+	for a := range actionSet {
+		found := false
+		for _, known := range actionOrder {
+			if a == known {
+				found = true
+				break
+			}
+		}
+		if !found {
+			actionOptions = append(actionOptions, ActionOption{Value: a, Label: t(a)})
+		}
+	}
+
+	// Build sorted HostOptions
+	var hostOptions []string
+	for h := range hostSet {
+		hostOptions = append(hostOptions, h)
+	}
+	sort.Strings(hostOptions)
+
+	// Build 24-hour activity timeline from the full unfiltered history.
+	// This always shows the complete 24h view so users can see the overall pattern.
+	nowInTZ := time.Now().In(tzLoc)
+	var timeline []timelineEntry
+	activeHoursAgo := -1 // which bar is currently active (-1 = none)
+	for i := 23; i >= 0; i-- {
+		hourInTZ := nowInTZ.Add(-time.Duration(i+1) * time.Hour)
+		hourStart := hourInTZ.Truncate(time.Hour)
+		hourEnd := hourStart.Add(time.Hour)
+		hoursAgo := i // bar at i=0 is the current (most recent) hour
+
+		count := 0
+		actionCounts := make(map[string][]string) // action -> hostnames
+		for _, e := range allHistory {
+			if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
+				count++
+				actionCounts[e.Action] = append(actionCounts[e.Action], e.Hostname)
+			}
+		}
+
+		// Build rich tooltip text
+		var detailParts []string
+		detailParts = append(detailParts, fmt.Sprintf("%d:00 – %d:00", hourStart.Hour(), hourEnd.Hour()))
+		// Sort action keys for deterministic ordering
+		var actionKeys []string
+		for a := range actionCounts {
+			actionKeys = append(actionKeys, a)
+		}
+		sort.Strings(actionKeys)
+		for _, action := range actionKeys {
+			hosts := actionCounts[action]
+			// Deduplicate hosts
+			seen := make(map[string]bool)
+			var unique []string
+			for _, h := range hosts {
+				if h != "" && !seen[h] {
+					seen[h] = true
+					unique = append(unique, h)
+				}
+			}
+			sort.Strings(unique)
+			hostStr := strings.Join(unique, ", ")
+			if hostStr != "" {
+				detailParts = append(detailParts, fmt.Sprintf("%d %s (%s)", len(hosts), t(action), hostStr))
+			} else {
+				detailParts = append(detailParts, fmt.Sprintf("%d %s", len(hosts), t(action)))
+			}
+		}
+
+		height := 2
+		if count > 0 {
+			height = count * 8
+			if height > 40 {
+				height = 40
+			}
+		}
+		timeline = append(timeline, timelineEntry{
+			Hour:      hourStart.Hour(),
+			HourLabel: fmt.Sprintf("%d:00", hourStart.Hour()),
+			Count:     count,
+			Height:    height,
+			IsNow:     i == 0,
+			HoursAgo:  hoursAgo,
+			Details:   strings.Join(detailParts, "\n"),
+		})
+	}
+
+	// Parse hours_ago filter (applied before other filters so they can combine)
+	hoursAgoStr := r.URL.Query().Get("hours_ago")
+	if hoursAgoStr != "" {
+		if h, err := strconv.Atoi(hoursAgoStr); err == nil && h >= 0 && h < 24 {
+			activeHoursAgo = h
+			hourStart := nowInTZ.Add(-time.Duration(h+1) * time.Hour).Truncate(time.Hour)
+			hourEnd := hourStart.Add(time.Hour)
+			var filtered []ActionLogEntryWithUser
+			for _, e := range allHistory {
+				if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
+					filtered = append(filtered, e)
+				}
+			}
+			allHistory = filtered
+		}
+	}
+
+	history := allHistory
+
+	// Filter by action type
+	if actionFilter != "" {
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if e.Action == actionFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
+	// Filter by hostname
+	if hostFilter != "" {
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if e.Hostname == hostFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
+	// Filter by search term (case-insensitive match on hostname or code)
+	if query != "" {
+		q := strings.ToLower(query)
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if strings.Contains(strings.ToLower(e.Hostname), q) || strings.Contains(strings.ToLower(e.Code), q) {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
+	// Sort results
+	asc := sortOrder == "asc"
+	sort.SliceStable(history, func(i, j int) bool {
+		switch sortField {
+		case "action":
+			if asc {
+				return history[i].Action < history[j].Action
+			}
+			return history[i].Action > history[j].Action
+		case "hostname":
+			if asc {
+				return history[i].Hostname < history[j].Hostname
+			}
+			return history[i].Hostname > history[j].Hostname
+		case "code":
+			if asc {
+				return history[i].Code < history[j].Code
+			}
+			return history[i].Code > history[j].Code
+		default: // timestamp
+			if asc {
+				return history[i].Timestamp.Before(history[j].Timestamp)
+			}
+			return history[i].Timestamp.After(history[j].Timestamp)
+		}
+	})
+
+	// Paginate
+	totalPages := (len(history) + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if end > len(history) {
+		end = len(history)
+	}
+	pageHistory := history[start:end]
+
+	// Pre-format entries with timezone
+	var viewEntries []historyViewEntry
+	for _, e := range pageHistory {
+		viewEntries = append(viewEntries, historyViewEntry{
+			Action:        e.Action,
+			ActionLabel:   t(e.Action),
+			Hostname:      e.Hostname,
+			Code:          e.Code,
+			Actor:         e.Actor,
+			Username:      e.Username,
+			FormattedTime: e.Timestamp.In(tzLoc).Format("2006-01-02 15:04"),
+			TimeAgo:       timeAgoI18n(e.Timestamp, t),
+		})
+	}
+
+	perPageOptions := []int{5, 10, 25, 50, 100, 500, 1000}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := historyTmpl.Execute(w, map[string]interface{}{
+		"Username":        username,
+		"Initial":         strings.ToUpper(username[:1]),
+		"Avatar":          getAvatar(r),
+		"History":         viewEntries,
+		"Query":           query,
+		"ActionFilter":    actionFilter,
+		"HostFilter":      hostFilter,
+		"ActionOptions":   actionOptions,
+		"HostOptions":     hostOptions,
+		"ActivePage":      "history",
+		"Theme":           getTheme(r),
+		"Page":            page,
+		"TotalPages":      totalPages,
+		"HasPrev":         page > 1,
+		"HasNext":         page < totalPages,
+		"Sort":            sortField,
+		"Order":           sortOrder,
+		"PerPage":         perPage,
+		"PerPageOptions":  perPageOptions,
+		"TZName":          tzName,
+		"Timezone":        tzName,
+		"CSPNonce":        r.Context().Value("csp-nonce"),
+		"T":               T(lang),
+		"Lang":            lang,
+		"Languages":       supportedLanguages,
+		"Timeline":        timeline,
+		"HoursAgo":        hoursAgoStr,
+		"ActiveHoursAgo":  activeHoursAgo,
+		"IsAdmin":         isAdmin,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
+}
+
+// handleHistoryExport exports action history as CSV or JSON.
+// Session-authenticated users see their own history.
+// API key callers (Authorization: Bearer <key>) see all users' combined history.
+// GET /api/history/export?format=csv|json
+func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	username := s.getSessionUser(r)
+	apiKeyAccess := false
+	if username == "" {
+		if !s.verifyAPIKey(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// API key access — export ALL users' history (admin-level)
+		apiKeyAccess = true
+	}
+
+	format := r.URL.Query().Get("format")
+
+	if apiKeyAccess {
+		// Return all-users history with username field included.
+		allHistory := s.store.AllActionHistoryWithUsers()
+		switch format {
+		case "csv":
+			w.Header().Set("Content-Type", "text/csv")
+			w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.csv")
+			w.Write([]byte("username,timestamp,action,hostname,code,actor\n"))
+			for _, e := range allHistory {
+				fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s\n",
+					e.Username,
+					e.Timestamp.Format(time.RFC3339),
+					e.Action,
+					e.Hostname,
+					e.Code,
+					e.Actor)
+			}
+		case "json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.json")
+			json.NewEncoder(w).Encode(allHistory)
+		default:
+			http.Error(w, "format must be csv or json", http.StatusBadRequest)
+		}
+		return
+	}
+
+	// Session-based access: export the authenticated user's own history.
+	history := s.store.ActionHistory(username)
+	switch format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.csv")
+		w.Write([]byte("timestamp,action,hostname,code,actor\n"))
+		for _, e := range history {
+			fmt.Fprintf(w, "%s,%s,%s,%s,%s\n",
+				e.Timestamp.Format(time.RFC3339),
+				e.Action,
+				e.Hostname,
+				e.Code,
+				e.Actor)
+		}
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=pam-pocketid-history.json")
+		json.NewEncoder(w).Encode(history)
+	default:
+		http.Error(w, "format must be csv or json", http.StatusBadRequest)
+	}
+}
