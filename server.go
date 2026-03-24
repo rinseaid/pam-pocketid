@@ -4679,8 +4679,13 @@ const historyPageHTML = `<!DOCTYPE html>
     .page-size-form select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); }
     .page-size-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); cursor: pointer; }
     .page-size-btn:hover { background: var(--info-bg); }
-    .history-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
-    .history-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); white-space: nowrap; }
+    .history-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; table-layout: fixed; }
+    .history-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
+    .history-table .col-time { width: 22%; }
+    .history-table .col-action { width: 18%; }
+    .history-table .col-user { width: 14%; }
+    .history-table .col-host { width: 20%; }
+    .history-table .col-code { width: 20%; }
     .history-table th a { color: var(--text-secondary); text-decoration: none; font-size: 0.75rem; text-transform: none; }
     .history-table th a:hover { color: var(--text); }
     .sort-arrow { font-size: 0.875rem; }
@@ -4857,8 +4862,8 @@ const historyPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
-          <th>{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th><form method="GET" action="/history" class="col-filter-form">
+          <th class="col-time">{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th class="col-action"><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="sort" value="{{.Sort}}">
@@ -4869,8 +4874,8 @@ const historyPageHTML = `<!DOCTYPE html>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
 </form><a href="/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}" title="{{call .T "sort_by_action"}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          {{if $.IsAdmin}}<th>{{call .T "user"}}</th>{{end}}
-          <th><form method="GET" action="/history" class="col-filter-form">
+          {{if $.IsAdmin}}<th class="col-user">{{call .T "user"}}</th>{{end}}
+          <th class="col-host"><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="sort" value="{{.Sort}}">
@@ -4881,7 +4886,7 @@ const historyPageHTML = `<!DOCTYPE html>
     {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
 </form><a href="/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}" title="{{call .T "sort_by_host"}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th>{{call .T "code"}} <a href="/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}" title="{{call .T "sort_by_code"}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th class="col-code">{{call .T "code"}} <a href="/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}" title="{{call .T "sort_by_code"}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
         </tr>
       </thead>
       <tbody>
@@ -4891,7 +4896,7 @@ const historyPageHTML = `<!DOCTYPE html>
             <span class="timestamp">{{.FormattedTime}}</span>
             <span class="time-ago">({{.TimeAgo}})</span>
           </td>
-          <td data-label="{{call $.T "action"}}"><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
+          <td data-label="{{call $.T "action"}}" class="col-action"><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
           {{if $.IsAdmin}}<td data-label="{{call $.T "user"}}">{{.Username}}</td>{{end}}
           <td data-label="{{call $.T "host"}}" class="col-host">{{.Hostname}}</td>
           <td data-label="{{call $.T "code"}}" class="col-code">{{if .Code}}{{.Code}}{{end}}</td>
@@ -5323,8 +5328,13 @@ const adminPageHTML = `<!DOCTYPE html>
     .page-size-form select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); }
     .page-size-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); cursor: pointer; }
     .page-size-btn:hover { background: var(--info-bg); }
-    .history-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
-    .history-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); white-space: nowrap; }
+    .history-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; table-layout: fixed; }
+    .history-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
+    .history-table .col-time { width: 22%; }
+    .history-table .col-action { width: 18%; }
+    .history-table .col-user { width: 14%; }
+    .history-table .col-host { width: 20%; }
+    .history-table .col-code { width: 20%; }
     .history-table th a { color: var(--text-secondary); text-decoration: none; font-size: 0.75rem; text-transform: none; }
     .history-table th a:hover { color: var(--text); }
     .history-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
