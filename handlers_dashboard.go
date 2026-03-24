@@ -255,9 +255,11 @@ func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusNotFound)
-		if err := approvalExpiredTmpl.Execute(w, map[string]string{
+		lang := detectLanguage(r)
+		if err := approvalExpiredTmpl.Execute(w, map[string]interface{}{
 			"Theme": getTheme(r),
-			"Lang":  detectLanguage(r),
+			"Lang":  lang,
+			"T":     T(lang),
 		}); err != nil {
 			log.Printf("ERROR: template execution: %v", err)
 		}
@@ -266,14 +268,13 @@ func (s *Server) handleApprovalPage(w http.ResponseWriter, r *http.Request) {
 
 	if challenge.Status != StatusPending {
 		w.Header().Set("Content-Type", "text/html")
-		status := string(challenge.Status)
-		if len(status) > 0 {
-			status = strings.ToUpper(status[:1]) + status[1:]
-		}
-		if err := approvalAlreadyTmpl.Execute(w, map[string]string{
-			"Status": status,
+		lang := detectLanguage(r)
+		t := T(lang)
+		if err := approvalAlreadyTmpl.Execute(w, map[string]interface{}{
+			"Status": t(string(challenge.Status)),
 			"Theme":  getTheme(r),
-			"Lang":   detectLanguage(r),
+			"Lang":   lang,
+			"T":      t,
 		}); err != nil {
 			log.Printf("ERROR: template execution: %v", err)
 		}

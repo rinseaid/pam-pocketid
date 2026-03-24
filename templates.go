@@ -19,12 +19,11 @@ var templateFuncMap = template.FuncMap{
 
 // Pre-parsed templates — avoids re-parsing on every request.
 var (
-	approvalAlreadyTmpl  = template.Must(template.New("already").Parse(approvalAlreadyHTML))
-	approvalExpiredTmpl  = template.Must(template.New("expired").Parse(approvalExpiredHTML))
-	approvalMismatchTmpl = template.Must(template.New("mismatch").Parse(approvalMismatchHTML))
-	adminTmpl            = template.Must(template.New("admin").Funcs(templateFuncMap).Parse(adminPageHTML))
-	dashboardTmpl        = template.Must(template.New("dashboard").Funcs(templateFuncMap).Parse(dashboardHTML))
-	historyTmpl          = template.Must(template.New("history").Funcs(templateFuncMap).Parse(historyPageHTML))
+	approvalAlreadyTmpl = template.Must(template.New("already").Parse(approvalAlreadyHTML))
+	approvalExpiredTmpl = template.Must(template.New("expired").Parse(approvalExpiredHTML))
+	adminTmpl           = template.Must(template.New("admin").Funcs(templateFuncMap).Parse(adminPageHTML))
+	dashboardTmpl       = template.Must(template.New("dashboard").Funcs(templateFuncMap).Parse(dashboardHTML))
+	historyTmpl         = template.Must(template.New("history").Funcs(templateFuncMap).Parse(historyPageHTML))
 )
 // HTML templates
 // All user-controlled values are rendered via html/template (auto-escaped).
@@ -367,7 +366,7 @@ const tzOptionsHTML = `
 const dashboardHTML = `<!DOCTYPE html>
 <html lang="{{.Lang}}" class="{{if eq .Theme "dark"}}theme-dark{{else if eq .Theme "light"}}theme-light{{end}}">
 <head>
-  <title>Sessions - pam-pocketid</title>
+  <title>{{call .T "sessions"}} - {{call .T "app_name"}}</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>` + sharedCSS + navCSS + `
@@ -470,20 +469,20 @@ const dashboardHTML = `<!DOCTYPE html>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
+        <button class="profile-btn" type="button" aria-label="{{call .T "aria_user_menu"}}" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
           <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span class="admin-pill">{{call .T "admin"}}</span>{{end}}</div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
           <form method="GET" action="/">
-            <select name="lang" class="lang-select" aria-label="Language">
+            <select name="lang" class="lang-select" aria-label="{{call .T "language"}}">
               {{range .Languages}}<option value="{{.Code}}" {{if eq .Code $.Lang}}selected{{end}}>{{.Name}}</option>{{end}}
             </select>
           </form>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "timezone"}}</div>
           <form method="GET" action="/">
-            <select name="tz" class="tz-select" aria-label="Timezone">` + tzOptionsHTML + `
+            <select name="tz" class="tz-select" aria-label="{{call .T "timezone"}}">` + tzOptionsHTML + `
             </select>
           </form>
           <div class="profile-dropdown-divider"></div>
@@ -547,13 +546,13 @@ const dashboardHTML = `<!DOCTYPE html>
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn success" onclick="return confirm('Approve all pending requests?')">{{call .T "approve_all"}}</button>
+        <button type="submit" class="bulk-btn success" onclick="return confirm('{{call .T "confirm_approve_all"}}')">{{call .T "approve_all"}}</button>
       </form>
       <form method="POST" action="/api/challenges/reject-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn danger" onclick="return confirm('Reject all pending requests?')">{{call .T "reject_all"}}</button>
+        <button type="submit" class="bulk-btn danger" onclick="return confirm('{{call .T "confirm_reject_all"}}')">{{call .T "reject_all"}}</button>
       </form>
     </div>
     {{end}}
@@ -574,7 +573,7 @@ const dashboardHTML = `<!DOCTYPE html>
           {{if $.IsAdmin}}<input type="hidden" name="session_username" value="{{.Username}}">{{end}}
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="host-btn primary" onclick="return confirm('Extend session on {{.Hostname}} to maximum?')">{{call $.T "extend"}}</button>
+          <button type="submit" class="host-btn primary" onclick="return confirm('{{printf (call $.T "confirm_extend_session") .Hostname}}')">{{call $.T "extend"}}</button>
         </form>
         <form method="POST" action="/api/sessions/revoke">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
@@ -582,7 +581,7 @@ const dashboardHTML = `<!DOCTYPE html>
           {{if $.IsAdmin}}<input type="hidden" name="session_username" value="{{.Username}}">{{end}}
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="host-btn danger" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('Revoke session on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+          <button type="submit" class="host-btn danger" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('{{printf (call $.T "confirm_revoke_session") .Hostname}}')">{{call $.T "revoke"}}</button>
         </form>
       </div>
       {{end}}
@@ -592,13 +591,13 @@ const dashboardHTML = `<!DOCTYPE html>
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn primary" onclick="return confirm('Extend all active sessions to maximum?')">{{call .T "extend_all"}}</button>
+        <button type="submit" class="bulk-btn primary" onclick="return confirm('{{call .T "confirm_extend_all"}}')">{{call .T "extend_all"}}</button>
       </form>
       <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn danger" onclick="return confirm('Revoke all active sessions?')">{{call .T "revoke_all"}}</button>
+        <button type="submit" class="bulk-btn danger" onclick="return confirm('{{call .T "confirm_revoke_all"}}')">{{call .T "revoke_all"}}</button>
       </form>
     </div>
     {{end}}
@@ -628,7 +627,7 @@ const dashboardHTML = `<!DOCTYPE html>
 const historyPageHTML = `<!DOCTYPE html>
 <html lang="{{.Lang}}" class="{{if eq .Theme "dark"}}theme-dark{{else if eq .Theme "light"}}theme-light{{end}}">
 <head>
-  <title>History - pam-pocketid</title>
+  <title>{{call .T "history"}} - {{call .T "app_name"}}</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="240">
@@ -788,20 +787,20 @@ const historyPageHTML = `<!DOCTYPE html>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
+        <button class="profile-btn" type="button" aria-label="{{call .T "aria_user_menu"}}" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
           <div class="profile-dropdown-label">{{.Username}}{{if .IsAdmin}} <span class="admin-pill">{{call .T "admin"}}</span>{{end}}</div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
           <form method="GET" action="/history">
-            <select name="lang" class="lang-select" aria-label="Language">
+            <select name="lang" class="lang-select" aria-label="{{call .T "language"}}">
               {{range .Languages}}<option value="{{.Code}}" {{if eq .Code $.Lang}}selected{{end}}>{{.Name}}</option>{{end}}
             </select>
           </form>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "timezone"}}</div>
           <form method="GET" action="/history">
-            <select name="tz" class="tz-select" aria-label="Timezone">` + tzOptionsHTML + `
+            <select name="tz" class="tz-select" aria-label="{{call .T "timezone"}}">` + tzOptionsHTML + `
             </select>
           </form>
           <div class="profile-dropdown-divider"></div>
@@ -841,7 +840,7 @@ const historyPageHTML = `<!DOCTYPE html>
       <input type="hidden" name="order" value="{{.Order}}">
       <input type="hidden" name="per_page" value="{{.PerPage}}">
       {{if .HoursAgo}}<input type="hidden" name="hours_ago" value="{{.HoursAgo}}">{{end}}
-      <input type="text" name="q" value="{{.Query}}" placeholder="{{call .T "search"}}" aria-label="Search">
+      <input type="text" name="q" value="{{.Query}}" placeholder="{{call .T "search"}}" aria-label="{{call .T "search"}}">
     </form>
 
     <div class="filter-toolbar">
@@ -850,11 +849,11 @@ const historyPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="sort" value="{{.Sort}}">
         <input type="hidden" name="order" value="{{.Order}}">
         <input type="hidden" name="per_page" value="{{.PerPage}}">
-        <select name="action" class="col-filter-select" aria-label="Filter by action">
+        <select name="action" class="col-filter-select" aria-label="{{call .T "aria_filter_action"}}">
           <option value="">{{call .T "action_all"}}</option>
           {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
-        <select name="hostname" class="col-filter-select" aria-label="Filter by hostname">
+        <select name="hostname" class="col-filter-select" aria-label="{{call .T "aria_filter_hostname"}}">
           <option value="">{{call .T "host_all"}}</option>
           {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
         </select>
@@ -872,7 +871,7 @@ const historyPageHTML = `<!DOCTYPE html>
   <input type="hidden" name="sort" value="{{.Sort}}">
   <input type="hidden" name="order" value="{{.Order}}">
   <input type="hidden" name="per_page" value="{{.PerPage}}">
-  <select name="action" class="col-filter-select" aria-label="Filter by action">
+  <select name="action" class="col-filter-select" aria-label="{{call .T "aria_filter_action"}}">
     <option value="">{{call .T "action_all"}}</option>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
@@ -884,7 +883,7 @@ const historyPageHTML = `<!DOCTYPE html>
   <input type="hidden" name="sort" value="{{.Sort}}">
   <input type="hidden" name="order" value="{{.Order}}">
   <input type="hidden" name="per_page" value="{{.PerPage}}">
-  <select name="hostname" class="col-filter-select" aria-label="Filter by hostname">
+  <select name="hostname" class="col-filter-select" aria-label="{{call .T "aria_filter_hostname"}}">
     <option value="">{{call .T "host_all"}}</option>
     {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
@@ -899,7 +898,7 @@ const historyPageHTML = `<!DOCTYPE html>
             <span class="timestamp">{{.FormattedTime}}</span>
             <span class="time-ago">({{.TimeAgo}})</span>
           </td>
-          <td data-label="{{call $.T "action"}}" class="col-action"><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
+          <td data-label="{{call $.T "action"}}" class="col-action"><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">{{call $.T "by"}} {{.Actor}}</span>{{end}}</td>
           {{if $.IsAdmin}}<td data-label="{{call $.T "user"}}">{{.Username}}</td>{{end}}
           <td data-label="{{call $.T "host"}}" class="col-host">{{.Hostname}}</td>
           <td data-label="{{call $.T "code"}}" class="col-code">{{if .Code}}{{.Code}}{{end}}</td>
@@ -917,12 +916,12 @@ const historyPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="sort" value="{{.Sort}}">
         <input type="hidden" name="order" value="{{.Order}}">
         <input type="hidden" name="q" value="{{.Query}}">
-        <select name="per_page" class="page-size-select" aria-label="Page size">
+        <select name="per_page" class="page-size-select" aria-label="{{call .T "aria_page_size"}}">
           {{range .PerPageOptions}}<option value="{{.}}" {{if eqInt . $.PerPage}}selected{{end}}>{{.}}</option>{{end}}
         </select>
         <button type="submit" class="page-size-btn">{{call .T "go"}}</button>
       </form>
-      <span class="export-links"><a href="/api/history/export?format=csv" class="export-link">CSV</a> <a href="/api/history/export?format=json" class="export-link">JSON</a></span>
+      <span class="export-links"><a href="/api/history/export?format=csv" class="export-link">{{call .T "export_csv"}}</a> <a href="/api/history/export?format=json" class="export-link">{{call .T "export_json"}}</a></span>
     </div>
     {{else}}
     <p class="empty-state">{{call .T "no_activity"}}</p>
@@ -936,7 +935,7 @@ const historyPageHTML = `<!DOCTYPE html>
 const adminPageHTML = `<!DOCTYPE html>
 <html lang="{{.Lang}}" class="{{if eq .Theme "dark"}}theme-dark{{else if eq .Theme "light"}}theme-light{{end}}">
 <head>
-  <title>Admin - pam-pocketid</title>
+  <title>{{call .T "admin"}} - {{call .T "app_name"}}</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="240">
@@ -1089,20 +1088,20 @@ const adminPageHTML = `<!DOCTYPE html>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       <a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>
       <div class="profile-menu" tabindex="-1">
-        <button class="profile-btn" type="button" aria-label="User menu" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
+        <button class="profile-btn" type="button" aria-label="{{call .T "aria_user_menu"}}" aria-expanded="false" aria-haspopup="true">{{if .Avatar}}<img src="{{.Avatar}}" class="profile-img" alt="">{{else}}{{.Initial}}{{end}}</button>
         <div class="profile-dropdown">
           <div class="profile-dropdown-label">{{.Username}} <span class="admin-pill">{{call .T "admin"}}</span></div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
           <form method="GET" action="/admin">
-            <select name="lang" class="lang-select" aria-label="Language">
+            <select name="lang" class="lang-select" aria-label="{{call .T "language"}}">
               {{range .Languages}}<option value="{{.Code}}" {{if eq .Code $.Lang}}selected{{end}}>{{.Name}}</option>{{end}}
             </select>
           </form>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "timezone"}}</div>
           <form method="GET" action="/admin">
-            <select name="tz" class="tz-select" aria-label="Timezone">` + tzOptionsHTML + `
+            <select name="tz" class="tz-select" aria-label="{{call .T "timezone"}}">` + tzOptionsHTML + `
             </select>
           </form>
           <div class="profile-dropdown-divider"></div>
@@ -1165,7 +1164,7 @@ const adminPageHTML = `<!DOCTYPE html>
       <thead>
         <tr>
           <th>{{call .T "user"}}</th>
-          <th>Groups</th>
+          <th>{{call .T "groups"}}</th>
           <th>{{call .T "active_sessions_count"}}</th>
           <th>{{call .T "last_active"}}</th>
           <th></th>
@@ -1194,7 +1193,7 @@ const adminPageHTML = `<!DOCTYPE html>
               <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
               <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
               <input type="hidden" name="from" value="/admin/users">
-              <button type="submit" class="host-btn danger" onclick="return confirm('Revoke all sessions for {{.Username}}?')">{{call $.T "revoke_all"}}</button>
+              <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_all_user") .Username}}')">{{call $.T "revoke_all"}}</button>
             </form>
             {{end}}
             <form method="POST" action="/api/users/remove" style="display:inline">
@@ -1202,7 +1201,7 @@ const adminPageHTML = `<!DOCTYPE html>
               <input type="hidden" name="username" value="{{$.Username}}">
               <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
               <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-              <button type="submit" class="host-btn danger" onclick="return confirm('Remove this user from pam-pocketid? This revokes all sessions and blocks future access.')">{{call $.T "remove_user"}}</button>
+              <button type="submit" class="host-btn danger" onclick="return confirm('{{call $.T "confirm_remove_user"}}')">{{call $.T "remove_user"}}</button>
             </form>
           </td>
         </tr>
@@ -1217,12 +1216,12 @@ const adminPageHTML = `<!DOCTYPE html>
     {{if .AllGroups}}
     <div class="group-filter">
       <form method="GET" action="/admin/hosts">
-        <select name="group" class="col-filter-select" aria-label="Filter by group">
-          <option value="">All groups</option>
+        <select name="group" class="col-filter-select" aria-label="{{call .T "aria_filter_group"}}">
+          <option value="">{{call .T "all_groups"}}</option>
           {{range .AllGroups}}<option value="{{.}}" {{if eq . $.GroupFilter}}selected{{end}}>{{.}}</option>{{end}}
         </select>
       </form>
-      {{if .GroupFilter}}<a href="/admin/hosts" style="font-size:0.813rem;color:var(--text-secondary)">clear filter</a>{{end}}
+      {{if .GroupFilter}}<a href="/admin/hosts" style="font-size:0.813rem;color:var(--text-secondary)">{{call .T "clear_filter"}}</a>{{end}}
     </div>
     {{end}}
 
@@ -1253,7 +1252,7 @@ const adminPageHTML = `<!DOCTYPE html>
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                     <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
                     <input type="hidden" name="from" value="/admin/hosts">
-                    <button type="submit" class="host-btn danger" onclick="return confirm('Revoke session for {{.Username}} on {{.Hostname}}?')">{{call $.T "revoke"}}</button>
+                    <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_session_user") .Username .Hostname}}')">{{call $.T "revoke"}}</button>
                   </form>
                 </div>
               </div>
@@ -1277,7 +1276,7 @@ const adminPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="username" value="{{$.Username}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="host-btn" onclick="return confirm('Request breakglass rotation on {{.Hostname}}?')">{{call $.T "rotate"}}</button>
+          <button type="submit" class="host-btn" onclick="return confirm('{{printf (call $.T "confirm_rotate_host") .Hostname}}')">{{call $.T "rotate"}}</button>
         </form>
         {{end}}
         {{if not .Active}}
@@ -1287,7 +1286,7 @@ const adminPageHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           {{if $.Durations}}
-          <select name="duration" aria-label="Duration">
+          <select name="duration" aria-label="{{call $.T "aria_duration"}}">
             {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
           </select>
           {{end}}
@@ -1303,7 +1302,7 @@ const adminPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <button type="submit" class="bulk-btn" onclick="return confirm('Request breakglass rotation on all hosts?')">{{call .T "rotate_all"}}</button>
+        <button type="submit" class="bulk-btn" onclick="return confirm('{{call .T "confirm_rotate_all"}}')">{{call .T "rotate_all"}}</button>
       </form>
       {{end}}
       <form method="POST" action="/api/sessions/extend-all" style="display:inline">
@@ -1311,14 +1310,14 @@ const adminPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
         <input type="hidden" name="from" value="/admin/hosts">
-        <button type="submit" class="bulk-btn primary" onclick="return confirm('Extend all active sessions to maximum?')">{{call .T "extend_all"}}</button>
+        <button type="submit" class="bulk-btn primary" onclick="return confirm('{{call .T "confirm_extend_all"}}')">{{call .T "extend_all"}}</button>
       </form>
       <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
         <input type="hidden" name="from" value="/admin/hosts">
-        <button type="submit" class="bulk-btn danger" onclick="return confirm('Revoke all active sessions?')">{{call .T "revoke_all"}}</button>
+        <button type="submit" class="bulk-btn danger" onclick="return confirm('{{call .T "confirm_revoke_all"}}')">{{call .T "revoke_all"}}</button>
       </form>
     </div>
     {{else}}
@@ -1333,7 +1332,7 @@ const adminPageHTML = `<!DOCTYPE html>
       <input type="hidden" name="sort" value="{{.Sort}}">
       <input type="hidden" name="order" value="{{.Order}}">
       <input type="hidden" name="per_page" value="{{.PerPage}}">
-      <input type="text" name="q" value="{{.Query}}" placeholder="{{call .T "search"}}" aria-label="Search">
+      <input type="text" name="q" value="{{.Query}}" placeholder="{{call .T "search"}}" aria-label="{{call .T "search"}}">
     </form>
 
     {{if .History}}
@@ -1348,7 +1347,7 @@ const adminPageHTML = `<!DOCTYPE html>
   <input type="hidden" name="sort" value="{{.Sort}}">
   <input type="hidden" name="order" value="{{.Order}}">
   <input type="hidden" name="per_page" value="{{.PerPage}}">
-  <select name="action" class="col-filter-select" aria-label="Filter by action">
+  <select name="action" class="col-filter-select" aria-label="{{call .T "aria_filter_action"}}">
     <option value="">{{call .T "action_all"}}</option>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
@@ -1360,8 +1359,8 @@ const adminPageHTML = `<!DOCTYPE html>
   <input type="hidden" name="sort" value="{{.Sort}}">
   <input type="hidden" name="order" value="{{.Order}}">
   <input type="hidden" name="per_page" value="{{.PerPage}}">
-  <select name="user" class="col-filter-select" aria-label="Filter by user">
-    <option value="">{{call .T "user"}} (all)</option>
+  <select name="user" class="col-filter-select" aria-label="{{call .T "aria_filter_user"}}">
+    <option value="">{{call .T "user_all"}}</option>
     {{range .UserOptions}}<option value="{{.}}" {{if eq . $.UserFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
 </form><a href="/admin/history?sort=user&order={{if eq .Sort "user"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "user"}} active{{end}}">{{if and (eq .Sort "user") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
@@ -1372,7 +1371,7 @@ const adminPageHTML = `<!DOCTYPE html>
   <input type="hidden" name="sort" value="{{.Sort}}">
   <input type="hidden" name="order" value="{{.Order}}">
   <input type="hidden" name="per_page" value="{{.PerPage}}">
-  <select name="hostname" class="col-filter-select" aria-label="Filter by hostname">
+  <select name="hostname" class="col-filter-select" aria-label="{{call .T "aria_filter_hostname"}}">
     <option value="">{{call .T "host_all"}}</option>
     {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
@@ -1387,7 +1386,7 @@ const adminPageHTML = `<!DOCTYPE html>
             <span class="timestamp">{{.FormattedTime}}</span>
             <span class="time-ago">({{.TimeAgo}})</span>
           </td>
-          <td><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">by {{.Actor}}</span>{{end}}</td>
+          <td><span class="history-action {{.Action}}">{{.ActionLabel}}</span>{{if .Actor}} <span class="history-actor">{{call $.T "by"}} {{.Actor}}</span>{{end}}</td>
           <td>{{.Username}}</td>
           <td class="col-host">{{.Hostname}}</td>
           <td class="col-code">{{if .Code}}{{.Code}}{{end}}</td>
@@ -1406,7 +1405,7 @@ const adminPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="sort" value="{{.Sort}}">
         <input type="hidden" name="order" value="{{.Order}}">
         <input type="hidden" name="q" value="{{.Query}}">
-        <select name="per_page" class="page-size-select" aria-label="Page size">
+        <select name="per_page" class="page-size-select" aria-label="{{call .T "aria_page_size"}}">
           {{range .PerPageOptions}}<option value="{{.}}" {{if eqInt . $.PerPage}}selected{{end}}>{{.}}</option>{{end}}
         </select>
         <button type="submit" class="page-size-btn">{{call .T "go"}}</button>
@@ -1420,73 +1419,10 @@ const adminPageHTML = `<!DOCTYPE html>
 </body>
 </html>`
 
-const approvalDeniedHTML = `<!DOCTYPE html>
-<html lang="{{.Lang}}"{{if eq .Theme "dark"}} class="theme-dark"{{else if eq .Theme "light"}} class="theme-light"{{end}}>
-<head>
-  <title>Request denied</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>` + sharedCSS + `
-    .icon-danger {
-      background: var(--danger-bg);
-      border: 2px solid var(--danger-border);
-      color: var(--danger);
-    }
-    h2 { color: var(--danger); }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="icon icon-danger" aria-hidden="true">&#x2717;</div>
-    <h2>Request denied</h2>
-    <p>The authentication was not completed. You may need to run your sudo command again.</p>
-  </div>
-</body>
-</html>`
-
-// approvalMismatchHTML uses html/template syntax so user-controlled values are safely escaped.
-const approvalMismatchHTML = `<!DOCTYPE html>
-<html lang="{{.Lang}}"{{if eq .Theme "dark"}} class="theme-dark"{{else if eq .Theme "light"}} class="theme-light"{{end}}>
-<head>
-  <title>Identity mismatch</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>` + sharedCSS + `
-    .icon-danger {
-      background: var(--danger-bg);
-      border: 2px solid var(--danger-border);
-      color: var(--danger);
-    }
-    h2 { color: var(--danger); }
-    .detail {
-      background: var(--danger-bg);
-      border: 1px solid var(--danger-border);
-      border-radius: 10px;
-      padding: 16px 20px;
-      margin: 16px 0;
-      text-align: left;
-      font-size: 0.875rem;
-      color: var(--text);
-      line-height: 1.7;
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="icon icon-danger" aria-hidden="true">&#x2717;</div>
-    <h2>Identity mismatch</h2>
-    <div class="detail">
-      <p>You authenticated as <strong>{{.AuthenticatedUser}}</strong>, but the sudo request is for <strong>{{.ExpectedUser}}</strong>.</p>
-    </div>
-    <p>Sign out of Pocket ID and authenticate as the correct user, then run your sudo command again.</p>
-  </div>
-</body>
-</html>`
-
 const approvalExpiredHTML = `<!DOCTYPE html>
 <html lang="{{.Lang}}"{{if eq .Theme "dark"}} class="theme-dark"{{else if eq .Theme "light"}} class="theme-light"{{end}}>
 <head>
-  <title>Request expired</title>
+  <title>{{call .T "request_expired"}}</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>` + sharedCSS + `
@@ -1501,9 +1437,9 @@ const approvalExpiredHTML = `<!DOCTYPE html>
 <body>
   <div class="card">
     <div class="icon icon-warning" aria-hidden="true">&#x23f0;</div>
-    <h2>Request expired</h2>
-    <p>This approval request has expired or was not found.</p>
-    <p>Run your sudo command again to create a new request.</p>
+    <h2>{{call .T "request_expired"}}</h2>
+    <p>{{call .T "request_expired_message"}}</p>
+    <p>{{call .T "request_expired_action"}}</p>
   </div>
 </body>
 </html>`
@@ -1512,7 +1448,7 @@ const approvalExpiredHTML = `<!DOCTYPE html>
 const approvalAlreadyHTML = `<!DOCTYPE html>
 <html lang="{{.Lang}}"{{if eq .Theme "dark"}} class="theme-dark"{{else if eq .Theme "light"}} class="theme-light"{{end}}>
 <head>
-  <title>Already resolved</title>
+  <title>{{call .T "already_resolved"}}</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>` + sharedCSS + `
@@ -1526,8 +1462,8 @@ const approvalAlreadyHTML = `<!DOCTYPE html>
 <body>
   <div class="card">
     <div class="icon icon-info" aria-hidden="true">&#x2139;</div>
-    <h2>Already resolved</h2>
-    <p>This sudo request has already been <strong>{{.Status}}</strong>.</p>
+    <h2>{{call .T "already_resolved"}}</h2>
+    <p>{{printf (call .T "already_resolved_message") .Status}}</p>
   </div>
 </body>
 </html>`
