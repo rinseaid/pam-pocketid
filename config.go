@@ -25,7 +25,6 @@ type WebhookConfig struct {
 	Format   string            `json:"format"` // "raw", "apprise", "discord", "slack", "ntfy", "custom"
 	Headers  map[string]string `json:"headers,omitempty"`
 	Template string            `json:"template,omitempty"` // for "custom" format
-	Tag      string            `json:"tag,omitempty"`      // apprise tag, ntfy topic, etc.
 }
 
 // DefaultConfigPath is the default location for the pam-pocketid config file.

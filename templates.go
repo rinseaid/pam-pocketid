@@ -205,21 +205,6 @@ func timeAgo(t time.Time) string {
 	}
 }
 
-// timeAgoStr formats a time as a human-readable relative string (non-template version).
-func timeAgoStr(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}
-
 // timeAgoI18n formats a time as a localized human-readable relative string.
 func timeAgoI18n(when time.Time, t func(string) string) string {
 	d := time.Since(when)
@@ -232,26 +217,6 @@ func timeAgoI18n(when time.Time, t func(string) string) string {
 		return fmt.Sprintf("%d%s %s", int(d.Hours()), t("hour_abbr"), t("ago"))
 	default:
 		return fmt.Sprintf("%d%s %s", int(d.Hours()/24), t("day_abbr"), t("ago"))
-	}
-}
-
-// actionLabelStr maps action strings to human-readable display labels (non-template version).
-func actionLabelStr(action string) string {
-	switch action {
-	case "auto_approved":
-		return "Auto-approved"
-	case "approved":
-		return "Approved"
-	case "revoked":
-		return "Revoked"
-	case "rejected":
-		return "Rejected"
-	case "elevated":
-		return "Elevated"
-	case "extended":
-		return "Extended"
-	default:
-		return action
 	}
 }
 
