@@ -2,7 +2,7 @@ name: Docker
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   docker:
@@ -26,6 +26,6 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
-          tags: ghcr.io/rinseaid/pam-pocketid:latest
+          tags: ghcr.io/rinseaid/pam-pocketid:${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
