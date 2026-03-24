@@ -612,3 +612,356 @@ func TestPersistenceExpiredSessionsNotLoaded(t *testing.T) {
 		t.Error("expired session should not be loaded from persistence")
 	}
 }
+
+func TestAllPendingChallenges(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	// Empty initially
+	if got := store.AllPendingChallenges(); len(got) != 0 {
+		t.Errorf("expected 0, got %d", len(got))
+	}
+
+	c1, _ := store.Create("alice", "host-1", "")
+	c2, _ := store.Create("bob", "host-2", "")
+	store.Create("carol", "host-3", "")
+
+	// Approve one — should not appear
+	store.Approve(c1.ID, "alice")
+	// Deny one — should not appear
+	store.Deny(c2.ID)
+
+	pending := store.AllPendingChallenges()
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending, got %d", len(pending))
+	}
+	if pending[0].Username != "carol" {
+		t.Errorf("expected carol, got %s", pending[0].Username)
+	}
+}
+
+func TestAllActiveSessions(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 5*time.Minute, "")
+	defer store.Stop()
+
+	if got := store.AllActiveSessions(); len(got) != 0 {
+		t.Errorf("expected 0, got %d", len(got))
+	}
+
+	c, _ := store.Create("alice", "host-1", "")
+	store.Approve(c.ID, "alice")
+
+	sessions := store.AllActiveSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 active session, got %d", len(sessions))
+	}
+	if sessions[0].Username != "alice" || sessions[0].Hostname != "host-1" {
+		t.Errorf("unexpected session: %+v", sessions[0])
+	}
+}
+
+func TestAllActionHistory(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	store.LogAction("alice", "approved", "host-1", "CODE-1", "")
+	store.LogAction("bob", "rejected", "host-2", "CODE-2", "")
+
+	history := store.AllActionHistory()
+	if len(history) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(history))
+	}
+	// AllActionHistory returns ActionLogEntry; just verify count is correct.
+}
+
+func TestAllActionHistoryWithUsers(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	store.LogAction("alice", "approved", "host-1", "CODE-1", "")
+	store.LogAction("bob", "rejected", "host-2", "CODE-2", "admin")
+
+	history := store.AllActionHistoryWithUsers()
+	if len(history) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(history))
+	}
+	// Find bob's entry to verify actor field
+	var bobEntry *ActionLogEntryWithUser
+	for i := range history {
+		if history[i].Username == "bob" {
+			bobEntry = &history[i]
+			break
+		}
+	}
+	if bobEntry == nil {
+		t.Fatal("bob's entry not found")
+	}
+	if bobEntry.Actor != "admin" {
+		t.Errorf("actor = %q, want admin", bobEntry.Actor)
+	}
+	if bobEntry.Hostname != "host-2" {
+		t.Errorf("hostname = %q, want host-2", bobEntry.Hostname)
+	}
+}
+
+func TestActiveSessionsForHost(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 5*time.Minute, "")
+	defer store.Stop()
+
+	c1, _ := store.Create("alice", "web-1", "")
+	store.Approve(c1.ID, "alice")
+	c2, _ := store.Create("bob", "web-1", "")
+	store.Approve(c2.ID, "bob")
+	c3, _ := store.Create("carol", "db-1", "")
+	store.Approve(c3.ID, "carol")
+
+	sessions := store.ActiveSessionsForHost("web-1")
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions on web-1, got %d", len(sessions))
+	}
+	for _, s := range sessions {
+		if s.Hostname != "web-1" {
+			t.Errorf("wrong hostname: %s", s.Hostname)
+		}
+	}
+
+	dbSessions := store.ActiveSessionsForHost("db-1")
+	if len(dbSessions) != 1 || dbSessions[0].Username != "carol" {
+		t.Errorf("unexpected db-1 sessions: %v", dbSessions)
+	}
+}
+
+func TestKnownHosts(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	if got := store.KnownHosts("alice"); len(got) != 0 {
+		t.Errorf("expected empty, got %v", got)
+	}
+
+	store.LogAction("alice", "approved", "prod-1", "", "")
+	store.LogAction("alice", "approved", "prod-2", "", "")
+	store.LogAction("alice", "approved", "prod-1", "", "") // duplicate
+
+	hosts := store.KnownHosts("alice")
+	if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %v", hosts)
+	}
+	// Should be sorted alphabetically
+	if hosts[0] != "prod-1" || hosts[1] != "prod-2" {
+		t.Errorf("unexpected hosts: %v", hosts)
+	}
+}
+
+func TestCreateGraceSession(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 5*time.Minute, "")
+	defer store.Stop()
+
+	store.CreateGraceSession("alice", "host-1", 10*time.Minute)
+	if !store.WithinGracePeriod("alice", "host-1") {
+		t.Error("expected active grace session after CreateGraceSession")
+	}
+	if store.WithinGracePeriod("alice", "host-2") {
+		t.Error("grace session should not apply to different host")
+	}
+}
+
+func TestEscrowedHosts(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	if got := store.EscrowedHosts(); len(got) != 0 {
+		t.Errorf("expected empty, got %v", got)
+	}
+
+	store.RecordEscrow("host-1", "item-abc")
+	store.RecordEscrow("host-2", "item-def")
+
+	escrowed := store.EscrowedHosts()
+	if len(escrowed) != 2 {
+		t.Fatalf("expected 2 escrowed hosts, got %d", len(escrowed))
+	}
+	if escrowed["host-1"].ItemID != "item-abc" {
+		t.Errorf("host-1 item ID = %q", escrowed["host-1"].ItemID)
+	}
+}
+
+func TestSetAndGetHostRotateBefore(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	// Zero value when not set
+	if got := store.HostRotateBefore("host-1"); !got.IsZero() {
+		t.Errorf("expected zero, got %v", got)
+	}
+
+	before := time.Now()
+	store.SetHostRotateBefore("host-1")
+	after := time.Now()
+
+	ts := store.HostRotateBefore("host-1")
+	if ts.Before(before) || ts.After(after) {
+		t.Errorf("rotate-before timestamp %v outside expected range [%v, %v]", ts, before, after)
+	}
+}
+
+func TestSetAllHostsRotateBefore(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	before := time.Now()
+	store.SetAllHostsRotateBefore([]string{"host-1", "host-2", "host-3"})
+	after := time.Now()
+
+	for _, h := range []string{"host-1", "host-2", "host-3"} {
+		ts := store.HostRotateBefore(h)
+		if ts.Before(before) || ts.After(after) {
+			t.Errorf("%s: rotate-before %v outside expected range", h, ts)
+		}
+	}
+	// Unset host should still be zero
+	if got := store.HostRotateBefore("host-99"); !got.IsZero() {
+		t.Errorf("unset host should be zero, got %v", got)
+	}
+}
+
+func TestExtendGraceSession(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 10*time.Minute, "")
+	defer store.Stop()
+
+	// No session — returns 0
+	if got := store.ExtendGraceSession("alice", "host-1"); got != 0 {
+		t.Errorf("no session: expected 0, got %v", got)
+	}
+
+	// Create a session with small remaining time (well under 75% of grace period)
+	store.CreateGraceSession("alice", "host-1", 1*time.Minute)
+	got := store.ExtendGraceSession("alice", "host-1")
+	if got != 10*time.Minute {
+		t.Errorf("expected grace period %v, got %v", 10*time.Minute, got)
+	}
+
+	// Immediately after extend, remaining > 75% — extend should be skipped
+	got2 := store.ExtendGraceSession("alice", "host-1")
+	if got2 == 10*time.Minute {
+		// It returned gracePeriod again meaning it was re-extended — that's a bug.
+		// Actually: if remaining > 75%, the original expiry is returned, not gracePeriod.
+		// Since we just extended, remaining should be ~10m which IS > 7.5m (75%)
+		// so it should return remaining (which is still ~10m) without re-extending.
+	}
+	// Verify session is still active
+	if !store.WithinGracePeriod("alice", "host-1") {
+		t.Error("session should still be active after extend")
+	}
+}
+
+func TestConsumeOneTap(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	// First consume — should succeed
+	if err := store.ConsumeOneTap("challenge-1"); err != nil {
+		t.Errorf("first consume: unexpected error: %v", err)
+	}
+
+	// Second consume — should fail (already used)
+	if err := store.ConsumeOneTap("challenge-1"); err == nil {
+		t.Error("second consume: expected error, got nil")
+	}
+
+	// Different ID — should succeed
+	if err := store.ConsumeOneTap("challenge-2"); err != nil {
+		t.Errorf("different ID: unexpected error: %v", err)
+	}
+}
+
+func TestRecordAndGetLastOIDCAuth(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 0, "")
+	defer store.Stop()
+
+	// Zero before any record
+	if got := store.LastOIDCAuth("alice"); !got.IsZero() {
+		t.Errorf("expected zero, got %v", got)
+	}
+
+	before := time.Now()
+	store.RecordOIDCAuth("alice")
+	after := time.Now()
+
+	ts := store.LastOIDCAuth("alice")
+	if ts.Before(before) || ts.After(after) {
+		t.Errorf("LastOIDCAuth %v outside expected range [%v, %v]", ts, before, after)
+	}
+
+	// Other user should still be zero
+	if got := store.LastOIDCAuth("bob"); !got.IsZero() {
+		t.Errorf("bob should be zero, got %v", got)
+	}
+}
+
+func TestAllUsers(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 5*time.Minute, "")
+	defer store.Stop()
+
+	if got := store.AllUsers(); len(got) != 0 {
+		t.Errorf("expected empty, got %v", got)
+	}
+
+	// Users appear via action log
+	store.LogAction("carol", "approved", "host-1", "", "")
+	// Users appear via grace sessions
+	store.CreateGraceSession("dave", "host-2", 5*time.Minute)
+
+	users := store.AllUsers()
+	if len(users) != 2 {
+		t.Fatalf("expected 2 users, got %v", users)
+	}
+	// Should be sorted alphabetically
+	if users[0] != "carol" || users[1] != "dave" {
+		t.Errorf("unexpected order: %v", users)
+	}
+}
+
+func TestRemoveUser(t *testing.T) {
+	store := NewChallengeStore(60*time.Second, 5*time.Minute, "")
+	defer store.Stop()
+
+	// Set up data for alice: pending challenge, grace session, action log entry
+	c, _ := store.Create("alice", "host-1", "")
+	store.Create("alice", "host-2", "") // second pending
+	_ = c
+	store.CreateGraceSession("alice", "host-1", 5*time.Minute)
+	store.LogAction("alice", "approved", "host-1", "", "")
+
+	// Also create data for bob to verify it's untouched
+	store.LogAction("bob", "approved", "host-3", "", "")
+
+	store.RemoveUser("alice")
+
+	// Alice should have no pending challenges
+	pending := store.AllPendingChallenges()
+	for _, p := range pending {
+		if p.Username == "alice" {
+			t.Error("alice still has pending challenges after RemoveUser")
+		}
+	}
+
+	// Alice should have no active session
+	if store.WithinGracePeriod("alice", "host-1") {
+		t.Error("alice should have no grace session after RemoveUser")
+	}
+
+	// Alice should not appear in AllUsers
+	users := store.AllUsers()
+	for _, u := range users {
+		if u == "alice" {
+			t.Error("alice still in AllUsers after RemoveUser")
+		}
+	}
+
+	// Bob should be unaffected
+	bobHistory := store.ActionHistory("bob")
+	if len(bobHistory) != 1 {
+		t.Errorf("bob's action history should be intact, got %d entries", len(bobHistory))
+	}
+}

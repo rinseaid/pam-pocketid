@@ -552,3 +552,171 @@ func TestNotifyPerUserNoFile(t *testing.T) {
 		}
 	}
 }
+
+func TestBestApprovalURL(t *testing.T) {
+	d := webhookData{ApprovalURL: "http://example.com/approve", OneTapURL: "http://example.com/onetap"}
+	if got := d.BestApprovalURL(); got != d.OneTapURL {
+		t.Errorf("with onetap: got %q, want %q", got, d.OneTapURL)
+	}
+	d2 := webhookData{ApprovalURL: "http://example.com/approve"}
+	if got := d2.BestApprovalURL(); got != d2.ApprovalURL {
+		t.Errorf("without onetap: got %q, want %q", got, d2.ApprovalURL)
+	}
+}
+
+func TestFormatWebhookRaw(t *testing.T) {
+	d := webhookData{
+		Username:    "alice",
+		Hostname:    "prod-1",
+		UserCode:    "ABCDEF-123456",
+		ApprovalURL: "http://example.com/approve",
+		OneTapURL:   "http://example.com/onetap",
+		ExpiresIn:   120,
+		Timestamp:   "2023-11-14T22:13:20Z",
+	}
+	b, err := formatWebhookRaw(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if m["event"] != "challenge_created" {
+		t.Errorf("event = %v, want challenge_created", m["event"])
+	}
+	if m["username"] != "alice" {
+		t.Errorf("username = %v", m["username"])
+	}
+	if m["hostname"] != "prod-1" {
+		t.Errorf("hostname = %v", m["hostname"])
+	}
+	if m["user_code"] != "ABCDEF-123456" {
+		t.Errorf("user_code = %v", m["user_code"])
+	}
+}
+
+func TestFormatWebhookApprise(t *testing.T) {
+	d := webhookData{Username: "bob", Hostname: "staging", UserCode: "CODE-1", ExpiresIn: 60, ApprovalURL: "http://example.com/approve"}
+	b, err := formatWebhookApprise(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if m["title"] != "Sudo approval needed" {
+		t.Errorf("title = %v", m["title"])
+	}
+	if m["format"] != "markdown" {
+		t.Errorf("format = %v", m["format"])
+	}
+	body, _ := m["body"].(string)
+	if !strings.Contains(body, "bob") {
+		t.Error("body missing username")
+	}
+	if !strings.Contains(body, "staging") {
+		t.Error("body missing hostname")
+	}
+	if !strings.Contains(body, "CODE-1") {
+		t.Error("body missing user_code")
+	}
+}
+
+func TestFormatWebhookDiscord(t *testing.T) {
+	d := webhookData{Username: "carol", Hostname: "db-1", UserCode: "XY-1234", ExpiresIn: 90, ApprovalURL: "http://example.com/approve"}
+	b, err := formatWebhookDiscord(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	embeds, ok := m["embeds"].([]interface{})
+	if !ok || len(embeds) == 0 {
+		t.Fatal("embeds missing or empty")
+	}
+	embed := embeds[0].(map[string]interface{})
+	if embed["title"] != "Sudo approval needed" {
+		t.Errorf("embed title = %v", embed["title"])
+	}
+	if embed["color"] != float64(3447003) {
+		t.Errorf("embed color = %v", embed["color"])
+	}
+}
+
+func TestFormatWebhookSlack(t *testing.T) {
+	d := webhookData{Username: "dave", Hostname: "web-1", UserCode: "SLACK-99", ExpiresIn: 45, ApprovalURL: "http://example.com/approve"}
+	b, err := formatWebhookSlack(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	text := m["text"]
+	if !strings.Contains(text, "dave") {
+		t.Error("slack text missing username")
+	}
+	if !strings.Contains(text, "web-1") {
+		t.Error("slack text missing hostname")
+	}
+	if !strings.Contains(text, "SLACK-99") {
+		t.Error("slack text missing user_code")
+	}
+	if !strings.Contains(text, "http://example.com/approve") {
+		t.Error("slack text missing approval URL")
+	}
+}
+
+func TestFormatWebhookNtfy(t *testing.T) {
+	d := webhookData{Username: "eve", Hostname: "cache-1", UserCode: "NTFY-42", ExpiresIn: 30, ApprovalURL: "http://example.com/approve"}
+	b, err := formatWebhookNtfy(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if m["title"] != "Sudo approval needed" {
+		t.Errorf("title = %v", m["title"])
+	}
+	msg, _ := m["message"].(string)
+	if !strings.Contains(msg, "eve") {
+		t.Error("ntfy message missing username")
+	}
+	actions, _ := m["actions"].([]interface{})
+	if len(actions) == 0 {
+		t.Fatal("ntfy actions empty")
+	}
+}
+
+func TestFormatWebhookCustom(t *testing.T) {
+	d := webhookData{Username: "frank", Hostname: "host-1", UserCode: "CUST-01", ApprovalURL: "http://example.com/approve"}
+
+	tmpl := `{"u":"{{.Username}}","h":"{{.Hostname}}"}`
+	b, err := formatWebhookCustom(d, tmpl)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if m["u"] != "frank" {
+		t.Errorf("u = %q", m["u"])
+	}
+	if m["h"] != "host-1" {
+		t.Errorf("h = %q", m["h"])
+	}
+
+	// Invalid template syntax
+	_, err = formatWebhookCustom(d, "{{.Missing.Field.Deeply.Nested")
+	if err == nil {
+		t.Error("expected error on invalid template")
+	}
+}

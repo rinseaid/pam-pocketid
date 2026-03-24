@@ -787,9 +787,6 @@ func (s *ChallengeStore) AllUsers() []string {
 		parts := strings.SplitN(key, "@", 2)
 		users[parts[0]] = true
 	}
-	for user := range s.revokeTokensBefore {
-		users[user] = true
-	}
 	result := make([]string, 0, len(users))
 	for u := range users {
 		result = append(result, u)
