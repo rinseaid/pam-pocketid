@@ -222,5 +222,11 @@
   "sudo_time_remaining": "Sudo残り時間",
   "commands": "コマンド",
   "no_sudo_session": "Sudoセッションなし",
-  "no_host_access": "ホストが見つかりません。"
+  "no_host_access": "ホストが見つかりません。",
+  "all_commands": "全コマンド",
+  "all_hosts": "全ホスト",
+  "on": "の",
+  "breakglass_random": "ランダム",
+  "breakglass_passphrase": "パスフレーズ",
+  "breakglass_alphanumeric": "英数字"
 }

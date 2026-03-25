@@ -57,8 +57,11 @@ func (s *Server) handleAdminInfo(w http.ResponseWriter, r *http.Request) {
 	challengeTTL := formatDuration(s.cfg.ChallengeTTL)
 
 	breakglassType := s.cfg.ClientBreakglassPasswordType
-	if breakglassType == "" {
+	switch breakglassType {
+	case "":
 		breakglassType = t("not_configured")
+	case "random", "passphrase", "alphanumeric":
+		breakglassType = t("breakglass_" + breakglassType)
 	}
 
 	breakglassRotation := t("not_configured")

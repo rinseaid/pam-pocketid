@@ -1135,14 +1135,14 @@ const adminPageHTML = `<!DOCTYPE html>
           <div class="profile-dropdown-label">{{.Username}} <span class="admin-pill">{{call .T "admin"}}</span></div>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "language"}}</div>
-          <form method="GET" action="/admin">
+          <form method="GET" action="/admin/{{.AdminTab}}">
             <select name="lang" class="lang-select" aria-label="{{call .T "language"}}">
               {{range .Languages}}<option value="{{.Code}}" {{if eq .Code $.Lang}}selected{{end}}>{{.Name}}</option>{{end}}
             </select>
           </form>
           <div class="profile-dropdown-divider"></div>
           <div class="profile-dropdown-label">{{call .T "timezone"}}</div>
-          <form method="GET" action="/admin">
+          <form method="GET" action="/admin/{{.AdminTab}}">
             <select name="tz" class="tz-select" aria-label="{{call .T "timezone"}}">` + tzOptionsHTML + `
             </select>
           </form>
@@ -1228,19 +1228,19 @@ const adminPageHTML = `<!DOCTYPE html>
             {{if or .SudoAllCmds .SudoCommands}}
             <div class="summary-line">
               {{if .SudoAllCmds}}
-              <span class="summary-chip all">ALL commands</span>
+              <span class="summary-chip all">{{call $.T "all_commands"}}</span>
               {{else if eqInt (len .SudoCommands) 1}}
               <span class="summary-chip single">{{index .SudoCommands 0}}</span>
               {{else}}
-              <span class="summary-chip commands expandable">{{len .SudoCommands}} commands <span class="caret">▼</span></span>
+              <span class="summary-chip commands expandable">{{len .SudoCommands}} {{call $.T "commands"}} <span class="caret">▼</span></span>
               {{end}}
-              <span class="summary-sep">on</span>
+              <span class="summary-sep">{{call $.T "on"}}</span>
               {{if .SudoAllHosts}}
-              <span class="summary-chip all">ALL hosts</span>
+              <span class="summary-chip all">{{call $.T "all_hosts"}}</span>
               {{else if eqInt (len .SudoHosts) 1}}
               <span class="summary-chip single">{{index .SudoHosts 0}}</span>
               {{else}}
-              <span class="summary-chip hosts expandable">{{len .SudoHosts}} hosts <span class="caret">▼</span></span>
+              <span class="summary-chip hosts expandable">{{len .SudoHosts}} {{call $.T "hosts"}} <span class="caret">▼</span></span>
               {{end}}
             </div>
             {{if and (not .SudoAllCmds) (gt (len .SudoCommands) 1)}}

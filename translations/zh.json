@@ -222,5 +222,11 @@
   "sudo_time_remaining": "Sudo剩余时间",
   "commands": "命令",
   "no_sudo_session": "无sudo会话",
-  "no_host_access": "未找到主机。"
+  "no_host_access": "未找到主机。",
+  "all_commands": "全部命令",
+  "all_hosts": "全部主机",
+  "on": "于",
+  "breakglass_random": "随机",
+  "breakglass_passphrase": "密码短语",
+  "breakglass_alphanumeric": "字母数字"
 }

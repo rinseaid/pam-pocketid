@@ -222,5 +222,11 @@
   "sudo_time_remaining": "Verbleibende Sudo-Zeit",
   "commands": "Befehle",
   "no_sudo_session": "Keine Sudo-Sitzung",
-  "no_host_access": "Keine Hosts gefunden."
+  "no_host_access": "Keine Hosts gefunden.",
+  "all_commands": "ALLE Befehle",
+  "all_hosts": "ALLE Hosts",
+  "on": "auf",
+  "breakglass_random": "zufällig",
+  "breakglass_passphrase": "Passphrase",
+  "breakglass_alphanumeric": "alphanumerisch"
 }

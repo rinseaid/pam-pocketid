@@ -222,5 +222,11 @@
   "request_expired_message": "This approval request has expired or was not found.",
   "request_expired_action": "Run your sudo command again to create a new request.",
   "already_resolved": "Already resolved",
-  "already_resolved_message": "This sudo request has already been %s."
+  "already_resolved_message": "This sudo request has already been %s.",
+  "all_commands": "ALL commands",
+  "all_hosts": "ALL hosts",
+  "on": "on",
+  "breakglass_random": "random",
+  "breakglass_passphrase": "passphrase",
+  "breakglass_alphanumeric": "alphanumeric"
 }

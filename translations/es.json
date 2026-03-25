@@ -222,5 +222,11 @@
   "sudo_time_remaining": "Tiempo sudo restante",
   "commands": "Comandos",
   "no_sudo_session": "Sin sesión sudo",
-  "no_host_access": "No se encontraron hosts."
+  "no_host_access": "No se encontraron hosts.",
+  "all_commands": "TODOS los comandos",
+  "all_hosts": "TODOS los hosts",
+  "on": "en",
+  "breakglass_random": "aleatorio",
+  "breakglass_passphrase": "frase de contraseña",
+  "breakglass_alphanumeric": "alfanumérico"
 }
