@@ -146,9 +146,9 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Determine if this user has admin role
 	isAdmin := s.getSessionRole(r) == "admin"
 
-	// Sessions tab always shows current user's own data (admin-wide view is in /admin).
+	// Access tab always shows current user's own data (admin-wide view is in /admin).
 	pending := s.store.PendingChallenges(username)
-	sessions := s.store.ActiveSessions(username)
+
 	var allHistoryWithUsers []ActionLogEntryWithUser
 	for _, e := range s.store.ActionHistory(username) {
 		allHistoryWithUsers = append(allHistoryWithUsers, ActionLogEntryWithUser{
@@ -199,29 +199,98 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	type sessionView struct {
-		Username  string
-		Hostname  string
-		Remaining string
-		ExpiresAt time.Time
-	}
-	var sessionViews []sessionView
-	for _, sess := range sessions {
-		sessHostname := sess.Hostname
-		if sessHostname == "(unknown)" {
-			sessHostname = t("unknown_host")
+	// Fetch Pocket ID permissions for this user to build host-access view
+	var userPerms map[string][]pocketIDGroupInfo
+	if s.pocketIDClient != nil {
+		if perms, err := s.pocketIDClient.GetUserPermissions(); err == nil {
+			userPerms = perms
 		}
-		sessionViews = append(sessionViews, sessionView{
-			Username:  sess.Username,
-			Hostname:  sessHostname,
-			Remaining: formatDuration(time.Until(sess.ExpiresAt)),
-			ExpiresAt: sess.ExpiresAt,
+	}
+
+	// Build the host list: known hosts + any explicitly listed in Pocket ID claims
+	knownHosts := s.store.KnownHosts(username)
+	hostSet := make(map[string]bool)
+	for _, h := range knownHosts {
+		hostSet[h] = true
+	}
+	for _, g := range userPerms[username] {
+		if g.SudoHosts == "" || g.SudoHosts == "ALL" {
+			continue // "ALL" / unrestricted doesn't list specific hosts
+		}
+		for _, part := range strings.Split(g.SudoHosts, ",") {
+			h := strings.TrimSpace(part)
+			if h != "" && !hostSet[h] {
+				hostSet[h] = true
+				knownHosts = append(knownHosts, h)
+			}
+		}
+	}
+	sort.Strings(knownHosts)
+
+	// Build active-session map for quick lookup
+	activeMap := make(map[string]string) // hostname -> remaining
+	for _, sess := range s.store.ActiveSessions(username) {
+		activeMap[sess.Hostname] = formatDuration(time.Until(sess.ExpiresAt))
+	}
+
+	type hostAccessView struct {
+		Hostname    string
+		Active      bool
+		Remaining   string
+		SudoSummary string
+	}
+	var hostAccessViews []hostAccessView
+	for _, h := range knownHosts {
+		remaining, active := activeMap[h]
+		// Build sudo summary for this specific host
+		var rules []string
+		seen := make(map[string]bool)
+		for _, g := range userPerms[username] {
+			if g.SudoCommands == "" {
+				continue
+			}
+			sudoH := strings.TrimSpace(g.SudoHosts)
+			applies := sudoH == "" || sudoH == "ALL"
+			if !applies {
+				for _, part := range strings.Split(sudoH, ",") {
+					if strings.TrimSpace(part) == h {
+						applies = true
+						break
+					}
+				}
+			}
+			if !applies {
+				continue
+			}
+			rule := g.SudoCommands
+			if g.SudoRunAs != "" && g.SudoRunAs != "root" {
+				rule += " as " + g.SudoRunAs
+			}
+			if !seen[rule] {
+				seen[rule] = true
+				rules = append(rules, rule)
+			}
+		}
+		displayH := h
+		if displayH == "(unknown)" {
+			displayH = t("unknown_host")
+		}
+		hostAccessViews = append(hostAccessViews, hostAccessView{
+			Hostname:    displayH,
+			Active:      active,
+			Remaining:   remaining,
+			SudoSummary: strings.Join(rules, "; "),
 		})
 	}
-	// Sort sessions by expiry (least time remaining first)
-	sort.Slice(sessionViews, func(i, j int) bool {
-		return sessionViews[i].ExpiresAt.Before(sessionViews[j].ExpiresAt)
+	// Sort: active sessions first (by remaining time), then inactive alphabetically
+	sort.SliceStable(hostAccessViews, func(i, j int) bool {
+		if hostAccessViews[i].Active != hostAccessViews[j].Active {
+			return hostAccessViews[i].Active
+		}
+		return hostAccessViews[i].Hostname < hostAccessViews[j].Hostname
 	})
+
+	hasActiveSessions := len(activeMap) > 0
 
 	// Read timezone from cookie for profile dropdown display
 	dashTZ := "UTC"
@@ -233,24 +302,25 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := dashboardTmpl.Execute(w, map[string]interface{}{
-		"Username":       username,
-		"Initial":        strings.ToUpper(username[:1]),
-		"Avatar":         getAvatar(r),
-		"Timezone":       dashTZ,
-		"Flashes":        flashes,
-		"Pending":        pendingViews,
-		"Sessions":       sessionViews,
-		"History":        dashHistory,
-		"HasMoreHistory": len(allHistoryWithUsers) > 5,
-		"CSRFToken":      csrfToken,
-		"CSRFTs":         csrfTs,
-		"ActivePage":     "sessions",
-		"Theme":          getTheme(r),
-		"CSPNonce":       r.Context().Value("csp-nonce"),
-		"T":              T(lang),
-		"Lang":           lang,
-		"Languages":      supportedLanguages,
-		"IsAdmin":        isAdmin,
+		"Username":          username,
+		"Initial":           strings.ToUpper(username[:1]),
+		"Avatar":            getAvatar(r),
+		"Timezone":          dashTZ,
+		"Flashes":           flashes,
+		"Pending":           pendingViews,
+		"HostAccess":        hostAccessViews,
+		"History":           dashHistory,
+		"HasMoreHistory":    len(allHistoryWithUsers) > 5,
+		"HasActiveSessions": hasActiveSessions,
+		"CSRFToken":         csrfToken,
+		"CSRFTs":            csrfTs,
+		"ActivePage":        "access",
+		"Theme":             getTheme(r),
+		"CSPNonce":          r.Context().Value("csp-nonce"),
+		"T":                 T(lang),
+		"Lang":              lang,
+		"Languages":         supportedLanguages,
+		"IsAdmin":           isAdmin,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}

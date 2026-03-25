@@ -213,5 +213,8 @@
   "request_expired_message": "Diese Genehmigungsanfrage ist abgelaufen oder wurde nicht gefunden.",
   "request_expired_action": "Führen Sie Ihren sudo-Befehl erneut aus, um eine neue Anfrage zu erstellen.",
   "already_resolved": "Bereits erledigt",
-  "already_resolved_message": "Diese sudo-Anfrage wurde bereits %s."
+  "already_resolved_message": "Diese sudo-Anfrage wurde bereits %s.",
+  "access": "Zugriff",
+  "host_access": "Host-Zugriff",
+  "no_host_access": "Keine Hosts gefunden."
 }

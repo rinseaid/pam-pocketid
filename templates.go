@@ -430,7 +430,7 @@ const dashboardHTML = `<!DOCTYPE html>
     <h2>{{call .T "app_name"}}</h2>
 
     <nav class="nav">
-      <a href="/" class="{{if eq .ActivePage "sessions"}}active{{end}}">{{call .T "sessions"}}</a>
+      <a href="/" class="{{if eq .ActivePage "access"}}active{{end}}">{{call .T "access"}}</a>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
@@ -522,20 +522,24 @@ const dashboardHTML = `<!DOCTYPE html>
     </div>
     {{end}}
 
-    {{if .Sessions}}
-    <div class="section-label">{{call .T "active_sessions"}}</div>
-    <div class="list" role="list" aria-label="{{call .T "active_sessions"}}">
-      {{range .Sessions}}
+    {{if .HostAccess}}
+    <div class="section-label">{{call .T "host_access"}}</div>
+    <div class="list" role="list" aria-label="{{call .T "host_access"}}">
+      {{range .HostAccess}}
       <div class="row" role="listitem">
         <div class="row-info">
           <span class="row-host">{{.Hostname}}</span>
-          {{if $.IsAdmin}}<span class="row-sub" style="color:var(--primary)">{{.Username}}</span>{{end}}
-          <span class="row-sub">{{.Remaining}} {{call $.T "remaining"}}</span>
+          {{if .Active}}
+            <span class="row-sub">{{.Remaining}} {{call $.T "remaining"}}</span>
+          {{else}}
+            <span class="row-sub">{{call $.T "no_active_session"}}</span>
+          {{end}}
+          {{if .SudoSummary}}<span class="row-sub" style="font-size:0.75rem;color:var(--text-secondary)">{{.SudoSummary}}</span>{{end}}
         </div>
+        {{if .Active}}
         <form method="POST" action="/api/sessions/extend" style="display:inline">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
-          {{if $.IsAdmin}}<input type="hidden" name="session_username" value="{{.Username}}">{{end}}
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <button type="submit" class="host-btn primary" onclick="return confirm('{{printf (call $.T "confirm_extend_session") .Hostname}}')">{{call $.T "extend"}}</button>
@@ -543,14 +547,15 @@ const dashboardHTML = `<!DOCTYPE html>
         <form method="POST" action="/api/sessions/revoke">
           <input type="hidden" name="hostname" value="{{.Hostname}}">
           <input type="hidden" name="username" value="{{$.Username}}">
-          {{if $.IsAdmin}}<input type="hidden" name="session_username" value="{{.Username}}">{{end}}
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <button type="submit" class="host-btn danger" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('{{printf (call $.T "confirm_revoke_session") .Hostname}}')">{{call $.T "revoke"}}</button>
         </form>
+        {{end}}
       </div>
       {{end}}
     </div>
+    {{if .HasActiveSessions}}
     <div class="bulk-actions">
       <form method="POST" action="/api/sessions/extend-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
@@ -566,9 +571,10 @@ const dashboardHTML = `<!DOCTYPE html>
       </form>
     </div>
     {{end}}
+    {{end}}
 
-    {{if not .Pending}}{{if not .Sessions}}
-    <p class="empty-state">{{call .T "no_pending_or_active"}}</p>
+    {{if not .Pending}}{{if not .HostAccess}}
+    <p class="empty-state">{{call .T "no_host_access"}}</p>
     {{end}}{{end}}
 
     {{if .History}}
@@ -748,7 +754,7 @@ const historyPageHTML = `<!DOCTYPE html>
     <h2>{{call .T "app_name"}}</h2>
 
     <nav class="nav">
-      <a href="/" class="{{if eq .ActivePage "sessions"}}active{{end}}">{{call .T "sessions"}}</a>
+      <a href="/" class="{{if eq .ActivePage "access"}}active{{end}}">{{call .T "access"}}</a>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       {{if .IsAdmin}}<a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>{{end}}
       <div class="profile-menu" tabindex="-1">
@@ -941,9 +947,16 @@ const adminPageHTML = `<!DOCTYPE html>
     .group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.813rem; }
     .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
     .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-    .elevate-form select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.813rem; background: var(--card-bg); color: var(--text); cursor: pointer; }
     .session-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; }
     .session-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .host-row-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .host-row-header-info { min-width: 0; flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .host-row-header-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+    .host-row-users { margin-top: 4px; margin-left: 12px; border-left: 2px solid var(--border); padding-left: 8px; }
+    .seg-btn { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--primary); flex-shrink: 0; }
+    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 4px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
+    .seg-btn button:last-child { border-right: none; }
+    .seg-btn button:hover { background: var(--primary); color: var(--bg); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .history-action { font-weight: 600; }
     .history-action.approved { color: var(--success); }
@@ -1049,7 +1062,7 @@ const adminPageHTML = `<!DOCTYPE html>
     <h2>{{call .T "app_name"}}</h2>
 
     <nav class="nav">
-      <a href="/" class="{{if eq .ActivePage "sessions"}}active{{end}}">{{call .T "sessions"}}</a>
+      <a href="/" class="{{if eq .ActivePage "access"}}active{{end}}">{{call .T "access"}}</a>
       <a href="/history" class="{{if eq .ActivePage "history"}}active{{end}}">{{call .T "history"}}</a>
       <a href="/admin" class="{{if eq .ActivePage "admin"}}active{{end}}">{{call .T "admin"}}</a>
       <div class="profile-menu" tabindex="-1">
@@ -1193,65 +1206,68 @@ const adminPageHTML = `<!DOCTYPE html>
     {{if .Hosts}}
     <div class="list" role="list" aria-label="{{call .T "known_hosts"}}">
       {{range .Hosts}}
-      <div class="row" role="listitem">
-        <div class="row-info">
-          <span class="row-host">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
+      <div class="row" role="listitem" style="flex-direction:column;align-items:stretch;gap:0">
+        <div class="host-row-header">
+          <div class="host-row-header-info">
+            <span class="row-host" style="display:inline">{{.Hostname}}{{if .Group}}<span class="host-group">{{.Group}}</span>{{end}}</span>
+            {{if .Escrowed}}<span class="row-sub" style="display:inline;font-size:0.75rem">{{if .EscrowExpired}}{{call $.T "breakglass_expired"}} ({{.EscrowAge}} {{call $.T "ago"}}){{else}}{{call $.T "breakglass_escrowed"}} ({{.EscrowAge}} {{call $.T "ago"}}){{end}}</span>{{end}}
+          </div>
+          <div class="host-row-header-actions">
+            {{if .Escrowed}}
+            {{if .EscrowLink}}<a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>{{end}}
+            <form method="POST" action="/api/hosts/rotate" style="display:inline">
+              <input type="hidden" name="hostname" value="{{.Hostname}}">
+              <input type="hidden" name="username" value="{{$.Username}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+              <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+              <button type="submit" class="host-btn" onclick="return confirm('{{printf (call $.T "confirm_rotate_host") .Hostname}}')">{{call $.T "rotate"}}</button>
+            </form>
+            {{end}}
+          </div>
+        </div>
+        {{if .HostUsers}}
+        <div class="host-row-users">
           {{range .HostUsers}}
-            <div class="session-row">
-              <span class="{{if .Active}}row-active{{else}}row-sub{{end}}">{{.Username}}{{if .Active}} — {{.Remaining}} {{call $.T "remaining"}}{{else}} — {{call $.T "no_active_session"}}{{end}}</span>
-              <div class="session-actions">
-                {{if .Active}}
-                <form method="POST" action="/api/sessions/extend" style="display:inline">
-                  <input type="hidden" name="hostname" value="{{.Hostname}}">
-                  <input type="hidden" name="username" value="{{$.Username}}">
-                  <input type="hidden" name="session_username" value="{{.Username}}">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                  <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-                  <input type="hidden" name="from" value="/admin/hosts">
-                  <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
-                </form>
-                <form method="POST" action="/api/sessions/revoke" style="display:inline">
-                  <input type="hidden" name="hostname" value="{{.Hostname}}">
-                  <input type="hidden" name="username" value="{{$.Username}}">
-                  <input type="hidden" name="session_username" value="{{.Username}}">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                  <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-                  <input type="hidden" name="from" value="/admin/hosts">
-                  <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_session_user") .Username .Hostname}}')">{{call $.T "revoke"}}</button>
-                </form>
-                {{else}}
-                <form method="POST" action="/api/hosts/elevate" class="elevate-form" style="display:inline-flex;gap:0.4rem;align-items:center">
-                  <input type="hidden" name="hostname" value="{{.Hostname}}">
-                  <input type="hidden" name="username" value="{{$.Username}}">
-                  <input type="hidden" name="target_user" value="{{.Username}}">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                  <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-                  {{if $.Durations}}
-                  <select name="duration" aria-label="{{call $.T "aria_duration"}}">
-                    {{range $.Durations}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
-                  </select>
-                  {{end}}
-                  <button type="submit" class="host-btn filled">{{call $.T "elevate"}}</button>
-                </form>
+          <div class="session-row">
+            <span class="{{if .Active}}row-active{{else}}row-sub{{end}}">{{.Username}}{{if .Active}} — {{.Remaining}} {{call $.T "remaining"}}{{else}} — {{call $.T "no_active_session"}}{{end}}</span>
+            <div class="session-actions">
+              {{if .Active}}
+              <form method="POST" action="/api/sessions/extend" style="display:inline">
+                <input type="hidden" name="hostname" value="{{.Hostname}}">
+                <input type="hidden" name="username" value="{{$.Username}}">
+                <input type="hidden" name="session_username" value="{{.Username}}">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                <input type="hidden" name="from" value="/admin/hosts">
+                <button type="submit" class="host-btn primary">{{call $.T "extend"}}</button>
+              </form>
+              <form method="POST" action="/api/sessions/revoke" style="display:inline">
+                <input type="hidden" name="hostname" value="{{.Hostname}}">
+                <input type="hidden" name="username" value="{{$.Username}}">
+                <input type="hidden" name="session_username" value="{{.Username}}">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                <input type="hidden" name="from" value="/admin/hosts">
+                <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_session_user") .Username .Hostname}}')">{{call $.T "revoke"}}</button>
+              </form>
+              {{else}}
+              <form method="POST" action="/api/hosts/elevate" class="elevate-form">
+                <input type="hidden" name="hostname" value="{{.Hostname}}">
+                <input type="hidden" name="username" value="{{$.Username}}">
+                <input type="hidden" name="target_user" value="{{.Username}}">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                {{if $.Durations}}
+                <div class="seg-btn" role="group" aria-label="{{call $.T "elevate"}}">
+                  {{range $.Durations}}<button type="submit" name="duration" value="{{.Value}}">{{.Label}}</button>{{end}}
+                </div>
                 {{end}}
-              </div>
+              </form>
+              {{end}}
             </div>
-          {{end}}
-          {{if .Escrowed}}
-            <span class="row-sub">{{if .EscrowExpired}}{{call $.T "breakglass_expired"}} ({{call $.T "escrowed"}} {{.EscrowAge}} {{call $.T "ago"}}){{else}}{{call $.T "breakglass_escrowed"}} ({{.EscrowAge}} {{call $.T "ago"}}){{end}}</span>
+          </div>
           {{end}}
         </div>
-        {{if .Escrowed}}
-        {{if .EscrowLink}}
-        <a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>
-        {{end}}
-        <form method="POST" action="/api/hosts/rotate" style="display:inline">
-          <input type="hidden" name="hostname" value="{{.Hostname}}">
-          <input type="hidden" name="username" value="{{$.Username}}">
-          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
-          <button type="submit" class="host-btn" onclick="return confirm('{{printf (call $.T "confirm_rotate_host") .Hostname}}')">{{call $.T "rotate"}}</button>
-        </form>
         {{end}}
       </div>
       {{end}}

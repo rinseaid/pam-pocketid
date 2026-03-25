@@ -1,6 +1,7 @@
 {
   "app_name": "pam-pocketid",
   "sessions": "Sessions",
+  "access": "Accès",
   "history": "Historique",
   "hosts": "Hôtes",
   "sign_out": "Déconnexion",
@@ -213,5 +214,7 @@
   "request_expired_message": "Cette demande d'approbation a expiré ou n'a pas été trouvée.",
   "request_expired_action": "Exécutez à nouveau votre commande sudo pour créer une nouvelle demande.",
   "already_resolved": "Déjà résolue",
-  "already_resolved_message": "Cette demande sudo a déjà été %s."
+  "already_resolved_message": "Cette demande sudo a déjà été %s.",
+  "host_access": "Accès aux hôtes",
+  "no_host_access": "Aucun hôte trouvé."
 }

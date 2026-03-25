@@ -213,5 +213,8 @@
   "request_expired_message": "Esta solicitação de aprovação expirou ou não foi encontrada.",
   "request_expired_action": "Execute seu comando sudo novamente para criar uma nova solicitação.",
   "already_resolved": "Já resolvida",
-  "already_resolved_message": "Esta solicitação sudo já foi %s."
+  "already_resolved_message": "Esta solicitação sudo já foi %s.",
+  "access": "Acesso",
+  "host_access": "Acesso a Hosts",
+  "no_host_access": "Nenhum host encontrado."
 }

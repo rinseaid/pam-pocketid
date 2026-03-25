@@ -213,5 +213,8 @@
   "request_expired_message": "この承認リクエストは期限切れになったか、見つかりませんでした。",
   "request_expired_action": "新しいリクエストを作成するには、sudo コマンドを再実行してください。",
   "already_resolved": "解決済み",
-  "already_resolved_message": "この sudo リクエストはすでに %s されました。"
+  "already_resolved_message": "この sudo リクエストはすでに %s されました。",
+  "access": "アクセス",
+  "host_access": "ホストアクセス",
+  "no_host_access": "ホストが見つかりません。"
 }

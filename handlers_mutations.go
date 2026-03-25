@@ -406,13 +406,8 @@ func (s *Server) handleExtendSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Admin extends unconditionally (bypass 75% guard); regular users use the guarded version.
-	var remaining time.Duration
-	if s.getSessionRole(r) == "admin" {
-		remaining = s.store.ForceExtendGraceSession(username, hostname)
-	} else {
-		remaining = s.store.ExtendGraceSession(username, hostname)
-	}
+	// Always force-extend to max grace period — the user made an explicit action.
+	remaining := s.store.ForceExtendGraceSession(username, hostname)
 	if remaining == 0 {
 		revokeErrorPage(w, r, http.StatusNotFound, "challenge_not_found", "challenge_expired_or_resolved")
 		return
@@ -459,7 +454,7 @@ func (s *Server) handleExtendAll(w http.ResponseWriter, r *http.Request) {
 		if hostname == "(unknown)" {
 			hostname = ""
 		}
-		if s.store.ExtendGraceSession(targetUser, hostname) > 0 {
+		if s.store.ForceExtendGraceSession(targetUser, hostname) > 0 {
 			s.store.LogAction(targetUser, "extended", sess.Hostname, "", username)
 			count++
 		}
