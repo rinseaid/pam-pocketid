@@ -130,6 +130,7 @@ func (s *Server) handleAdminInfo(w http.ResponseWriter, r *http.Request) {
 		"Languages":           supportedLanguages,
 		"IsAdmin":             true,
 		"Version":             version,
+		"Commit":              commit,
 		"GracePeriod":         gracePeriod,
 		"ChallengeTTL":        challengeTTL,
 		"BreakglassType":      breakglassType,

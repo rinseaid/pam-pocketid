@@ -1202,7 +1202,7 @@ const adminPageHTML = `<!DOCTYPE html>
     <div class="info-section">
       <h3>{{call .T "server_config"}}</h3>
       <table class="info-table">
-        <tr><td class="info-label">{{call .T "version"}}</td><td>{{.Version}}</td></tr>
+        <tr><td class="info-label">{{call .T "version"}}</td><td>{{.Version}}{{if .Commit}} <span style="color:var(--text-secondary);font-size:0.85em">({{.Commit}})</span>{{end}}</td></tr>
         <tr><td class="info-label">{{call .T "grace_period"}}</td><td>{{.GracePeriod}}</td></tr>
         <tr><td class="info-label">{{call .T "onetap_max_age"}}</td><td>{{.OneTapMaxAge}}</td></tr>
         <tr><td class="info-label">{{call .T "challenge_ttl"}}</td><td>{{.ChallengeTTL}}</td></tr>

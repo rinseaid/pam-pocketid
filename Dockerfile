@@ -4,8 +4,9 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 ARG VERSION=dev
+ARG COMMIT=
 COPY . .
-RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /app/pam-pocketid .
+RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=$(echo ${COMMIT} | cut -c1-8)" -o /app/pam-pocketid .
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -23,6 +23,9 @@ var messageWriter io.Writer = os.Stdout
 // version is set at build time via -ldflags "-X main.version=v0.6.1".
 var version = "dev"
 
+// commit is the short git SHA set at build time via -ldflags "-X main.commit=abc1234".
+var commit = ""
+
 // safeUsername validates the PAM_USER value to prevent injection attacks.
 // PAM usernames should be short, alphanumeric with limited special chars.
 var safeUsername = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
