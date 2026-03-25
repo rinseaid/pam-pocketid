@@ -379,6 +379,10 @@ const dashboardHTML = `<!DOCTYPE html>
     .history-action.rotated_breakglass { border: 1px solid var(--border); color: var(--text-secondary); }
     .history-host { color: var(--text); font-size: 0.813rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .history-meta { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
+    .seg-btn { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--primary); flex-shrink: 0; }
+    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 4px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
+    .seg-btn button:last-child { border-right: none; }
+    .seg-btn button:hover { background: var(--primary); color: var(--bg); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .view-all { display: block; text-align: left; margin-top: 8px; font-size: 0.813rem; color: var(--primary); text-decoration: none; font-weight: 600; }
     .view-all:hover { text-decoration: underline; }
@@ -547,6 +551,21 @@ const dashboardHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <button type="submit" class="host-btn danger" aria-label="{{call $.T "revoke"}} {{.Hostname}}" onclick="return confirm('{{printf (call $.T "confirm_revoke_session") .Hostname}}')">{{call $.T "revoke"}}</button>
+        </form>
+        {{else}}
+        <form method="POST" action="/api/hosts/elevate">
+          <input type="hidden" name="hostname" value="{{.Hostname}}">
+          <input type="hidden" name="username" value="{{$.Username}}">
+          <input type="hidden" name="target_user" value="{{$.Username}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+          <input type="hidden" name="from" value="/">
+          <div class="seg-btn" role="group" aria-label="{{call $.T "elevate"}}">
+            <button type="submit" name="duration" value="1h">{{call $.T "1_hour"}}</button>
+            <button type="submit" name="duration" value="4h">{{call $.T "4_hours"}}</button>
+            <button type="submit" name="duration" value="8h">{{call $.T "8_hours"}}</button>
+            <button type="submit" name="duration" value="24h">{{call $.T "1_day"}}</button>
+          </div>
         </form>
         {{end}}
       </div>
@@ -1171,9 +1190,9 @@ const adminPageHTML = `<!DOCTYPE html>
             {{if .Groups}}
             <div class="user-groups">
               {{range .Groups}}<span class="group-badge">{{.Name}}</span>{{end}}
+              {{if .SudoSummary}}<div class="sudo-detail">{{.SudoSummary}}</div>{{end}}
             </div>
             {{end}}
-            {{if .SudoSummary}}<div class="sudo-detail">{{.SudoSummary}}</div>{{end}}
           </td>
           <td>{{.ActiveSessions}}</td>
           <td>{{if .LastActiveAgo}}{{.LastActiveAgo}}{{else}}—{{end}}</td>
