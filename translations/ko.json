@@ -204,8 +204,8 @@
   "aria_filter_group": "그룹으로 필터링",
   "aria_page_size": "페이지 크기",
   "aria_duration": "기간",
-  "groups": "Sudo 그룹",
-  "permissions": "Sudo 권한",
+  "groups": "그룹",
+  "permissions": "권한",
   "all_groups": "모든 그룹",
   "clear_filter": "필터 지우기",
   "user_all": "사용자 (전체)",
@@ -228,5 +228,6 @@
   "on": "의",
   "breakglass_random": "무작위",
   "breakglass_passphrase": "패스프레이즈",
-  "breakglass_alphanumeric": "영숫자"
+  "breakglass_alphanumeric": "영숫자",
+  "sudo": "Sudo"
 }

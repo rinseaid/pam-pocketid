@@ -1039,7 +1039,9 @@ const adminPageHTML = `<!DOCTYPE html>
     .sort-btn.active { color: var(--primary); }
     .users-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .users-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; min-width: 700px; }
-    .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; white-space: nowrap; }
+    .users-table th { padding: 6px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; white-space: nowrap; vertical-align: bottom; }
+    .users-table thead tr:first-child th[colspan] { border-bottom: 1px solid var(--border); padding-bottom: 2px; }
+    .users-table thead tr:last-child th { padding-top: 2px; border-bottom: 2px solid var(--border); }
     .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
     .user-name { font-weight: 600; }
     .user-groups { margin-bottom: 4px; }
@@ -1205,12 +1207,15 @@ const adminPageHTML = `<!DOCTYPE html>
     <table class="users-table">
       <thead>
         <tr>
-          <th scope="col">{{call .T "user"}}</th>
+          <th scope="col" rowspan="2">{{call .T "user"}}</th>
+          <th scope="colgroup" colspan="3" style="text-align:center;border-bottom:1px solid var(--border);padding-bottom:4px">{{call .T "sudo"}}</th>
+          <th scope="col" rowspan="2">{{call .T "last_active"}}</th>
+          <th scope="col" rowspan="2"></th>
+        </tr>
+        <tr>
           <th scope="col">{{call .T "groups"}}</th>
           <th scope="col">{{call .T "permissions"}}</th>
           <th scope="col">{{call .T "active_sessions_count"}}</th>
-          <th scope="col">{{call .T "last_active"}}</th>
-          <th scope="col"></th>
         </tr>
       </thead>
       <tbody>

@@ -204,8 +204,8 @@
   "aria_filter_group": "Filtrar por grupo",
   "aria_page_size": "Tamaño de página",
   "aria_duration": "Duración",
-  "groups": "Grupos Sudo",
-  "permissions": "Permisos Sudo",
+  "groups": "Grupos",
+  "permissions": "Permisos",
   "all_groups": "Todos los grupos",
   "clear_filter": "Limpiar filtro",
   "user_all": "Usuario (todos)",
@@ -228,5 +228,6 @@
   "on": "en",
   "breakglass_random": "aleatorio",
   "breakglass_passphrase": "frase de contraseña",
-  "breakglass_alphanumeric": "alfanumérico"
+  "breakglass_alphanumeric": "alfanumérico",
+  "sudo": "Sudo"
 }

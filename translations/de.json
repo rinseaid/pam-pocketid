@@ -204,8 +204,8 @@
   "aria_filter_group": "Nach Gruppe filtern",
   "aria_page_size": "Seitengröße",
   "aria_duration": "Dauer",
-  "groups": "Sudo-Gruppen",
-  "permissions": "Sudo-Berechtigungen",
+  "groups": "Gruppen",
+  "permissions": "Berechtigungen",
   "all_groups": "Alle Gruppen",
   "clear_filter": "Filter zurücksetzen",
   "user_all": "Benutzer (alle)",
@@ -228,5 +228,6 @@
   "on": "auf",
   "breakglass_random": "zufällig",
   "breakglass_passphrase": "Passphrase",
-  "breakglass_alphanumeric": "alphanumerisch"
+  "breakglass_alphanumeric": "alphanumerisch",
+  "sudo": "Sudo"
 }

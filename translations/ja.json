@@ -204,8 +204,8 @@
   "aria_filter_group": "グループでフィルタ",
   "aria_page_size": "ページサイズ",
   "aria_duration": "期間",
-  "groups": "Sudoグループ",
-  "permissions": "Sudo権限",
+  "groups": "グループ",
+  "permissions": "権限",
   "all_groups": "すべてのグループ",
   "clear_filter": "フィルタをクリア",
   "user_all": "ユーザー（全員）",
@@ -228,5 +228,6 @@
   "on": "の",
   "breakglass_random": "ランダム",
   "breakglass_passphrase": "パスフレーズ",
-  "breakglass_alphanumeric": "英数字"
+  "breakglass_alphanumeric": "英数字",
+  "sudo": "Sudo"
 }

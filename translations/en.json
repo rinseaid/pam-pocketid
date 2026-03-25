@@ -212,8 +212,8 @@
   "aria_filter_group": "Filter by group",
   "aria_page_size": "Page size",
   "aria_duration": "Duration",
-  "groups": "Sudo Groups",
-  "permissions": "Sudo Permissions",
+  "groups": "Groups",
+  "permissions": "Permissions",
   "all_groups": "All groups",
   "clear_filter": "Clear filter",
   "user_all": "User (all)",
@@ -228,5 +228,6 @@
   "on": "on",
   "breakglass_random": "random",
   "breakglass_passphrase": "passphrase",
-  "breakglass_alphanumeric": "alphanumeric"
+  "breakglass_alphanumeric": "alphanumeric",
+  "sudo": "Sudo"
 }
