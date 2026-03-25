@@ -381,7 +381,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .history-host { color: var(--text); font-size: 0.813rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .history-actor { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
     .seg-btn { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--primary); flex-shrink: 0; }
-    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 5px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
+    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 6px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
     .seg-btn button:last-child { border-right: none; }
     .seg-btn button:hover { background: var(--primary); color: var(--bg); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
@@ -990,7 +990,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .host-row-header-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
     .host-row-users { margin-top: 4px; margin-left: 12px; border-left: 2px solid var(--border); padding-left: 8px; }
     .seg-btn { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--primary); flex-shrink: 0; }
-    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 5px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
+    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 6px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
     .seg-btn button:last-child { border-right: none; }
     .seg-btn button:hover { background: var(--primary); color: var(--bg); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
@@ -1037,6 +1037,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .sort-btn.active { color: var(--primary); }
     .users-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
     .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; }
+    .users-table th { white-space: nowrap; }
     .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
     .user-name { font-weight: 600; }
     .user-groups { margin-bottom: 4px; }
@@ -1106,14 +1107,16 @@ const adminPageHTML = `<!DOCTYPE html>
       document.querySelectorAll('.profile-btn').forEach(function(b){b.setAttribute('aria-expanded','false');});
     });
   });
-  function togglePerms(chip){
+  document.addEventListener('click',function(e){
+    var chip=e.target.closest('.summary-chip.expandable');
+    if(!chip)return;
     var cell=chip.closest('.perms-cell');
     var listType=chip.classList.contains('commands')?'cmd':'host';
     var list=cell.querySelector('.expanded-list[data-type="'+listType+'"]');
     var open=list.classList.contains('visible');
     list.classList.toggle('visible',!open);
     chip.classList.toggle('open',!open);
-  }
+  });
   </script>
 </head>
 <body class="wide">
@@ -1226,7 +1229,7 @@ const adminPageHTML = `<!DOCTYPE html>
               {{else if eqInt (len .SudoCommands) 1}}
               <span class="summary-chip single">{{index .SudoCommands 0}}</span>
               {{else}}
-              <span class="summary-chip commands" onclick="togglePerms(this)">{{len .SudoCommands}} commands <span class="caret">▼</span></span>
+              <span class="summary-chip commands expandable">{{len .SudoCommands}} commands <span class="caret">▼</span></span>
               {{end}}
               <span class="summary-sep">on</span>
               {{if .SudoAllHosts}}
@@ -1234,7 +1237,7 @@ const adminPageHTML = `<!DOCTYPE html>
               {{else if eqInt (len .SudoHosts) 1}}
               <span class="summary-chip single">{{index .SudoHosts 0}}</span>
               {{else}}
-              <span class="summary-chip hosts" onclick="togglePerms(this)">{{len .SudoHosts}} hosts <span class="caret">▼</span></span>
+              <span class="summary-chip hosts expandable">{{len .SudoHosts}} hosts <span class="caret">▼</span></span>
               {{end}}
             </div>
             {{if and (not .SudoAllCmds) (gt (len .SudoCommands) 1)}}
@@ -1250,7 +1253,7 @@ const adminPageHTML = `<!DOCTYPE html>
             {{end}}
           </td>
           <td>{{.ActiveSessions}}</td>
-          <td>{{if .LastActiveAgo}}{{.LastActiveAgo}}{{else}}—{{end}}</td>
+          <td>{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><br><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
           <td class="user-actions">
             {{if gt .ActiveSessions 0}}
             <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
