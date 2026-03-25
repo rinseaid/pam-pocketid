@@ -1042,6 +1042,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .user-groups { margin-bottom: 4px; }
     .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; }
     .perms-cell { min-width: 140px; }
+    .col-last-active { white-space: nowrap; }
     .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
     .summary-chip { font-size: 0.65rem; padding: 2px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; user-select: none; display: inline-flex; align-items: center; gap: 4px; transition: opacity 0.15s; }
     .summary-chip:hover { opacity: 0.8; }
@@ -1205,7 +1206,7 @@ const adminPageHTML = `<!DOCTYPE html>
           <th scope="col">{{call .T "user"}}</th>
           <th scope="col">{{call .T "permissions"}}</th>
           <th scope="col">{{call .T "active_sessions_count"}}</th>
-          <th scope="col">{{call .T "last_active"}}</th>
+          <th scope="col" class="col-last-active">{{call .T "last_active"}}</th>
           <th scope="col"></th>
         </tr>
       </thead>
@@ -1248,7 +1249,7 @@ const adminPageHTML = `<!DOCTYPE html>
             {{end}}
           </td>
           <td>{{.ActiveSessions}}</td>
-          <td>{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
+          <td class="col-last-active">{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
           <td class="user-actions">
             {{if gt .ActiveSessions 0}}
             <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
