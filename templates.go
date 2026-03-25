@@ -564,10 +564,7 @@ const dashboardHTML = `<!DOCTYPE html>
           <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
           <input type="hidden" name="from" value="/">
           <div class="seg-btn" role="group" aria-label="{{call $.T "elevate"}}">
-            <button type="submit" name="duration" value="1h">{{call $.T "1_hour"}}</button>
-            <button type="submit" name="duration" value="4h">{{call $.T "4_hours"}}</button>
-            <button type="submit" name="duration" value="8h">{{call $.T "8_hours"}}</button>
-            <button type="submit" name="duration" value="24h">{{call $.T "1_day"}}</button>
+            {{range $.Durations}}<button type="submit" name="duration" value="{{.Value}}">{{.Label}}</button>{{end}}
           </div>
         </form>
         {{end}}
@@ -1056,7 +1053,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .caret { font-size: 0.55rem; transition: transform 0.2s; display: inline-block; }
     .summary-chip.open .caret { transform: rotate(180deg); }
     .expanded-list { display: none; margin-top: 6px; }
-    .expanded-list.visible { display: flex; flex-wrap: wrap; gap: 3px; }
+    .expanded-list.visible { display: flex; flex-wrap: wrap; gap: 3px; max-width: 300px; }
     .pill { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
     .pill.cmd { background: rgba(59,130,246,0.1); color: #93c5fd; font-family: monospace; }
     .pill.host { background: rgba(16,185,129,0.1); color: #6ee7b7; }

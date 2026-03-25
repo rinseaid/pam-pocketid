@@ -292,6 +292,31 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	hasActiveSessions := len(activeMap) > 0
 
+	// Build elevate duration options filtered by GracePeriod (same logic as admin hosts page).
+	type durationOption struct {
+		Value int
+		Label string
+	}
+	allDurations := []durationOption{
+		{3600, t("1_hour")},
+		{14400, t("4_hours")},
+		{28800, t("8_hours")},
+		{86400, t("1_day")},
+	}
+	var elevateDurations []durationOption
+	graceSec := int(s.cfg.GracePeriod.Seconds())
+	if graceSec <= 0 {
+		graceSec = 86400
+	}
+	for _, d := range allDurations {
+		if d.Value <= graceSec {
+			elevateDurations = append(elevateDurations, d)
+		}
+	}
+	if len(elevateDurations) == 0 {
+		elevateDurations = []durationOption{{graceSec, formatDuration(s.cfg.GracePeriod)}}
+	}
+
 	// Read timezone from cookie for profile dropdown display
 	dashTZ := "UTC"
 	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
@@ -321,6 +346,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"Lang":              lang,
 		"Languages":         supportedLanguages,
 		"IsAdmin":           isAdmin,
+		"Durations":         elevateDurations,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
