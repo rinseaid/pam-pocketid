@@ -521,13 +521,14 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if s.cfg.EscrowCommand == "" {
-		log.Printf("BREAKGLASS: escrow received from host %q but no escrow command configured — password discarded", req.Hostname)
+	hasNativeEscrow := s.cfg.EscrowBackend != ""
+	if s.cfg.EscrowCommand == "" && !hasNativeEscrow {
+		log.Printf("BREAKGLASS: escrow received from host %q but no escrow configured — password discarded", req.Hostname)
 		http.Error(w, "escrow not configured on server", http.StatusNotImplemented)
 		return
 	}
 
-	// Limit concurrent escrow command executions
+	// Limit concurrent escrow operations
 	select {
 	case escrowSemaphore <- struct{}{}:
 		defer func() { <-escrowSemaphore }()
@@ -536,65 +537,79 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Execute escrow command with password on stdin and hostname as env var.
-	// Password is NOT passed as an argument to avoid /proc/cmdline exposure.
-	// Use a minimal environment to avoid leaking server secrets (CLIENT_SECRET,
-	// SHARED_SECRET, etc.) to the escrow command.
 	ctx, cancel := context.WithTimeout(r.Context(), escrowTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", s.cfg.EscrowCommand)
-	cmd.Stdin = strings.NewReader(req.Password)
-	// Start with minimal env, then add configured passthrough prefixes.
-	// This prevents leaking server secrets while allowing cloud CLI tools
-	// (AWS, Vault, etc.) to function when explicitly configured via
-	// PAM_POCKETID_ESCROW_ENV=AWS_,VAULT_,OP_
-	cmdEnv := []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-		"BREAKGLASS_HOSTNAME=" + req.Hostname,
-	}
-	if len(s.cfg.EscrowEnvPassthrough) > 0 {
-		for _, env := range os.Environ() {
-			// Skip vars that are already in the baseline to prevent shadowing
-			if strings.HasPrefix(env, "PATH=") || strings.HasPrefix(env, "HOME=") || strings.HasPrefix(env, "BREAKGLASS_HOSTNAME=") {
-				continue
-			}
-			for _, prefix := range s.cfg.EscrowEnvPassthrough {
-				if prefix != "" && strings.HasPrefix(env, prefix) {
-					cmdEnv = append(cmdEnv, env)
-					break
+	var itemID string
+
+	if hasNativeEscrow {
+		backend := newEscrowBackend(s.cfg)
+		var err error
+		itemID, err = backend.Store(ctx, req.Hostname, req.Password)
+		if err != nil {
+			breakglassEscrowTotal.WithLabelValues("failure").Inc()
+			log.Printf("BREAKGLASS: %s escrow failed for host %q: %v", s.cfg.EscrowBackend, req.Hostname, err)
+			http.Error(w, "escrow failed", http.StatusInternalServerError)
+			return
+		}
+		breakglassEscrowTotal.WithLabelValues("success").Inc()
+	} else {
+		// Execute escrow command with password on stdin and hostname as env var.
+		// Password is NOT passed as an argument to avoid /proc/cmdline exposure.
+		// Use a minimal environment to avoid leaking server secrets (CLIENT_SECRET,
+		// SHARED_SECRET, etc.) to the escrow command.
+		cmd := exec.CommandContext(ctx, "sh", "-c", s.cfg.EscrowCommand)
+		cmd.Stdin = strings.NewReader(req.Password)
+		// Start with minimal env, then add configured passthrough prefixes.
+		// This prevents leaking server secrets while allowing cloud CLI tools
+		// (AWS, Vault, etc.) to function when explicitly configured via
+		// PAM_POCKETID_ESCROW_ENV=AWS_,VAULT_,OP_
+		cmdEnv := []string{
+			"PATH=" + os.Getenv("PATH"),
+			"HOME=" + os.Getenv("HOME"),
+			"BREAKGLASS_HOSTNAME=" + req.Hostname,
+		}
+		if len(s.cfg.EscrowEnvPassthrough) > 0 {
+			for _, env := range os.Environ() {
+				// Skip vars that are already in the baseline to prevent shadowing
+				if strings.HasPrefix(env, "PATH=") || strings.HasPrefix(env, "HOME=") || strings.HasPrefix(env, "BREAKGLASS_HOSTNAME=") {
+					continue
+				}
+				for _, prefix := range s.cfg.EscrowEnvPassthrough {
+					if prefix != "" && strings.HasPrefix(env, prefix) {
+						cmdEnv = append(cmdEnv, env)
+						break
+					}
 				}
 			}
 		}
-	}
-	cmd.Env = cmdEnv
+		cmd.Env = cmdEnv
 
-	// Use separate capped buffers instead of CombinedOutput() to prevent
-	// memory exhaustion from a verbose or malicious escrow command.
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &limitedWriter{w: &stdoutBuf, n: escrowMaxOutput}
-	cmd.Stderr = &limitedWriter{w: &stderrBuf, n: escrowMaxOutput}
+		// Use separate capped buffers instead of CombinedOutput() to prevent
+		// memory exhaustion from a verbose or malicious escrow command.
+		var stdoutBuf, stderrBuf bytes.Buffer
+		cmd.Stdout = &limitedWriter{w: &stdoutBuf, n: escrowMaxOutput}
+		cmd.Stderr = &limitedWriter{w: &stderrBuf, n: escrowMaxOutput}
 
-	if err := cmd.Run(); err != nil {
-		breakglassEscrowTotal.WithLabelValues("failure").Inc()
-		combined := truncateOutput(stdoutBuf.String() + stderrBuf.String())
-		log.Printf("BREAKGLASS: escrow command failed for host %q: %v (output: %s)", req.Hostname, err, combined)
-		http.Error(w, "escrow command failed", http.StatusInternalServerError)
-		return
-	}
+		if err := cmd.Run(); err != nil {
+			breakglassEscrowTotal.WithLabelValues("failure").Inc()
+			combined := truncateOutput(stdoutBuf.String() + stderrBuf.String())
+			log.Printf("BREAKGLASS: escrow command failed for host %q: %v (output: %s)", req.Hostname, err, combined)
+			http.Error(w, "escrow command failed", http.StatusInternalServerError)
+			return
+		}
+		breakglassEscrowTotal.WithLabelValues("success").Inc()
 
-	breakglassEscrowTotal.WithLabelValues("success").Inc()
-
-	// Parse item ID from escrow command stdout (format: "item_id=xxx")
-	var itemID string
-	for _, line := range strings.Split(stdoutBuf.String(), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "item_id=") {
-			itemID = strings.TrimPrefix(line, "item_id=")
-			break
+		// Parse item ID from escrow command stdout (format: "item_id=xxx")
+		for _, line := range strings.Split(stdoutBuf.String(), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "item_id=") {
+				itemID = strings.TrimPrefix(line, "item_id=")
+				break
+			}
 		}
 	}
+
 	s.store.RecordEscrow(req.Hostname, itemID)
 	// Log the escrow as a "rotated_breakglass" action visible in the history page.
 	// Since escrow is a machine-level operation (no user session), log it for all

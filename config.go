@@ -59,15 +59,21 @@ type Config struct {
 	BreakglassPasswordType string // Password type: random, passphrase, alphanumeric (default random)
 
 	// Notification settings (server mode)
-	NotifyCommand        string   // Shell command to run when a new challenge is created
-	NotifyEnvPassthrough []string // Additional env var prefixes to pass to notify command (e.g., APPRISE_,TELEGRAM_)
-	NotifyUsersFile      string   // Path to JSON file mapping usernames to per-user notification URLs
-	NotifyWebhookURL     string          // URL for webhook notifications (POST JSON) — legacy, superseded by Webhooks
-	Webhooks             []WebhookConfig // Multi-webhook destinations (parsed from PAM_POCKETID_WEBHOOKS / PAM_POCKETID_WEBHOOKS_FILE)
+	NotifyCommand        string            // Shell command to run when a new challenge is created
+	NotifyEnvPassthrough []string          // Additional env var prefixes to pass to notify command (e.g., APPRISE_,TELEGRAM_)
+	NotifyUsersFile      string            // Path to JSON file mapping usernames to per-user notification URLs
+	NotifyUsers          map[string]string // Inline per-user notification URLs (overrides NotifyUsersFile when set)
+	NotifyWebhookURL     string            // URL for webhook notifications (POST JSON) — legacy, superseded by Webhooks
+	Webhooks             []WebhookConfig   // Multi-webhook destinations (parsed from PAM_POCKETID_WEBHOOKS / PAM_POCKETID_WEBHOOKS_FILE)
 
 	// Break-glass settings (server mode)
 	EscrowCommand          string    // Shell command to escrow break-glass passwords
 	EscrowEnvPassthrough   []string  // Additional env var prefixes to pass to escrow command (e.g., AWS_,VAULT_)
+	EscrowBackend          string    // Native escrow backend: "1password-connect", "vault", "bitwarden", "infisical"
+	EscrowURL              string    // Backend base URL
+	EscrowAuthID           string    // Backend auth identifier (role_id, client_id, etc.)
+	EscrowAuthSecret       string    // Backend auth secret (token, secret_id, etc.)
+	EscrowPath             string    // Storage location (vault name/UUID, KV path prefix, org/project, etc.)
 	BreakglassRotateBefore time.Time // Tell clients to rotate if their hash file is older than this
 
 	// History page settings (server mode)
@@ -210,6 +216,14 @@ func LoadServerConfig() (*Config, error) {
 		return nil, fmt.Errorf("PAM_POCKETID_NOTIFY_USERS_FILE must be an absolute path (got %q)", cfg.NotifyUsersFile)
 	}
 
+	// PAM_POCKETID_NOTIFY_USERS: inline JSON map of username → notification URLs.
+	// Takes precedence over NOTIFY_USERS_FILE when both are set.
+	if v := os.Getenv("PAM_POCKETID_NOTIFY_USERS"); v != "" {
+		if err := json.Unmarshal([]byte(v), &cfg.NotifyUsers); err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_NOTIFY_USERS: %w", err)
+		}
+	}
+
 	cfg.NotifyWebhookURL = os.Getenv("PAM_POCKETID_NOTIFY_WEBHOOK_URL")
 
 	// PAM_POCKETID_WEBHOOKS: inline JSON array of WebhookConfig objects.
@@ -249,11 +263,14 @@ func LoadServerConfig() (*Config, error) {
 		cfg.Webhooks = append(cfg.Webhooks, WebhookConfig{URL: cfg.NotifyWebhookURL, Format: "raw"})
 	}
 
-	// Warn about likely misconfigurations: per-user file or env passthrough
+	// Warn about likely misconfigurations: per-user config or env passthrough
 	// without a notify command means those settings have no effect.
 	if cfg.NotifyCommand == "" {
 		if cfg.NotifyUsersFile != "" {
 			log.Printf("WARNING: PAM_POCKETID_NOTIFY_USERS_FILE is set but PAM_POCKETID_NOTIFY_COMMAND is empty — per-user routing will have no effect")
+		}
+		if cfg.NotifyUsers != nil {
+			log.Printf("WARNING: PAM_POCKETID_NOTIFY_USERS is set but PAM_POCKETID_NOTIFY_COMMAND is empty — per-user routing will have no effect")
 		}
 		if len(cfg.NotifyEnvPassthrough) > 0 {
 			log.Printf("WARNING: PAM_POCKETID_NOTIFY_ENV is set but PAM_POCKETID_NOTIFY_COMMAND is empty — env passthrough will have no effect")
@@ -284,6 +301,34 @@ func LoadServerConfig() (*Config, error) {
 			if prefix != "" {
 				cfg.EscrowEnvPassthrough = append(cfg.EscrowEnvPassthrough, prefix)
 			}
+		}
+	}
+
+	// Native escrow backend (alternative to EscrowCommand)
+	cfg.EscrowBackend = os.Getenv("PAM_POCKETID_ESCROW_BACKEND")
+	if cfg.EscrowBackend != "" {
+		switch cfg.EscrowBackend {
+		case "1password-connect", "vault", "bitwarden", "infisical":
+			// valid
+		default:
+			return nil, fmt.Errorf("PAM_POCKETID_ESCROW_BACKEND must be one of: 1password-connect, vault, bitwarden, infisical")
+		}
+		cfg.EscrowURL = os.Getenv("PAM_POCKETID_ESCROW_URL")
+		cfg.EscrowAuthID = os.Getenv("PAM_POCKETID_ESCROW_AUTH_ID")
+		cfg.EscrowAuthSecret = os.Getenv("PAM_POCKETID_ESCROW_AUTH_SECRET")
+		if secretFile := os.Getenv("PAM_POCKETID_ESCROW_AUTH_SECRET_FILE"); secretFile != "" && cfg.EscrowAuthSecret == "" {
+			data, err := os.ReadFile(secretFile)
+			if err != nil {
+				return nil, fmt.Errorf("PAM_POCKETID_ESCROW_AUTH_SECRET_FILE: %w", err)
+			}
+			cfg.EscrowAuthSecret = strings.TrimSpace(string(data))
+		}
+		cfg.EscrowPath = os.Getenv("PAM_POCKETID_ESCROW_PATH")
+		if cfg.EscrowURL == "" {
+			return nil, fmt.Errorf("PAM_POCKETID_ESCROW_URL is required when ESCROW_BACKEND is set")
+		}
+		if cfg.EscrowAuthSecret == "" {
+			return nil, fmt.Errorf("PAM_POCKETID_ESCROW_AUTH_SECRET (or _FILE) is required when ESCROW_BACKEND is set")
 		}
 	}
 
@@ -367,6 +412,34 @@ func LoadServerConfig() (*Config, error) {
 		}
 	}
 
+	// PAM_POCKETID_CLIENT_CONFIG: JSON blob to set multiple client overrides at once.
+	// Takes precedence over the individual CLIENT_BREAKGLASS_* and CLIENT_TOKEN_CACHE vars.
+	// Format: {"breakglass_password_type":"random","breakglass_rotation_days":90,"token_cache":true}
+	if v := os.Getenv("PAM_POCKETID_CLIENT_CONFIG"); v != "" {
+		var cc struct {
+			BreakglassPasswordType string `json:"breakglass_password_type"`
+			BreakglassRotationDays int    `json:"breakglass_rotation_days"`
+			TokenCache             *bool  `json:"token_cache"`
+		}
+		if err := json.Unmarshal([]byte(v), &cc); err != nil {
+			return nil, fmt.Errorf("PAM_POCKETID_CLIENT_CONFIG: %w", err)
+		}
+		if cc.BreakglassPasswordType != "" {
+			switch cc.BreakglassPasswordType {
+			case "random", "passphrase", "alphanumeric":
+				cfg.ClientBreakglassPasswordType = cc.BreakglassPasswordType
+			default:
+				return nil, fmt.Errorf("PAM_POCKETID_CLIENT_CONFIG: breakglass_password_type must be one of: random, passphrase, alphanumeric")
+			}
+		}
+		if cc.BreakglassRotationDays > 0 {
+			cfg.ClientBreakglassRotationDays = cc.BreakglassRotationDays
+		}
+		if cc.TokenCache != nil {
+			cfg.ClientTokenCacheEnabled = cc.TokenCache
+		}
+	}
+
 	// Best-effort: clear secrets from environment to reduce exposure window.
 	// Note: this does NOT scrub /proc/PID/environ on Linux (the initial
 	// environment snapshot is immutable), but it prevents os.Getenv from
@@ -375,6 +448,7 @@ func LoadServerConfig() (*Config, error) {
 	os.Unsetenv("PAM_POCKETID_CLIENT_SECRET")
 	os.Unsetenv("PAM_POCKETID_POCKETID_API_KEY")
 	os.Unsetenv("PAM_POCKETID_API_KEYS")
+	os.Unsetenv("PAM_POCKETID_ESCROW_AUTH_SECRET")
 
 	return cfg, nil
 }

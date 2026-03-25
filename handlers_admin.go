@@ -75,7 +75,9 @@ func (s *Server) handleAdminInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	escrowConfigured := t("not_configured")
-	if s.cfg.EscrowCommand != "" {
+	if s.cfg.EscrowBackend != "" {
+		escrowConfigured = s.cfg.EscrowBackend
+	} else if s.cfg.EscrowCommand != "" {
 		escrowConfigured = t("configured")
 	}
 

@@ -141,6 +141,7 @@ func (s *Server) sendNotification(challenge *Challenge, approvalURL string, oneT
 	notifyCmd := s.cfg.NotifyCommand
 	notifyEnv := s.cfg.NotifyEnvPassthrough
 	notifyUsersFile := s.cfg.NotifyUsersFile
+	notifyUsersInline := s.cfg.NotifyUsers
 
 	s.notifyWg.Add(1)
 	go func() {
@@ -168,13 +169,19 @@ func (s *Server) sendNotification(challenge *Challenge, approvalURL string, oneT
 		// grandchildren. Avoid notify commands that fork background processes.
 		cmd := exec.CommandContext(ctx, "sh", "-c", notifyCmd)
 
-		// Look up per-user notification URLs (re-reads file on each
-		// notification so changes take effect without restart).
-		userURLs := lookupUserURLs(loadNotifyUsers(notifyUsersFile), username)
+		// Look up per-user notification URLs. Inline map (from NOTIFY_USERS env)
+		// takes precedence over the file; file is re-read on each notification
+		// so changes take effect without restart.
+		var userURLs string
+		if notifyUsersInline != nil {
+			userURLs = lookupUserURLs(notifyUsersInline, username)
+		} else {
+			userURLs = lookupUserURLs(loadNotifyUsers(notifyUsersFile), username)
+		}
 
 		// Log routing failures for per-user issues (only log when something
 		// is wrong to avoid noise on every notification).
-		if notifyUsersFile != "" && userURLs == "" {
+		if (notifyUsersFile != "" || notifyUsersInline != nil) && userURLs == "" {
 			log.Printf("NOTIFY: no per-user mapping for %q (NOTIFY_USER_URLS will be empty)", username)
 		}
 
