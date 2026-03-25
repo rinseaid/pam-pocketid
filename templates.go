@@ -371,6 +371,8 @@ const dashboardHTML = `<!DOCTYPE html>
     .bulk-btn.success { border-color: var(--success); color: var(--success); }
     .admin-required { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); white-space: nowrap; }
     .bulk-btn.success:hover { background: var(--success-bg); }
+    .bulk-btn.primary { border-color: var(--primary); color: var(--primary); }
+    .bulk-btn.primary:hover { background: var(--info-bg); }
     .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
     .bulk-btn.danger:hover { background: var(--danger-bg); }
     .history-entry { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
@@ -976,6 +978,8 @@ const adminPageHTML = `<!DOCTYPE html>
     .bulk-actions { margin: 16px 0 8px; text-align: right; }
     .bulk-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 0.813rem; font-weight: 600; }
     .bulk-btn:hover { background: var(--info-bg); color: var(--text); }
+    .bulk-btn.primary { border-color: var(--primary); color: var(--primary); }
+    .bulk-btn.primary:hover { background: var(--info-bg); }
     .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
     .bulk-btn.danger:hover { background: var(--danger-bg); }
     .host-group { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--info-bg); color: var(--text-secondary); margin-left: 8px; vertical-align: middle; }
