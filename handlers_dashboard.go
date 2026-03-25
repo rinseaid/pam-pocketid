@@ -282,11 +282,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			SudoSummary: strings.Join(rules, "; "),
 		})
 	}
-	// Sort: active sessions first (by remaining time), then inactive alphabetically
-	sort.SliceStable(hostAccessViews, func(i, j int) bool {
-		if hostAccessViews[i].Active != hostAccessViews[j].Active {
-			return hostAccessViews[i].Active
-		}
+	// Sort alphabetically — user can filter to active-only via the UI toggle.
+	sort.Slice(hostAccessViews, func(i, j int) bool {
 		return hostAccessViews[i].Hostname < hostAccessViews[j].Hostname
 	})
 

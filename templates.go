@@ -347,11 +347,16 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     .section-label.pending { color: var(--warning); }
     .list { text-align: left; margin: 0 0 8px; }
-    .row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+    .row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; border-left: 3px solid transparent; padding-left: 10px; margin-left: -13px; }
+    .row.row-active { border-left-color: var(--primary); }
     .row-info { min-width: 0; flex: 1; }
     .row-host { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row-sub { color: var(--text-secondary); font-size: 0.813rem; display: block; }
     .row-label { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); opacity: 0.55; }
+    .host-access-header { display: flex; align-items: center; justify-content: space-between; }
+    .filter-btn { font-size: 0.7rem; font-weight: 600; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: none; color: var(--text-secondary); cursor: pointer; }
+    .filter-btn.active { border-color: var(--primary); color: var(--primary); background: var(--info-bg); }
+    .list.active-only [data-active="false"] { display: none; }
     .row-value { color: var(--text); font-weight: 500; }
     .row-code { color: var(--text-secondary); font-size: 0.813rem; font-family: monospace; display: block; }
     .banner { padding: 10px 16px; border-radius: 8px; margin-bottom: 12px; font-size: 0.875rem; font-weight: 600; text-align: left; }
@@ -419,6 +424,15 @@ const dashboardHTML = `<!DOCTYPE html>
       document.querySelectorAll('.profile-dropdown').forEach(function(d){d.style.display='none';});
       document.querySelectorAll('.profile-btn').forEach(function(b){b.setAttribute('aria-expanded','false');});
     });
+    // Active-only filter toggle
+    var filterBtn=document.getElementById('active-filter-btn');
+    var hostList=document.getElementById('host-access-list');
+    if(filterBtn&&hostList){
+      var activeOnly=localStorage.getItem('pam_active_only')==='1';
+      function applyFilter(){hostList.classList.toggle('active-only',activeOnly);filterBtn.classList.toggle('active',activeOnly);}
+      applyFilter();
+      filterBtn.addEventListener('click',function(){activeOnly=!activeOnly;localStorage.setItem('pam_active_only',activeOnly?'1':'0');applyFilter();});
+    }
   });
   var es = new EventSource('/api/events');
   es.addEventListener('update', function(e) {
@@ -529,10 +543,13 @@ const dashboardHTML = `<!DOCTYPE html>
     {{end}}
 
     {{if .HostAccess}}
-    <div class="section-label">{{call .T "sudo_access"}}</div>
-    <div class="list" role="list" aria-label="{{call .T "sudo_access"}}">
+    <div class="host-access-header">
+      <div class="section-label" style="margin-bottom:0">{{call .T "sudo_access"}}</div>
+      {{if .HasActiveSessions}}<button class="filter-btn" id="active-filter-btn" type="button">Active only</button>{{end}}
+    </div>
+    <div class="list" id="host-access-list" role="list" aria-label="{{call .T "sudo_access"}}">
       {{range .HostAccess}}
-      <div class="row" role="listitem">
+      <div class="row{{if .Active}} row-active{{end}}" data-active="{{.Active}}" role="listitem">
         <div class="row-info">
           <span class="row-sub"><span class="row-label">{{call $.T "host"}}:</span> <span class="row-value">{{.Hostname}}</span></span>
           {{if .Active}}
