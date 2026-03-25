@@ -351,6 +351,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .row-info { min-width: 0; flex: 1; }
     .row-host { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row-sub { color: var(--text-secondary); font-size: 0.813rem; display: block; }
+    .row-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); opacity: 0.7; }
     .row-code { color: var(--text-secondary); font-size: 0.813rem; font-family: monospace; display: block; }
     .banner { padding: 10px 16px; border-radius: 8px; margin-bottom: 12px; font-size: 0.875rem; font-weight: 600; text-align: left; }
     .banner-success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success); }
@@ -525,18 +526,18 @@ const dashboardHTML = `<!DOCTYPE html>
     {{end}}
 
     {{if .HostAccess}}
-    <div class="section-label">{{call .T "host_access"}}</div>
-    <div class="list" role="list" aria-label="{{call .T "host_access"}}">
+    <div class="section-label">{{call .T "sudo_access"}}</div>
+    <div class="list" role="list" aria-label="{{call .T "sudo_access"}}">
       {{range .HostAccess}}
       <div class="row" role="listitem">
         <div class="row-info">
-          <span class="row-host">{{.Hostname}}</span>
+          <span class="row-sub"><span class="row-label">{{call $.T "host"}}:</span> {{.Hostname}}</span>
           {{if .Active}}
-            <span class="row-sub">{{.Remaining}} {{call $.T "remaining"}}</span>
+            <span class="row-sub"><span class="row-label">{{call $.T "time_remaining"}}:</span> {{.Remaining}}</span>
           {{else}}
-            <span class="row-sub">{{call $.T "no_active_session"}}</span>
+            <span class="row-sub">{{call $.T "no_sudo_session"}}</span>
           {{end}}
-          {{if .SudoSummary}}<span class="row-sub" style="font-size:0.75rem;color:var(--text-secondary)">{{.SudoSummary}}</span>{{end}}
+          {{if .SudoSummary}}<span class="row-sub"><span class="row-label">{{call $.T "commands"}}:</span> {{.SudoSummary}}</span>{{end}}
         </div>
         {{if .Active}}
         <form method="POST" action="/api/sessions/extend" style="display:inline">
@@ -1321,7 +1322,7 @@ const adminPageHTML = `<!DOCTYPE html>
         <div class="host-row-users">
           {{range .HostUsers}}
           <div class="session-row">
-            <span class="{{if .Active}}row-active{{else}}row-sub{{end}}">{{.Username}}{{if .Active}} — {{.Remaining}} {{call $.T "remaining"}}{{else}} — {{call $.T "no_active_session"}}{{end}}</span>
+            <span class="{{if .Active}}row-active{{else}}row-sub{{end}}">{{.Username}}{{if .Active}} — {{call $.T "time_remaining"}}: {{.Remaining}}{{else}} — {{call $.T "no_sudo_session"}}{{end}}</span>
             <div class="session-actions">
               {{if .Active}}
               <form method="POST" action="/api/sessions/extend" style="display:inline">
