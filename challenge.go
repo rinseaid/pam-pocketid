@@ -721,6 +721,22 @@ func (s *ChallengeStore) ExtendGraceSession(username, hostname string) time.Dura
 	return s.gracePeriod
 }
 
+// ForceExtendGraceSession extends a grace session to the full grace period
+// unconditionally, bypassing the 75% guard. Used for admin-initiated extends.
+func (s *ChallengeStore) ForceExtendGraceSession(username, hostname string) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := graceKey(username, hostname)
+	if _, ok := s.lastApproval[key]; !ok {
+		return 0
+	}
+	newExpiry := time.Now().Add(s.gracePeriod)
+	s.lastApproval[key] = newExpiry
+	graceSessions.Set(float64(len(s.lastApproval)))
+	s.saveStateLocked()
+	return s.gracePeriod
+}
+
 // RevokeSession removes a grace session for a user on a specific hostname
 // and sets the revocation timestamp so that token caches are invalidated.
 func (s *ChallengeStore) RevokeSession(username, hostname string) {
