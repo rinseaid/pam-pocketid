@@ -381,7 +381,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .history-host { color: var(--text); font-size: 0.813rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .history-actor { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
     .seg-btn { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--primary); flex-shrink: 0; }
-    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 4px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
+    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 5px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
     .seg-btn button:last-child { border-right: none; }
     .seg-btn button:hover { background: var(--primary); color: var(--bg); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
@@ -990,7 +990,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .host-row-header-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
     .host-row-users { margin-top: 4px; margin-left: 12px; border-left: 2px solid var(--border); padding-left: 8px; }
     .seg-btn { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--primary); flex-shrink: 0; }
-    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 4px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
+    .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 5px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
     .seg-btn button:last-child { border-right: none; }
     .seg-btn button:hover { background: var(--primary); color: var(--bg); }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
@@ -1223,7 +1223,7 @@ const adminPageHTML = `<!DOCTYPE html>
             <div class="summary-line">
               {{if .SudoAllCmds}}
               <span class="summary-chip all">ALL commands</span>
-              {{else if eq (len .SudoCommands) 1}}
+              {{else if eqInt (len .SudoCommands) 1}}
               <span class="summary-chip single">{{index .SudoCommands 0}}</span>
               {{else}}
               <span class="summary-chip commands" onclick="togglePerms(this)">{{len .SudoCommands}} commands <span class="caret">▼</span></span>
@@ -1231,7 +1231,7 @@ const adminPageHTML = `<!DOCTYPE html>
               <span class="summary-sep">on</span>
               {{if .SudoAllHosts}}
               <span class="summary-chip all">ALL hosts</span>
-              {{else if eq (len .SudoHosts) 1}}
+              {{else if eqInt (len .SudoHosts) 1}}
               <span class="summary-chip single">{{index .SudoHosts 0}}</span>
               {{else}}
               <span class="summary-chip hosts" onclick="togglePerms(this)">{{len .SudoHosts}} hosts <span class="caret">▼</span></span>
