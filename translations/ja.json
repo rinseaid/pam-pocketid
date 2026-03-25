@@ -54,6 +54,7 @@
   "breakglass_escrowed": "緊急パスワード保管済み",
   "breakglass_expired": "緊急パスワード期限切れ",
   "ago": "前",
+  "until": "まで",
   "no_known_hosts": "既知のホストはまだありません。",
   "approved": "承認済み",
   "rejected": "拒否済み",

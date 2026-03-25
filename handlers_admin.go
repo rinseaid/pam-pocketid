@@ -350,28 +350,57 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve timezone for flash time formatting
+	flashTZ := "UTC"
+	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if _, err2 := time.LoadLocation(c.Value); err2 == nil {
+			flashTZ = c.Value
+		}
+	}
+	flashLoc, _ := time.LoadLocation(flashTZ)
+	formatFlashTime := func(unixStr string) string {
+		unix, err := strconv.ParseInt(unixStr, 10, 64)
+		if err != nil {
+			return ""
+		}
+		return time.Unix(unix, 0).In(flashLoc).Format("Jan 2, 3:04 PM")
+	}
+
 	// Parse flash messages from cookie
 	var flashes []string
 	if flashParam := getAndClearFlash(w, r); flashParam != "" {
 		for _, f := range strings.Split(flashParam, ",") {
-			parts := strings.SplitN(f, ":", 2)
-			if len(parts) == 2 {
-				switch parts[0] {
-				case "elevated":
+			parts := strings.SplitN(f, ":", 5)
+			if len(parts) < 2 {
+				continue
+			}
+			switch parts[0] {
+			case "elevated":
+				if len(parts) == 4 {
+					flashes = append(flashes, t("elevated_session_on")+" "+parts[1]+" ("+parts[2]+") "+t("until")+" "+formatFlashTime(parts[3]))
+				} else {
 					flashes = append(flashes, t("elevated_session_on")+" "+parts[1])
-				case "extended":
-					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
-				case "extended_all":
-					flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
-				case "revoked":
-					flashes = append(flashes, t("revoked_session_on")+" "+parts[1])
-				case "revoked_all":
-					flashes = append(flashes, fmt.Sprintf(t("revoked_n_sessions"), atoi(parts[1])))
-				case "rotated":
-					flashes = append(flashes, t("rotated_breakglass_on")+" "+parts[1])
-				case "rotated_all":
-					flashes = append(flashes, fmt.Sprintf(t("rotated_n_hosts"), atoi(parts[1])))
 				}
+			case "extended":
+				if len(parts) == 4 {
+					flashes = append(flashes, t("extended_session_on")+" "+parts[1]+" ("+parts[2]+") "+t("until")+" "+formatFlashTime(parts[3]))
+				} else {
+					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
+				}
+			case "extended_all":
+				flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
+			case "revoked":
+				if len(parts) == 3 {
+					flashes = append(flashes, t("revoked_session_on")+" "+parts[1]+" ("+parts[2]+")")
+				} else {
+					flashes = append(flashes, t("revoked_session_on")+" "+parts[1])
+				}
+			case "revoked_all":
+				flashes = append(flashes, fmt.Sprintf(t("revoked_n_sessions"), atoi(parts[1])))
+			case "rotated":
+				flashes = append(flashes, t("rotated_breakglass_on")+" "+parts[1])
+			case "rotated_all":
+				flashes = append(flashes, fmt.Sprintf(t("rotated_n_hosts"), atoi(parts[1])))
 			}
 		}
 	}

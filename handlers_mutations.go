@@ -70,7 +70,8 @@ func (s *Server) handleBulkApprove(w http.ResponseWriter, r *http.Request) {
 	s.broadcastSSE(challenge.Username, "challenge_resolved")
 
 	// Redirect back to the dashboard with flash cookie
-	setFlashCookie(w, "approved:"+hostname)
+	expiry := time.Now().Add(s.store.GraceRemaining(challenge.Username, challenge.Hostname))
+	setFlashCookie(w, fmt.Sprintf("approved:%s:%s:%d", hostname, challenge.Username, expiry.Unix()))
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
 }
 
@@ -274,7 +275,7 @@ func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
 	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
 		dest = "/"
 	}
-	setFlashCookie(w, "revoked:"+displayHostname)
+	setFlashCookie(w, fmt.Sprintf("revoked:%s:%s", displayHostname, sessionOwner))
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+dest, http.StatusSeeOther)
 }
 
@@ -332,28 +333,42 @@ func (s *Server) handleRevokeAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var sessions []GraceSession
 	targetUser := username
 	if s.getSessionRole(r) == "admin" {
 		if su := r.FormValue("session_username"); su != "" && validUsername.MatchString(su) {
 			targetUser = su
+			sessions = s.store.ActiveSessions(targetUser)
+		} else {
+			// Admin revoke-all without specific user: revoke all active sessions across all users
+			sessions = s.store.AllActiveSessions()
+			targetUser = ""
 		}
+	} else {
+		sessions = s.store.ActiveSessions(targetUser)
 	}
 
-	// Revoke all active sessions for the target user
-	sessions := s.store.ActiveSessions(targetUser)
+	// Revoke all collected sessions
+	notified := make(map[string]bool)
 	count := 0
 	for _, sess := range sessions {
+		sessUser := targetUser
+		if sessUser == "" {
+			sessUser = sess.Username
+		}
 		hostname := sess.Hostname
 		if hostname == "(unknown)" {
 			hostname = ""
 		}
-		s.store.RevokeSession(targetUser, hostname)
-		s.store.LogAction(targetUser, "revoked", sess.Hostname, "", username)
+		s.store.RevokeSession(sessUser, hostname)
+		s.store.LogAction(sessUser, "revoked", sess.Hostname, "", username)
+		log.Printf("BULK_REVOKE_ALL: user %q host %q from %s", sessUser, sess.Hostname, remoteAddr(r))
 		count++
-		log.Printf("BULK_REVOKE_ALL: user %q host %q from %s", targetUser, sess.Hostname, remoteAddr(r))
+		if !notified[sessUser] {
+			s.broadcastSSE(sessUser, "session_changed")
+			notified[sessUser] = true
+		}
 	}
-
-	s.broadcastSSE(targetUser, "session_changed")
 	setFlashCookie(w, fmt.Sprintf("revoked_all:%d", count))
 	dest := r.FormValue("from")
 	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
@@ -409,7 +424,8 @@ func (s *Server) handleExtendSession(w http.ResponseWriter, r *http.Request) {
 	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
 		dest = "/"
 	}
-	setFlashCookie(w, "extended:"+displayHostname)
+	expiry := time.Now().Add(remaining)
+	setFlashCookie(w, fmt.Sprintf("extended:%s:%s:%d", displayHostname, username, expiry.Unix()))
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+dest, http.StatusSeeOther)
 }
 
@@ -424,26 +440,37 @@ func (s *Server) handleExtendAll(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		return
 	}
+	var sessions []GraceSession
 	targetUser := username
 	if s.getSessionRole(r) == "admin" {
 		if su := r.FormValue("session_username"); su != "" && validUsername.MatchString(su) {
 			targetUser = su
+			sessions = s.store.ActiveSessions(targetUser)
+		} else {
+			// Admin extend-all without specific user: extend all active sessions across all users
+			sessions = s.store.AllActiveSessions()
+			targetUser = ""
 		}
+	} else {
+		sessions = s.store.ActiveSessions(targetUser)
 	}
-	sessions := s.store.ActiveSessions(targetUser)
 	count := 0
 	for _, sess := range sessions {
+		sessUser := targetUser
+		if sessUser == "" {
+			sessUser = sess.Username
+		}
 		hostname := sess.Hostname
 		if hostname == "(unknown)" {
 			hostname = ""
 		}
-		if s.store.ExtendGraceSession(targetUser, hostname) > 0 {
-			s.store.LogAction(targetUser, "extended", sess.Hostname, "", username)
+		if s.store.ExtendGraceSession(sessUser, hostname) > 0 {
+			s.store.LogAction(sessUser, "extended", sess.Hostname, "", username)
 			count++
+			s.broadcastSSE(sessUser, "session_changed")
 		}
 	}
-	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions for %q from %s", username, count, targetUser, remoteAddr(r))
-	s.broadcastSSE(targetUser, "session_changed")
+	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions from %s", username, count, remoteAddr(r))
 
 	setFlashCookie(w, fmt.Sprintf("extended_all:%d", count))
 	dest := r.FormValue("from")
@@ -608,7 +635,8 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 	log.Printf("ELEVATED: user %q host %q duration %s by %q from %s", targetUser, hostname, duration, username, remoteAddr(r))
 	s.broadcastSSE(targetUser, "session_changed")
 
-	setFlashCookie(w, "elevated:"+hostname)
+	expiry := time.Now().Add(duration)
+	setFlashCookie(w, fmt.Sprintf("elevated:%s:%s:%d", hostname, targetUser, expiry.Unix()))
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/admin/hosts", http.StatusSeeOther)
 }
 

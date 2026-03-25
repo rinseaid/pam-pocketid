@@ -54,6 +54,7 @@
   "breakglass_escrowed": "Break-glass password escrowed",
   "breakglass_expired": "Break-glass password expired",
   "ago": "ago",
+  "until": "until",
   "no_known_hosts": "No known hosts yet.",
   "approved": "Approved",
   "rejected": "Rejected",
