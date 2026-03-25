@@ -229,5 +229,7 @@
   "breakglass_random": "随机",
   "breakglass_passphrase": "密码短语",
   "breakglass_alphanumeric": "字母数字",
-  "sudo": "Sudo"
+  "sudo": "Sudo",
+  "group": "组",
+  "no_groups": "未配置任何组"
 }

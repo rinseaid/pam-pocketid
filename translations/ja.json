@@ -229,5 +229,7 @@
   "breakglass_random": "ランダム",
   "breakglass_passphrase": "パスフレーズ",
   "breakglass_alphanumeric": "英数字",
-  "sudo": "Sudo"
+  "sudo": "Sudo",
+  "group": "グループ",
+  "no_groups": "グループが設定されていません"
 }

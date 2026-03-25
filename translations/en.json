@@ -229,5 +229,7 @@
   "breakglass_random": "random",
   "breakglass_passphrase": "passphrase",
   "breakglass_alphanumeric": "alphanumeric",
-  "sudo": "Sudo"
+  "sudo": "Sudo",
+  "group": "Group",
+  "no_groups": "No groups configured"
 }

@@ -74,6 +74,41 @@ func NewPocketIDClient(baseURL, apiKey string) *PocketIDClient {
 	}
 }
 
+// GetGroups returns all PocketID groups with their members and custom claims.
+// Results are served from the shared 5-minute cache.
+func (c *PocketIDClient) GetGroups() ([]pocketIDGroup, error) {
+	if c == nil {
+		return nil, nil
+	}
+	c.mu.RLock()
+	if c.cachedData != nil && time.Now().Before(c.cacheExpiry) {
+		data := c.cachedData.Groups
+		c.mu.RUnlock()
+		return data, nil
+	}
+	c.mu.RUnlock()
+
+	c.fetchMu.Lock()
+	defer c.fetchMu.Unlock()
+	c.mu.RLock()
+	if c.cachedData != nil && time.Now().Before(c.cacheExpiry) {
+		data := c.cachedData.Groups
+		c.mu.RUnlock()
+		return data, nil
+	}
+	c.mu.RUnlock()
+
+	data, err := c.fetchGroupData()
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.cachedData = data
+	c.cacheExpiry = time.Now().Add(c.cacheTTL)
+	c.mu.Unlock()
+	return data.Groups, nil
+}
+
 func (c *PocketIDClient) GetUserPermissions() (map[string][]pocketIDGroupInfo, error) {
 	if c == nil {
 		return nil, nil
@@ -155,6 +190,7 @@ func (c *PocketIDClient) fetchGroupData() (*pocketIDData, error) {
 
 	// Step 2: Fetch each group's details (members + custom claims)
 	userGroups := make(map[string][]pocketIDGroupInfo)
+	var groups []pocketIDGroup
 
 	for _, g := range allGroups {
 		url := fmt.Sprintf("%s/api/user-groups/%s", c.baseURL, g.ID)
@@ -188,9 +224,11 @@ func (c *PocketIDClient) fetchGroupData() (*pocketIDData, error) {
 		for _, user := range group.Users {
 			userGroups[user.Username] = append(userGroups[user.Username], info)
 		}
+
+		groups = append(groups, group)
 	}
 
-	return &pocketIDData{UserGroups: userGroups}, nil
+	return &pocketIDData{Groups: groups, UserGroups: userGroups}, nil
 }
 
 func (c *PocketIDClient) apiGet(url string) ([]byte, error) {

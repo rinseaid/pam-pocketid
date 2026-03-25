@@ -230,10 +230,6 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		LastActive     string
 		LastActiveAgo  string
 		Groups         []pocketIDGroupInfo
-		SudoCommands   []string
-		SudoHosts      []string
-		SudoAllCmds    bool
-		SudoAllHosts   bool
 	}
 
 	now := time.Now()
@@ -271,33 +267,6 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		uv.Groups = sudoGroups
-		// Build deduplicated commands and hosts lists for click-to-expand UI
-		seenCmds := make(map[string]bool)
-		seenHosts := make(map[string]bool)
-		for _, g := range uv.Groups {
-			// Commands
-			if g.SudoCommands == "ALL" {
-				uv.SudoAllCmds = true
-			} else if g.SudoCommands != "" {
-				for _, c := range strings.Split(g.SudoCommands, ",") {
-					if cmd := strings.TrimSpace(c); cmd != "" && !seenCmds[cmd] {
-						uv.SudoCommands = append(uv.SudoCommands, cmd)
-						seenCmds[cmd] = true
-					}
-				}
-			}
-			// Hosts
-			if g.SudoHosts == "" || g.SudoHosts == "ALL" {
-				uv.SudoAllHosts = true
-			} else {
-				for _, p := range strings.Split(g.SudoHosts, ",") {
-					if h := strings.TrimSpace(p); h != "" && !seenHosts[h] {
-						uv.SudoHosts = append(uv.SudoHosts, h)
-						seenHosts[h] = true
-					}
-				}
-			}
-		}
 		// Skip users with no sudo groups AND no pam-pocketid activity
 		hasPamActivity := uv.ActiveSessions > 0 || uv.LastActive != ""
 		if len(uv.Groups) == 0 && !hasPamActivity {
@@ -331,6 +300,116 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		"Users":      userViews,
 		"CSRFToken":  csrfToken,
 		"CSRFTs":     csrfTs,
+	}); err != nil {
+		log.Printf("ERROR: template execution: %v", err)
+	}
+}
+
+// handleAdminGroups renders the admin groups page at /admin/groups.
+// GET /admin/groups
+func (s *Server) handleAdminGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if setLanguageCookie(w, r) {
+		return
+	}
+	lang := detectLanguage(r)
+	t := T(lang)
+
+	username := s.getSessionUser(r)
+	if username == "" {
+		setFlashCookie(w, "expired:")
+		http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/", http.StatusSeeOther)
+		return
+	}
+	s.setSessionCookie(w, username, s.getSessionRole(r))
+	if s.getSessionRole(r) != "admin" {
+		revokeErrorPage(w, r, http.StatusForbidden, "not_authorized", "not_authorized_message")
+		return
+	}
+
+	type groupView struct {
+		Name         string
+		SudoCommands string
+		SudoHosts    string
+		SudoRunAs    string
+		Members      []string
+		AllCmds      bool
+		AllHosts     bool
+		CmdList      []string
+		HostList     []string
+	}
+
+	allGroups, err := s.pocketIDClient.GetGroups()
+	if err != nil {
+		log.Printf("ERROR: fetching groups: %v", err)
+	}
+
+	var groups []groupView
+	for _, g := range allGroups {
+		claims := make(map[string]string)
+		for _, cl := range g.CustomClaims {
+			claims[cl.Key] = cl.Value
+		}
+		cmds := claims["sudoCommands"]
+		hosts := claims["sudoHosts"]
+		// Only include groups with sudo claims
+		if cmds == "" && hosts == "" {
+			continue
+		}
+		gv := groupView{
+			Name:         g.Name,
+			SudoCommands: cmds,
+			SudoHosts:    hosts,
+			SudoRunAs:    claims["sudoRunAsUser"],
+		}
+		gv.AllCmds = cmds == "ALL"
+		gv.AllHosts = hosts == "" || hosts == "ALL"
+		if !gv.AllCmds {
+			for _, c := range strings.Split(cmds, ",") {
+				if c := strings.TrimSpace(c); c != "" {
+					gv.CmdList = append(gv.CmdList, c)
+				}
+			}
+		}
+		if !gv.AllHosts {
+			for _, h := range strings.Split(hosts, ",") {
+				if h := strings.TrimSpace(h); h != "" {
+					gv.HostList = append(gv.HostList, h)
+				}
+			}
+		}
+		for _, u := range g.Users {
+			gv.Members = append(gv.Members, u.Username)
+		}
+		sort.Strings(gv.Members)
+		groups = append(groups, gv)
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Name < groups[j].Name })
+
+	now := time.Now()
+	csrfTs := fmt.Sprintf("%d", now.Unix())
+	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := adminTmpl.Execute(w, map[string]interface{}{
+		"Username":   username,
+		"Initial":    strings.ToUpper(username[:1]),
+		"Avatar":     getAvatar(r),
+		"AdminTab":   "groups",
+		"Groups":     groups,
+		"Flashes":    []string{},
+		"CSRFToken":  csrfToken,
+		"CSRFTs":     csrfTs,
+		"ActivePage": "admin",
+		"Theme":      getTheme(r),
+		"CSPNonce":   r.Context().Value("csp-nonce"),
+		"T":          t,
+		"Lang":       lang,
+		"Languages":  supportedLanguages,
+		"IsAdmin":    true,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}

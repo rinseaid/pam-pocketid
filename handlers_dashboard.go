@@ -125,7 +125,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 					flashes = append(flashes, t("extended_session_on")+" "+parts[1])
 				}
 			case "extended_all":
-				flashes = append(flashes, fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1])))
+				msg := fmt.Sprintf(t("extended_n_sessions"), atoi(parts[1]))
+				if len(parts) >= 3 {
+					msg += " " + t("until") + " " + formatFlashTime(parts[2])
+				}
+				flashes = append(flashes, msg)
 			case "expired":
 				flashes = append(flashes, t("session_expired_sign_in"))
 			}

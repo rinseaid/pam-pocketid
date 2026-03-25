@@ -229,5 +229,7 @@
   "breakglass_random": "무작위",
   "breakglass_passphrase": "패스프레이즈",
   "breakglass_alphanumeric": "영숫자",
-  "sudo": "Sudo"
+  "sudo": "Sudo",
+  "group": "그룹",
+  "no_groups": "그룹이 구성되지 않았습니다"
 }

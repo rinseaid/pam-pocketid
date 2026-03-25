@@ -1070,7 +1070,8 @@ const adminPageHTML = `<!DOCTYPE html>
     .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
     .user-name { font-weight: 600; }
     .user-groups { margin-bottom: 4px; }
-    .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; }
+    .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; text-decoration: none; }
+    .group-badge-link:hover { background: var(--primary); color: #fff; }
     .perms-cell { min-width: 140px; }
     .col-last-active { white-space: nowrap; }
     .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
@@ -1189,6 +1190,7 @@ const adminPageHTML = `<!DOCTYPE html>
 
     <div class="admin-tabs">
       <a href="/admin/users" class="{{if eq .AdminTab "users"}}active{{end}}">{{call .T "users"}}</a>
+      <a href="/admin/groups" class="{{if eq .AdminTab "groups"}}active{{end}}">{{call .T "groups"}}</a>
       <a href="/admin/hosts" class="{{if eq .AdminTab "hosts"}}active{{end}}">{{call .T "hosts"}}</a>
       <a href="/admin/info" class="{{if eq .AdminTab "info"}}active{{end}}">{{call .T "info"}}</a>
     </div>
@@ -1233,8 +1235,8 @@ const adminPageHTML = `<!DOCTYPE html>
     <table class="users-table">
       <thead>
         <tr>
-          <th scope="col" style="width:14%">{{call .T "user"}}</th>
-          <th scope="col">{{call .T "permissions"}}</th>
+          <th scope="col" style="width:18%">{{call .T "user"}}</th>
+          <th scope="col">{{call .T "groups"}}</th>
           <th scope="col" style="width:9%">{{call .T "active_sessions_count"}}</th>
           <th scope="col" class="col-last-active" style="width:16%">{{call .T "last_active"}}</th>
           <th scope="col" style="width:22%"></th>
@@ -1243,41 +1245,8 @@ const adminPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .Users}}
         <tr>
-          <td>
-            <span class="user-name">{{.Username}}</span>
-            {{if .Groups}}<div class="user-groups">{{range .Groups}}<span class="group-badge">{{.Name}}</span>{{end}}</div>{{end}}
-          </td>
-          <td class="perms-cell">
-            {{if or .SudoAllCmds .SudoCommands}}
-            <div class="summary-line">
-              {{if .SudoAllCmds}}
-              <span class="summary-chip all">{{call $.T "all_commands"}}</span>
-              {{else if eqInt (len .SudoCommands) 1}}
-              <span class="summary-chip single">{{index .SudoCommands 0}}</span>
-              {{else}}
-              <span class="summary-chip commands expandable">{{len .SudoCommands}} {{call $.T "commands"}} <span class="caret">▼</span></span>
-              {{end}}
-              <span class="summary-sep">{{call $.T "on"}}</span>
-              {{if .SudoAllHosts}}
-              <span class="summary-chip all">{{call $.T "all_hosts"}}</span>
-              {{else if eqInt (len .SudoHosts) 1}}
-              <span class="summary-chip single">{{index .SudoHosts 0}}</span>
-              {{else}}
-              <span class="summary-chip hosts expandable">{{len .SudoHosts}} {{call $.T "hosts"}} <span class="caret">▼</span></span>
-              {{end}}
-            </div>
-            {{if and (not .SudoAllCmds) (gt (len .SudoCommands) 1)}}
-            <div class="expanded-list" data-type="cmd">
-              {{range .SudoCommands}}<span class="pill cmd">{{.}}</span>{{end}}
-            </div>
-            {{end}}
-            {{if and (not .SudoAllHosts) (gt (len .SudoHosts) 1)}}
-            <div class="expanded-list" data-type="host">
-              {{range .SudoHosts}}<span class="pill host">{{.}}</span>{{end}}
-            </div>
-            {{end}}
-            {{end}}
-          </td>
+          <td><span class="user-name">{{.Username}}</span></td>
+          <td>{{if .Groups}}{{range .Groups}}<a href="/admin/groups#group-{{.Name}}" class="group-badge group-badge-link">{{.Name}}</a> {{end}}{{else}}—{{end}}</td>
           <td>{{.ActiveSessions}}</td>
           <td class="col-last-active">{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
           <td class="user-actions">
@@ -1307,6 +1276,42 @@ const adminPageHTML = `<!DOCTYPE html>
     </div>
     {{else}}
     <p class="empty-state">{{call .T "no_users"}}</p>
+    {{end}}
+
+    {{else if eq .AdminTab "groups"}}
+    {{if .Groups}}
+    <div class="groups-table-wrap">
+    <table class="users-table" style="table-layout:auto">
+      <thead>
+        <tr>
+          <th scope="col" style="width:18%">{{call .T "group"}}</th>
+          <th scope="col">{{call .T "commands"}}</th>
+          <th scope="col">{{call .T "hosts"}}</th>
+          <th scope="col" style="width:12%">Run as</th>
+          <th scope="col">Members</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Groups}}
+        <tr id="group-{{.Name}}">
+          <td><span class="user-name">{{.Name}}</span></td>
+          <td>
+            {{if .AllCmds}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_commands"}}</span>
+            {{else}}{{range .CmdList}}<span class="pill cmd" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
+          </td>
+          <td>
+            {{if .AllHosts}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_hosts"}}</span>
+            {{else}}{{range .HostList}}<span class="pill host" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
+          </td>
+          <td>{{if .SudoRunAs}}{{.SudoRunAs}}{{else}}—{{end}}</td>
+          <td>{{range .Members}}<span class="group-badge" style="margin-bottom:2px">{{.}}</span> {{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <p class="empty-state">{{call .T "no_groups"}}</p>
     {{end}}
 
     {{else if eq .AdminTab "hosts"}}

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Admin Users - Option 4+3 Blend</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; padding: 32px; }
+  .card { background: #1a1f2e; border-radius: 12px; padding: 24px; max-width: 960px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  th { padding: 8px 12px; border-bottom: 2px solid #2d3748; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; text-align: left; }
+  td { padding: 10px 12px; border-bottom: 1px solid #1e2535; vertical-align: top; }
+  .user-name { font-weight: 600; }
+  .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: #1e3a5f; color: #94a3b8; white-space: nowrap; }
+  .btn { display: inline-block; padding: 5px 12px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; border: 1px solid; cursor: pointer; white-space: nowrap; }
+  .btn-default { border-color: #2d3748; color: #94a3b8; }
+  .btn-danger { border-color: #f87171; color: #f87171; }
+  .btn-group { display: flex; gap: 4px; align-items: center; }
+
+  /* Summary chips */
+  .perms-cell { min-width: 180px; }
+  .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .summary-chip {
+    font-size: 0.65rem; padding: 2px 8px; border-radius: 8px;
+    cursor: pointer; white-space: nowrap; user-select: none;
+    display: inline-flex; align-items: center; gap: 4px;
+    transition: opacity 0.15s;
+  }
+  .summary-chip:hover { opacity: 0.8; }
+  .summary-chip.commands { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
+  .summary-chip.hosts    { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
+  .summary-chip.all      { background: rgba(99,102,241,0.12); color: #818cf8; border: 1px solid rgba(99,102,241,0.25); cursor: default; }
+  .summary-chip.single   { background: #1e2535; color: #94a3b8; border: 1px solid #2d3748; cursor: default; }
+  .caret { font-size: 0.55rem; transition: transform 0.2s; display: inline-block; }
+  .summary-chip.open .caret { transform: rotate(180deg); }
+  .sep { font-size: 0.65rem; color: #4b5563; }
+
+  /* Expanded pill lists */
+  .expanded-list { display: none; margin-top: 6px; }
+  .expanded-list.visible { display: flex; flex-wrap: wrap; gap: 3px; }
+  .pill {
+    display: inline-block; font-size: 0.65rem; padding: 1px 6px;
+    border-radius: 4px; white-space: nowrap;
+  }
+  .pill.cmd  { background: rgba(59,130,246,0.1); color: #93c5fd; font-family: monospace; }
+  .pill.host { background: rgba(16,185,129,0.1); color: #6ee7b7; }
+</style>
+</head>
+<body>
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:12%">User</th>
+        <th style="width:14%">Group</th>
+        <th>Permissions</th>
+        <th style="width:9%">Sessions</th>
+        <th style="width:11%">Last active</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+
+      <!-- bert: many commands, many hosts -->
+      <tr>
+        <td><span class="user-name">bert</span></td>
+        <td><span class="group-badge">sudo-test</span></td>
+        <td class="perms-cell">
+          <div class="summary-line">
+            <span class="summary-chip commands" onclick="toggle(this)">11 commands <span class="caret">▼</span></span>
+            <span class="sep">on</span>
+            <span class="summary-chip hosts" onclick="toggle(this)">13 hosts <span class="caret">▼</span></span>
+          </div>
+          <div class="expanded-list" data-type="cmd">
+            <span class="pill cmd">/usr/bin/ls</span><span class="pill cmd">parted</span><span class="pill cmd">ping</span><span class="pill cmd">/usr/bin/cp</span><span class="pill cmd">/usr/bin/mv</span><span class="pill cmd">iftop</span><span class="pill cmd">top</span><span class="pill cmd">/usr/bin/man</span><span class="pill cmd">apt-get</span><span class="pill cmd">apt</span><span class="pill cmd">gparted</span>
+          </div>
+          <div class="expanded-list" data-type="host">
+            <span class="pill host">plex</span><span class="pill host">docker</span><span class="pill host">testhost1</span><span class="pill host">testhost2</span><span class="pill host">testhost3</span><span class="pill host">testhost4</span><span class="pill host">testhost5</span><span class="pill host">testhost6</span><span class="pill host">testhost7</span><span class="pill host">testhost8</span><span class="pill host">testhost9</span><span class="pill host">testhost10</span><span class="pill host">testhost11</span>
+          </div>
+        </td>
+        <td>0</td>
+        <td>46m ago</td>
+        <td><div class="btn-group"><a class="btn btn-default">History</a><a class="btn btn-danger">Remove</a></div></td>
+      </tr>
+
+      <!-- rinseaid: ALL -->
+      <tr>
+        <td><span class="user-name">rinseaid</span></td>
+        <td><span class="group-badge">sudo-all</span></td>
+        <td class="perms-cell">
+          <div class="summary-line">
+            <span class="summary-chip all">ALL commands</span>
+            <span class="sep">on</span>
+            <span class="summary-chip all">ALL hosts</span>
+          </div>
+        </td>
+        <td>2</td>
+        <td>16m ago</td>
+        <td><div class="btn-group"><a class="btn btn-danger">Revoke all</a><a class="btn btn-default">History</a><a class="btn btn-danger">Remove</a></div></td>
+      </tr>
+
+      <!-- tugboat: several commands, several hosts -->
+      <tr>
+        <td><span class="user-name">tugboat</span></td>
+        <td><span class="group-badge">sudo-test</span></td>
+        <td class="perms-cell">
+          <div class="summary-line">
+            <span class="summary-chip commands" onclick="toggle(this)">6 commands <span class="caret">▼</span></span>
+            <span class="sep">on</span>
+            <span class="summary-chip hosts" onclick="toggle(this)">5 hosts <span class="caret">▼</span></span>
+          </div>
+          <div class="expanded-list" data-type="cmd">
+            <span class="pill cmd">/usr/bin/ls</span><span class="pill cmd">parted</span><span class="pill cmd">ping</span><span class="pill cmd">/usr/bin/cp</span><span class="pill cmd">apt-get</span><span class="pill cmd">gparted</span>
+          </div>
+          <div class="expanded-list" data-type="host">
+            <span class="pill host">plex</span><span class="pill host">docker</span><span class="pill host">testhost1</span><span class="pill host">testhost2</span><span class="pill host">testhost3</span>
+          </div>
+        </td>
+        <td>1</td>
+        <td>48m ago</td>
+        <td><div class="btn-group"><a class="btn btn-danger">Revoke all</a><a class="btn btn-default">History</a><a class="btn btn-danger">Remove</a></div></td>
+      </tr>
+
+      <!-- single command, single host — shown inline, no expand -->
+      <tr>
+        <td><span class="user-name">alice</span></td>
+        <td><span class="group-badge">sudo-limited</span></td>
+        <td class="perms-cell">
+          <div class="summary-line">
+            <span class="summary-chip single">/usr/bin/ls</span>
+            <span class="sep">on</span>
+            <span class="summary-chip single">plex</span>
+          </div>
+        </td>
+        <td>0</td>
+        <td>2h ago</td>
+        <td><div class="btn-group"><a class="btn btn-default">History</a><a class="btn btn-danger">Remove</a></div></td>
+      </tr>
+
+    </tbody>
+  </table>
+</div>
+
+<script>
+function toggle(chip) {
+  var cell = chip.closest('.perms-cell');
+  var isCmds = chip.classList.contains('commands');
+  var listType = isCmds ? 'cmd' : 'host';
+  var list = cell.querySelector('.expanded-list[data-type="' + listType + '"]');
+  var open = list.classList.contains('visible');
+  list.classList.toggle('visible', !open);
+  chip.classList.toggle('open', !open);
+}
+</script>
+</body>
+</html>

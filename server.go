@@ -124,6 +124,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.mux.HandleFunc("/admin", s.handleAdmin)
 	s.mux.HandleFunc("/admin/info", s.handleAdminInfo)
 	s.mux.HandleFunc("/admin/users", s.handleAdminUsers)
+	s.mux.HandleFunc("/admin/groups", s.handleAdminGroups)
 	s.mux.HandleFunc("/admin/hosts", s.handleAdminHosts)
 s.mux.HandleFunc("/api/users/remove", s.handleRemoveUser)
 	// Redirect old URLs for bookmarks

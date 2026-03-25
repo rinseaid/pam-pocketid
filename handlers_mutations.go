@@ -462,7 +462,8 @@ func (s *Server) handleExtendAll(w http.ResponseWriter, r *http.Request) {
 	s.broadcastSSE(targetUser, "session_changed")
 	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions for %q from %s", username, count, targetUser, remoteAddr(r))
 
-	setFlashCookie(w, fmt.Sprintf("extended_all:%d", count))
+	expiry := time.Now().Add(s.cfg.GracePeriod)
+	setFlashCookie(w, fmt.Sprintf("extended_all:%d:%d", count, expiry.Unix()))
 	dest := r.FormValue("from")
 	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
 		dest = "/"
