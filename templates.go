@@ -371,17 +371,14 @@ const dashboardHTML = `<!DOCTYPE html>
     .bulk-btn.success:hover { background: var(--success-bg); }
     .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
     .bulk-btn.danger:hover { background: var(--danger-bg); }
-    .history-entry { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.813rem; color: var(--text-secondary); text-align: left; display: flex; gap: 8px; }
-    .history-action { font-weight: 600; }
-    .history-action.approved { color: var(--success); }
-    .history-action.revoked { color: var(--danger); }
-    .history-action.auto_approved { color: var(--primary); }
-    .history-action.rejected { color: var(--danger); }
-    .history-action.elevated { color: var(--primary); }
-    .history-action.extended { color: var(--primary); }
-    .history-action.rotated_breakglass { color: var(--text-secondary); }
-    .history-actor { font-size: 0.7rem; color: var(--text-secondary); font-weight: 400; }
-    .history-time { flex-shrink: 0; }
+    .history-entry { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .history-action { font-size: 0.69rem; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; letter-spacing: 0.03em; text-transform: uppercase; }
+    .history-action.approved { background: rgba(72,199,142,0.15); color: var(--success); }
+    .history-action.auto_approved, .history-action.extended, .history-action.elevated { background: var(--info-bg); color: var(--primary); }
+    .history-action.revoked, .history-action.rejected { background: var(--danger-bg); color: var(--danger); }
+    .history-action.rotated_breakglass { border: 1px solid var(--border); color: var(--text-secondary); }
+    .history-host { color: var(--text); font-size: 0.813rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .history-meta { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
     .empty-state { color: var(--text-secondary); margin: 16px 0; font-size: 0.875rem; }
     .view-all { display: block; text-align: left; margin-top: 8px; font-size: 0.813rem; color: var(--primary); text-decoration: none; font-weight: 600; }
     .view-all:hover { text-decoration: underline; }
@@ -582,10 +579,10 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="list">
       {{range .History}}
       <div class="history-entry">
-        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>{{if .Actor}}<span class="history-actor">by {{.Actor}}</span>{{end}}{{if $.IsAdmin}}<span class="history-actor">{{.Username}}</span>{{end}}
-        <span>{{.Hostname}}</span>
+        <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>
+        <span class="history-host">{{.Hostname}}</span>
         {{if .Code}}<span class="row-code">{{.Code}}</span>{{end}}
-        <span class="history-time">{{timeAgo .Timestamp}}</span>
+        <span class="history-meta">{{if .Actor}}{{call $.T "by"}} {{.Actor}} · {{end}}{{timeAgo .Timestamp}}</span>
       </div>
       {{end}}
     </div>
@@ -791,7 +788,7 @@ const historyPageHTML = `<!DOCTYPE html>
     {{if .Timeline}}
     <div class="timeline">
       <div class="timeline-bars">
-        {{range .Timeline}}<a href="/history?hours_ago={{.HoursAgo}}&per_page={{$.PerPage}}" class="timeline-bar{{if .IsNow}} now{{end}}{{if eqInt .HoursAgo $.ActiveHoursAgo}} timeline-active{{end}}" style="height:{{.Height}}px" title="{{.Details}}" aria-label="{{.Details}}"></a>{{end}}
+        {{range .Timeline}}<a href="/history?hours_ago={{.HoursAgo}}&per_page={{$.PerPage}}&user={{$.UserFilter}}" class="timeline-bar{{if .IsNow}} now{{end}}{{if eqInt .HoursAgo $.ActiveHoursAgo}} timeline-active{{end}}" style="height:{{.Height}}px" title="{{.Details}}" aria-label="{{.Details}}"></a>{{end}}
       </div>
       <div class="timeline-label">24h</div>
     </div>
@@ -800,13 +797,14 @@ const historyPageHTML = `<!DOCTYPE html>
     {{if .HoursAgo}}
     <div class="time-filter-banner">
       <span>{{call .T "filtered_to_one_hour"}}</span>
-      <a href="/history?q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}" class="time-filter-clear">{{call .T "clear_time_filter"}}</a>
+      <a href="/history?q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}" class="time-filter-clear">{{call .T "clear_time_filter"}}</a>
     </div>
     {{end}}
 
     <form method="GET" action="/history" class="search-bar">
       <input type="hidden" name="action" value="{{.ActionFilter}}">
       <input type="hidden" name="hostname" value="{{.HostFilter}}">
+      {{if .IsAdmin}}<input type="hidden" name="user" value="{{.UserFilter}}">{{end}}
       <input type="hidden" name="sort" value="{{.Sort}}">
       <input type="hidden" name="order" value="{{.Order}}">
       <input type="hidden" name="per_page" value="{{.PerPage}}">
@@ -828,6 +826,10 @@ const historyPageHTML = `<!DOCTYPE html>
           <option value="">{{call .T "host_all"}}</option>
           {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
         </select>
+        {{if .IsAdmin}}<select name="user" class="col-filter-select" aria-label="{{call .T "aria_filter_user"}}">
+          <option value="">{{call .T "user_all"}}</option>
+          {{range .UserOptions}}<option value="{{.}}" {{if eq . $.UserFilter}}selected{{end}}>{{.}}</option>{{end}}
+        </select>{{end}}
       </form>
     </div>
 
@@ -835,9 +837,10 @@ const historyPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
-          <th scope="col" class="col-time">{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col" class="col-time">{{call .T "time"}} <a href="/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th scope="col" class="col-action"><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
+  <input type="hidden" name="user" value="{{.UserFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="sort" value="{{.Sort}}">
   <input type="hidden" name="order" value="{{.Order}}">
@@ -846,10 +849,22 @@ const historyPageHTML = `<!DOCTYPE html>
     <option value="">{{call .T "action_all"}}</option>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
-</form><a href="/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}" title="{{call .T "sort_by_action"}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          {{if $.IsAdmin}}<th scope="col" class="col-user">{{call .T "user"}}</th>{{end}}
+</form><a href="/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}" title="{{call .T "sort_by_action"}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          {{if $.IsAdmin}}<th scope="col" class="col-user"><form method="GET" action="/history" class="col-filter-form">
+  <input type="hidden" name="action" value="{{.ActionFilter}}">
+  <input type="hidden" name="hostname" value="{{.HostFilter}}">
+  <input type="hidden" name="q" value="{{.Query}}">
+  <input type="hidden" name="sort" value="{{.Sort}}">
+  <input type="hidden" name="order" value="{{.Order}}">
+  <input type="hidden" name="per_page" value="{{.PerPage}}">
+  <select name="user" class="col-filter-select" aria-label="{{call .T "aria_filter_user"}}">
+    <option value="">{{call .T "user_all"}}</option>
+    {{range .UserOptions}}<option value="{{.}}" {{if eq . $.UserFilter}}selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</form><a href="/history?sort=user&order={{if eq .Sort "user"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "user"}} active{{end}}">{{if and (eq .Sort "user") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>{{end}}
           <th scope="col" class="col-host"><form method="GET" action="/history" class="col-filter-form">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
+  <input type="hidden" name="user" value="{{.UserFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="sort" value="{{.Sort}}">
   <input type="hidden" name="order" value="{{.Order}}">
@@ -858,8 +873,8 @@ const historyPageHTML = `<!DOCTYPE html>
     <option value="">{{call .T "host_all"}}</option>
     {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
-</form><a href="/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}" title="{{call .T "sort_by_host"}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th scope="col" class="col-code">{{call .T "code"}} <a href="/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}" title="{{call .T "sort_by_code"}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+</form><a href="/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}" title="{{call .T "sort_by_host"}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col" class="col-code">{{call .T "code"}} <a href="/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}" title="{{call .T "sort_by_code"}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
         </tr>
       </thead>
       <tbody>
@@ -878,12 +893,13 @@ const historyPageHTML = `<!DOCTYPE html>
       </tbody>
     </table>
     <div class="pagination">
-      {{if .HasPrev}}<a href="/history?page={{sub .Page 1}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}">&#8592; {{call .T "previous"}}</a>{{end}}
+      {{if .HasPrev}}<a href="/history?page={{sub .Page 1}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}">&#8592; {{call .T "previous"}}</a>{{end}}
       <span class="page-info">{{call .T "page"}} {{.Page}} {{call .T "of"}} {{.TotalPages}}</span>
-      {{if .HasNext}}<a href="/history?page={{add .Page 1}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}">{{call .T "next"}} &#8594;</a>{{end}}
+      {{if .HasNext}}<a href="/history?page={{add .Page 1}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&sort={{.Sort}}&order={{.Order}}&per_page={{.PerPage}}">{{call .T "next"}} &#8594;</a>{{end}}
       <form method="GET" action="/history" class="page-size-form">
         <input type="hidden" name="action" value="{{.ActionFilter}}">
         <input type="hidden" name="hostname" value="{{.HostFilter}}">
+        <input type="hidden" name="user" value="{{.UserFilter}}">
         <input type="hidden" name="sort" value="{{.Sort}}">
         <input type="hidden" name="order" value="{{.Order}}">
         <input type="hidden" name="q" value="{{.Query}}">
@@ -1005,7 +1021,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .user-name { font-weight: 600; }
     .user-groups { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 2px; }
     .group-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; }
-    .sudo-detail { font-size: 0.65rem; color: var(--text-secondary); margin-top: 2px; }
+    .sudo-detail { font-size: 0.65rem; color: var(--text-secondary); margin-top: 2px; flex-basis: 100%; }
     .user-actions { white-space: nowrap; text-align: right; }
     .user-actions form { display: inline; }
     @media (max-width: 600px) {
@@ -1096,7 +1112,6 @@ const adminPageHTML = `<!DOCTYPE html>
     </nav>
 
     <div class="admin-tabs">
-      <a href="/admin/history" class="{{if eq .AdminTab "history"}}active{{end}}">{{call .T "history"}}</a>
       <a href="/admin/users" class="{{if eq .AdminTab "users"}}active{{end}}">{{call .T "users"}}</a>
       <a href="/admin/hosts" class="{{if eq .AdminTab "hosts"}}active{{end}}">{{call .T "hosts"}}</a>
       <a href="/admin/info" class="{{if eq .AdminTab "info"}}active{{end}}">{{call .T "info"}}</a>
@@ -1163,7 +1178,6 @@ const adminPageHTML = `<!DOCTYPE html>
           <td>{{.ActiveSessions}}</td>
           <td>{{if .LastActiveAgo}}{{.LastActiveAgo}}{{else}}—{{end}}</td>
           <td class="user-actions">
-            <a href="/admin/history?user={{.Username}}" class="host-btn" style="margin-right:4px">{{call $.T "history"}}</a>
             {{if gt .ActiveSessions 0}}
             <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
               <input type="hidden" name="username" value="{{$.Username}}">
@@ -1174,6 +1188,7 @@ const adminPageHTML = `<!DOCTYPE html>
               <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_all_user") .Username}}')">{{call $.T "revoke_all"}}</button>
             </form>
             {{end}}
+            <a href="/history?user={{.Username}}" class="host-btn" style="margin-right:4px">{{call $.T "history"}}</a>
             <form method="POST" action="/api/users/remove" style="display:inline">
               <input type="hidden" name="target_user" value="{{.Username}}">
               <input type="hidden" name="username" value="{{$.Username}}">

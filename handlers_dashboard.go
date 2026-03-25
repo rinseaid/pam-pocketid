@@ -516,16 +516,23 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	}
 	tzLoc, _ := time.LoadLocation(tzName)
 
+	isAdmin := s.getSessionRole(r) == "admin"
+
 	query := r.URL.Query().Get("q")
 	actionFilter := r.URL.Query().Get("action")
 	hostFilter := r.URL.Query().Get("hostname")
+	userFilter := ""
+	if isAdmin {
+		userFilter = r.URL.Query().Get("user")
+	}
 
 	// Parse sort and order params
 	sortField := r.URL.Query().Get("sort")
-	switch sortField {
-	case "timestamp", "action", "hostname", "code":
-		// valid
-	default:
+	validSort := map[string]bool{"timestamp": true, "action": true, "hostname": true, "code": true}
+	if isAdmin {
+		validSort["user"] = true
+	}
+	if !validSort[sortField] {
 		sortField = "timestamp"
 	}
 	sortOrder := r.URL.Query().Get("order")
@@ -547,28 +554,34 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	isAdmin := s.getSessionRole(r) == "admin"
-
-	// History tab always shows current user's own history (all-users is at /admin/history).
+	// Admins see all users' history; others see only their own.
 	var allHistory []ActionLogEntryWithUser
-	for _, e := range s.store.ActionHistory(username) {
-		allHistory = append(allHistory, ActionLogEntryWithUser{
-			Username:  username,
-			Actor:     e.Actor,
-			Timestamp: e.Timestamp,
-			Action:    e.Action,
-			Hostname:  e.Hostname,
-			Code:      e.Code,
-		})
+	if isAdmin {
+		allHistory = s.store.AllActionHistoryWithUsers()
+	} else {
+		for _, e := range s.store.ActionHistory(username) {
+			allHistory = append(allHistory, ActionLogEntryWithUser{
+				Username:  username,
+				Actor:     e.Actor,
+				Timestamp: e.Timestamp,
+				Action:    e.Action,
+				Hostname:  e.Hostname,
+				Code:      e.Code,
+			})
+		}
 	}
 
-	// Collect unique action types and hostnames from the FULL unfiltered history
+	// Collect unique action types, hostnames, and (for admins) users from FULL unfiltered history
 	actionSet := make(map[string]bool)
 	hostSet := make(map[string]bool)
+	userSet := make(map[string]bool)
 	for _, e := range allHistory {
 		actionSet[e.Action] = true
 		if e.Hostname != "" {
 			hostSet[e.Hostname] = true
+		}
+		if isAdmin && e.Username != "" {
+			userSet[e.Username] = true
 		}
 	}
 
@@ -602,6 +615,13 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(hostOptions)
 
+	// Build sorted UserOptions (admin only)
+	var userOptions []string
+	for u := range userSet {
+		userOptions = append(userOptions, u)
+	}
+	sort.Strings(userOptions)
+
 	// Build 24-hour activity timeline from the full unfiltered history.
 	// This always shows the complete 24h view so users can see the overall pattern.
 	nowInTZ := time.Now().In(tzLoc)
@@ -614,11 +634,12 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		hoursAgo := i // bar at i=0 is the current (most recent) hour
 
 		count := 0
-		actionCounts := make(map[string][]string) // action -> hostnames
+		type timelineEvent struct{ hostname, username string }
+		actionEvents := make(map[string][]timelineEvent) // action -> events
 		for _, e := range allHistory {
 			if e.Timestamp.After(hourStart) && e.Timestamp.Before(hourEnd) {
 				count++
-				actionCounts[e.Action] = append(actionCounts[e.Action], e.Hostname)
+				actionEvents[e.Action] = append(actionEvents[e.Action], timelineEvent{e.Hostname, e.Username})
 			}
 		}
 
@@ -627,27 +648,35 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		detailParts = append(detailParts, fmt.Sprintf("%d:00 – %d:00", hourStart.Hour(), hourEnd.Hour()))
 		// Sort action keys for deterministic ordering
 		var actionKeys []string
-		for a := range actionCounts {
+		for a := range actionEvents {
 			actionKeys = append(actionKeys, a)
 		}
 		sort.Strings(actionKeys)
 		for _, action := range actionKeys {
-			hosts := actionCounts[action]
-			// Deduplicate hosts
+			events := actionEvents[action]
+			var parts []string
 			seen := make(map[string]bool)
-			var unique []string
-			for _, h := range hosts {
-				if h != "" && !seen[h] {
-					seen[h] = true
-					unique = append(unique, h)
+			for _, ev := range events {
+				var key string
+				if isAdmin && ev.username != "" {
+					if ev.hostname != "" {
+						key = ev.username + ": " + ev.hostname
+					} else {
+						key = ev.username
+					}
+				} else if ev.hostname != "" {
+					key = ev.hostname
+				}
+				if key != "" && !seen[key] {
+					seen[key] = true
+					parts = append(parts, key)
 				}
 			}
-			sort.Strings(unique)
-			hostStr := strings.Join(unique, ", ")
-			if hostStr != "" {
-				detailParts = append(detailParts, fmt.Sprintf("%d %s (%s)", len(hosts), t(action), hostStr))
+			sort.Strings(parts)
+			if len(parts) > 0 {
+				detailParts = append(detailParts, fmt.Sprintf("%d %s (%s)", len(events), t(action), strings.Join(parts, ", ")))
 			} else {
-				detailParts = append(detailParts, fmt.Sprintf("%d %s", len(hosts), t(action)))
+				detailParts = append(detailParts, fmt.Sprintf("%d %s", len(events), t(action)))
 			}
 		}
 
@@ -688,6 +717,17 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 
 	history := allHistory
 
+	// Filter by user (admin only)
+	if isAdmin && userFilter != "" {
+		var filtered []ActionLogEntryWithUser
+		for _, e := range history {
+			if e.Username == userFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		history = filtered
+	}
+
 	// Filter by action type
 	if actionFilter != "" {
 		var filtered []ActionLogEntryWithUser
@@ -710,12 +750,14 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		history = filtered
 	}
 
-	// Filter by search term (case-insensitive match on hostname or code)
+	// Filter by search term (case-insensitive match on hostname, code, or username for admins)
 	if query != "" {
 		q := strings.ToLower(query)
 		var filtered []ActionLogEntryWithUser
 		for _, e := range history {
-			if strings.Contains(strings.ToLower(e.Hostname), q) || strings.Contains(strings.ToLower(e.Code), q) {
+			if strings.Contains(strings.ToLower(e.Hostname), q) ||
+				strings.Contains(strings.ToLower(e.Code), q) ||
+				(isAdmin && strings.Contains(strings.ToLower(e.Username), q)) {
 				filtered = append(filtered, e)
 			}
 		}
@@ -741,6 +783,11 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 				return history[i].Code < history[j].Code
 			}
 			return history[i].Code > history[j].Code
+		case "user":
+			if asc {
+				return history[i].Username < history[j].Username
+			}
+			return history[i].Username > history[j].Username
 		default: // timestamp
 			if asc {
 				return history[i].Timestamp.Before(history[j].Timestamp)
@@ -790,8 +837,10 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		"Query":           query,
 		"ActionFilter":    actionFilter,
 		"HostFilter":      hostFilter,
+		"UserFilter":      userFilter,
 		"ActionOptions":   actionOptions,
 		"HostOptions":     hostOptions,
+		"UserOptions":     userOptions,
 		"ActivePage":      "history",
 		"Theme":           getTheme(r),
 		"Page":            page,
