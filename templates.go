@@ -1038,9 +1038,9 @@ const adminPageHTML = `<!DOCTYPE html>
     .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; }
     .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
     .user-name { font-weight: 600; }
-    .user-groups { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 2px; }
-    .group-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; }
-    .sudo-detail { font-size: 0.65rem; color: var(--text-secondary); margin-top: 2px; flex-basis: 100%; }
+    .user-groups { margin-bottom: 4px; }
+    .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; }
+    .sudo-detail { font-size: 0.65rem; color: var(--text-secondary); margin-top: 0; display: block; }
     .user-actions { white-space: nowrap; text-align: right; }
     .user-actions form { display: inline; }
     @media (max-width: 600px) {
