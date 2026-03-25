@@ -1256,7 +1256,7 @@ const adminPageHTML = `<!DOCTYPE html>
             {{end}}
           </td>
           <td>{{.ActiveSessions}}</td>
-          <td>{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><br><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
+          <td>{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
           <td class="user-actions">
             {{if gt .ActiveSessions 0}}
             <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
