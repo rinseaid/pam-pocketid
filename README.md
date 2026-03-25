@@ -593,6 +593,66 @@ glauth-pocketid defines *what* users can sudo. pam-pocketid defines *how* they a
 
 Leave `POCKETID_SUDO_NO_AUTHENTICATE=false` (the default) in glauth-pocketid so sudo invokes the PAM stack — which routes through pam-pocketid instead of prompting for a password.
 
+## Uninstalling
+
+### On each Linux host
+
+**1. Restore PAM configuration**
+
+Remove the `pam_exec` line from `/etc/pam.d/sudo` (and `/etc/pam.d/sudo-i` if it exists):
+
+```
+auth    required    pam_exec.so    stdout /usr/local/bin/pam-pocketid
+```
+
+**2. Stop and remove the systemd timer**
+
+```bash
+systemctl disable --now pam-pocketid-rotate.timer
+rm -f /etc/systemd/system/pam-pocketid-rotate.timer \
+      /etc/systemd/system/pam-pocketid-rotate.service
+systemctl daemon-reload
+```
+
+**3. Remove binary and config files**
+
+```bash
+rm -f /usr/local/bin/pam-pocketid       # binary
+rm -f /etc/pam-pocketid.conf            # config file
+rm -f /etc/pam-pocketid-breakglass      # break-glass bcrypt hash
+rm -f /var/run/pam-pocketid-breakglass-failures  # failure counter (also clears on reboot)
+rm -rf /run/pocketid                    # token cache (also clears on reboot)
+```
+
+### Server
+
+**Stop and remove the container**
+
+```bash
+docker compose down -v   # -v removes the named volume (sessions, hosts registry, etc.)
+```
+
+Or without removing the data volume (to preserve history for audit purposes):
+
+```bash
+docker compose down
+docker volume rm pam-pocketid-data
+```
+
+**Remove any config files referenced by the server**
+
+If you configured these optional paths, remove them as well:
+
+- `PAM_POCKETID_SESSION_STATE_FILE` (e.g. `/data/sessions.json`)
+- `PAM_POCKETID_HOST_REGISTRY_FILE` (e.g. `/data/hosts.json`)
+- `PAM_POCKETID_NOTIFY_USERS_FILE`
+- `PAM_POCKETID_WEBHOOKS_FILE`
+
+### Pocket ID
+
+- Delete the OIDC client registered for pam-pocketid in the Pocket ID admin UI.
+- If you configured `PAM_POCKETID_POCKETID_API_KEY`, revoke that API key in Pocket ID.
+
 ## Building from source
 
 ```bash

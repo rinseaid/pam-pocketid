@@ -511,7 +511,7 @@ func breakglassFileExists(path string) bool {
 // rotateBreakglass generates a new break-glass password, writes the hash locally,
 // and escrows the plaintext to the server. Returns the plaintext password when
 // escrow was not performed (caller should display it), or empty string if escrowed.
-func rotateBreakglass(cfg *Config, force bool) (plaintext string, err error) {
+func rotateBreakglass(cfg *Config, force, quiet bool) (plaintext string, err error) {
 	// Acquire an exclusive advisory lock to prevent concurrent rotations
 	// (e.g., cron + maybeRotateBreakglass, or two simultaneous sudo sessions).
 	// Without this, two rotations can each escrow different passwords and race
@@ -558,7 +558,7 @@ func rotateBreakglass(cfg *Config, force bool) (plaintext string, err error) {
 	hostname, _ := os.Hostname()
 	escrowed := false
 	if cfg.ServerURL != "" {
-		err := escrowPassword(cfg, hostname, password)
+		err := escrowPassword(cfg, hostname, password, quiet)
 		if err != nil {
 			// Treat 501 (escrow not configured on server) as non-fatal:
 			// the server is reachable but has no escrow command. Proceed with
@@ -578,7 +578,9 @@ func rotateBreakglass(cfg *Config, force bool) (plaintext string, err error) {
 	if err := writeBreakglassFile(cfg.BreakglassFile, hash, hostname, cfg.BreakglassPasswordType); err != nil {
 		return "", fmt.Errorf("writing hash file: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "break-glass hash written to %s\n", cfg.BreakglassFile)
+	if !quiet {
+		fmt.Fprintf(os.Stderr, "break-glass hash written to %s\n", cfg.BreakglassFile)
+	}
 
 	// Return the plaintext password when it was NOT escrowed, so the caller
 	// can display it appropriately. The CLI prints it; the PAM path suppresses it.
@@ -589,7 +591,7 @@ func rotateBreakglass(cfg *Config, force bool) (plaintext string, err error) {
 }
 
 // escrowPassword sends the plaintext password to the server's escrow endpoint.
-func escrowPassword(cfg *Config, hostname, password string) error {
+func escrowPassword(cfg *Config, hostname, password string, quiet bool) error {
 	if cfg.ServerURL == "" {
 		return fmt.Errorf("PAM_POCKETID_SERVER_URL not configured")
 	}
@@ -633,7 +635,9 @@ func escrowPassword(cfg *Config, hostname, password string) error {
 		return &escrowHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(b))}
 	}
 
-	fmt.Fprintf(os.Stderr, "break-glass password escrowed to server\n")
+	if !quiet {
+		fmt.Fprintf(os.Stderr, "break-glass password escrowed to server\n")
+	}
 	return nil
 }
 
@@ -673,7 +677,7 @@ func maybeRotateBreakglass(cfg *Config, rotateBefore time.Time) {
 	if !breakglassFileExists(cfg.BreakglassFile) {
 		// Initial provisioning: create the break-glass hash file automatically.
 		fmt.Fprintf(os.Stderr, "pam-pocketid: no break-glass hash file found — generating initial password\n")
-		if _, err := rotateBreakglass(cfg, true); err != nil {
+		if _, err := rotateBreakglass(cfg, true, true); err != nil {
 			fmt.Fprintf(os.Stderr, "pam-pocketid: initial break-glass setup failed: %v\n", err)
 		}
 		return
@@ -692,18 +696,13 @@ func maybeRotateBreakglass(cfg *Config, rotateBefore time.Time) {
 		return err == nil && mtime.Before(rotateBefore)
 	}()
 
-	if rotationDue {
-		fmt.Fprintf(os.Stderr, "pam-pocketid: break-glass password is %d days old (rotation every %d days) — rotating now\n",
-			int(age.Hours()/24), cfg.BreakglassRotationDays)
-	} else if serverRequested {
-		fmt.Fprintf(os.Stderr, "pam-pocketid: server requested break-glass rotation — rotating now\n")
-	} else {
+	if !rotationDue && !serverRequested {
 		return
 	}
 
 	// Discard the returned password — in the PAM path we must NOT print it
 	// to stdout (which goes to the user's terminal via pam_exec).
-	if _, err := rotateBreakglass(cfg, true); err != nil {
+	if _, err := rotateBreakglass(cfg, true, true); err != nil {
 		fmt.Fprintf(os.Stderr, "pam-pocketid: break-glass rotation failed: %v\n", err)
 	}
 }

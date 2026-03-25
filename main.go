@@ -209,7 +209,7 @@ func runRotateBreakglass() {
 		os.Exit(1)
 	}
 
-	plaintext, err := rotateBreakglass(cfg, force)
+	plaintext, err := rotateBreakglass(cfg, force, false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

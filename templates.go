@@ -1068,6 +1068,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .users-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; min-width: 700px; table-layout: fixed; }
     .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; white-space: nowrap; }
     .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .groups-table-wrap .users-table td { vertical-align: middle; }
     .user-name { font-weight: 600; }
     .user-groups { margin-bottom: 4px; }
     .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; text-decoration: none; }

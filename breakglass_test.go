@@ -840,7 +840,7 @@ func TestRotateBreakglass_EscrowBeforeHash(t *testing.T) {
 		BreakglassPasswordType: "random",
 	}
 
-	plaintext, err := rotateBreakglass(cfg, true)
+	plaintext, err := rotateBreakglass(cfg, true, false)
 	if err != nil {
 		t.Fatalf("rotation failed: %v", err)
 	}
@@ -885,7 +885,7 @@ func TestRotateBreakglass_EscrowFailure_PreservesOldHash(t *testing.T) {
 		BreakglassPasswordType: "random",
 	}
 
-	_, err := rotateBreakglass(cfg, true)
+	_, err := rotateBreakglass(cfg, true, false)
 	if err == nil {
 		t.Fatal("expected error when escrow fails")
 	}
@@ -922,7 +922,7 @@ func TestRotateBreakglass_501_ReturnsPassword(t *testing.T) {
 		BreakglassPasswordType: "random",
 	}
 
-	plaintext, err := rotateBreakglass(cfg, true)
+	plaintext, err := rotateBreakglass(cfg, true, false)
 	if err != nil {
 		t.Fatalf("expected success on 501 (non-fatal), got: %v", err)
 	}
@@ -958,7 +958,7 @@ func TestRotateBreakglass_NoServer_ReturnsPassword(t *testing.T) {
 		BreakglassPasswordType: "passphrase",
 	}
 
-	plaintext, err := rotateBreakglass(cfg, true)
+	plaintext, err := rotateBreakglass(cfg, true, false)
 	if err != nil {
 		t.Fatalf("expected success without server, got: %v", err)
 	}
