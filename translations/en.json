@@ -193,7 +193,7 @@
   "user_removed": "User removed",
   "confirm_remove_user": "Remove this user from pam-pocketid? This revokes all sessions and blocks future access.",
   "last_active": "Last active",
-  "active_sessions_count": "Active sessions",
+  "active_sessions_count": "Sessions",
   "no_users": "No users found.",
   "confirm_approve_all": "Approve all pending requests?",
   "confirm_reject_all": "Reject all pending requests?",

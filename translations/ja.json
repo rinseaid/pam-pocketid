@@ -185,7 +185,7 @@
   "user_removed": "ユーザーが削除されました",
   "confirm_remove_user": "このユーザーをpam-pocketidから削除しますか？すべてのセッションが取り消され、今後のアクセスがブロックされます。",
   "last_active": "最終アクティブ",
-  "active_sessions_count": "アクティブセッション",
+  "active_sessions_count": "セッション",
   "no_users": "ユーザーが見つかりません。",
   "confirm_approve_all": "保留中のリクエストをすべて承認しますか？",
   "confirm_reject_all": "保留中のリクエストをすべて拒否しますか？",

@@ -185,7 +185,7 @@
   "user_removed": "用户已删除",
   "confirm_remove_user": "从 pam-pocketid 中删除此用户？这将撤销所有会话并阻止将来的访问。",
   "last_active": "最后活动",
-  "active_sessions_count": "活动会话",
+  "active_sessions_count": "会话",
   "no_users": "未找到用户。",
   "confirm_approve_all": "批准所有待处理的请求？",
   "confirm_reject_all": "拒绝所有待处理的请求？",

@@ -185,7 +185,7 @@
   "user_removed": "Benutzer entfernt",
   "confirm_remove_user": "Diesen Benutzer aus pam-pocketid entfernen? Alle Sitzungen werden widerrufen und zukünftiger Zugriff gesperrt.",
   "last_active": "Zuletzt aktiv",
-  "active_sessions_count": "Aktive Sitzungen",
+  "active_sessions_count": "Sitzungen",
   "no_users": "Keine Benutzer gefunden.",
   "confirm_approve_all": "Alle ausstehenden Anfragen genehmigen?",
   "confirm_reject_all": "Alle ausstehenden Anfragen ablehnen?",

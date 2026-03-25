@@ -185,7 +185,7 @@
   "user_removed": "Usuário removido",
   "confirm_remove_user": "Remover este usuário do pam-pocketid? Todas as sessões serão revogadas e o acesso futuro será bloqueado.",
   "last_active": "Última atividade",
-  "active_sessions_count": "Sessões ativas",
+  "active_sessions_count": "Sessões",
   "no_users": "Nenhum usuário encontrado.",
   "confirm_approve_all": "Aprovar todas as solicitações pendentes?",
   "confirm_reject_all": "Rejeitar todas as solicitações pendentes?",
