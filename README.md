@@ -103,11 +103,17 @@ The Docker image is built on `debian:bookworm-slim` and includes: the `pam-pocke
 
 ### 3. Install the PAM helper on Linux hosts
 
-**Quick install** (downloads latest binary and installs a systemd rotation timer):
+**Quick install** — the server serves a pre-configured installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rinseaid/pam-pocketid/main/install.sh | sudo bash
+# Downloads binary, writes /etc/pam-pocketid.conf, configures PAM, installs systemd timer
+curl -fsSL https://sudo.example.com/install.sh | sudo bash
+
+# For automated/non-interactive deployments, pass the shared secret via env:
+SHARED_SECRET=your-shared-secret curl -fsSL https://sudo.example.com/install.sh | sudo bash
 ```
+
+Replace `sudo.example.com` with your `PAM_POCKETID_EXTERNAL_URL`. The script auto-detects OS architecture (amd64/arm64), verifies the binary checksum, and sets up the weekly break-glass rotation timer.
 
 **Or install manually:**
 
@@ -200,7 +206,6 @@ $ sudo systemctl restart nginx
 | `PAM_POCKETID_ADMIN_APPROVAL_HOSTS` | *(empty)* | Comma-separated glob patterns of hostnames that require a second admin approval before a challenge is granted |
 | `PAM_POCKETID_WEBHOOKS` | *(empty)* | JSON array of webhook configurations for structured notifications (see [Webhooks](#webhooks)) |
 | `PAM_POCKETID_WEBHOOKS_FILE` | *(empty)* | Path to a JSON file containing the webhook configuration array |
-| `PAM_POCKETID_NOTIFY_WEBHOOK_URL` | *(empty)* | (legacy, use WEBHOOKS instead) Single webhook URL for structured notifications |
 | `PAM_POCKETID_API_KEYS` | *(empty)* | Comma-separated API keys for Bearer token auth on `/api/history/export` |
 | `PAM_POCKETID_POCKETID_API_KEY` | *(empty)* | Pocket ID API key for server-side Pocket ID API calls |
 | `PAM_POCKETID_POCKETID_API_URL` | *(empty)* | Pocket ID API base URL for server-side Pocket ID API calls |
@@ -215,14 +220,9 @@ $ sudo systemctl restart nginx
 | `PAM_POCKETID_ESCROW_AUTH_SECRET_FILE` | *(empty)* | File path to read `ESCROW_AUTH_SECRET` from (used when the secret lives in a Docker secret or volume) |
 | `PAM_POCKETID_ESCROW_PATH` | *(empty)* | Storage location — vault name/UUID (1Password Connect), KV path prefix (Vault), `{orgId}/{projectId}` (Bitwarden), `{workspaceId}/{environment}` (Infisical) |
 | `PAM_POCKETID_ESCROW_COMMAND` | *(empty)* | Shell command to escrow break-glass passwords (fallback when `ESCROW_BACKEND` is not set; receives plaintext on stdin) |
-| `PAM_POCKETID_ESCROW_ENV` | *(empty)* | Comma-separated env var prefixes to pass to the escrow command (e.g., `AWS_,VAULT_,OP_`) |
-| `PAM_POCKETID_ESCROW_LINK_TEMPLATE` | *(empty)* | URL template for viewing escrowed credentials (`{hostname}` and `{item_id}` placeholders) |
-| `PAM_POCKETID_ESCROW_LINK_LABEL` | `View password` | Label for escrow link button on the Hosts tab |
+| `PAM_POCKETID_ESCROW_COMMAND_ENV` | *(empty)* | Comma-separated prefixes of env vars from the server process to forward to `ESCROW_COMMAND` (e.g., `AWS_,VAULT_`). Only vars matching these prefixes are passed; server secrets are never forwarded. Only relevant when `ESCROW_COMMAND` is set. |
 | `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` | *(empty)* | RFC3339 timestamp; clients with hash files older than this will rotate on next sudo |
-| `PAM_POCKETID_CLIENT_CONFIG` | *(none)* | JSON blob to set client overrides at once: `{"breakglass_password_type":"...","breakglass_rotation_days":N,"token_cache":true/false}`; takes precedence over the individual vars below |
-| `PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE` | *(none)* | Server-side override: client break-glass password type (`random`/`passphrase`/`alphanumeric`) |
-| `PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS` | *(none)* | Server-side override: client break-glass rotation interval (days) |
-| `PAM_POCKETID_CLIENT_TOKEN_CACHE` | *(none)* | Server-side override: client token cache (`true`/`false`) |
+| `PAM_POCKETID_CLIENT_CONFIG` | *(none)* | JSON blob to override client settings server-wide: `{"breakglass_password_type":"...","breakglass_rotation_days":N,"token_cache":true/false}` |
 | `PAM_POCKETID_INSECURE` | `false` | Allow unauthenticated API — not for production |
 
 ### PAM helper configuration
@@ -278,7 +278,7 @@ Full audit log with sortable columns, filter dropdowns, live search, configurabl
 - **Manual elevation** — create a grace session for a host without a sudo invocation (1h/4h/8h/1d, capped to configured grace period)
 - **Break-glass rotation** — signal a host or all hosts to rotate on next sudo
 - **Escrow status** — password age and whether it has exceeded the rotation interval
-- **Escrow links** — if `PAM_POCKETID_ESCROW_LINK_TEMPLATE` is set, a button links to the stored credential
+- **Escrow view** — a **View** button links directly to the stored credential in the backend's web UI (Vault, Bitwarden, Infisical); no button is shown for 1Password Connect (no web UI) or when no backend is configured
 - **Host registry** — registered hosts, their per-host secrets, and authorized users; each host displays its group badge if one was set at registration; a group filter dropdown narrows the list
 
 ### Info tab (`/info` → redirects to `/admin/info`)
@@ -436,9 +436,9 @@ After 3 consecutive failed attempts, exponential backoff kicks in: 1s, 2s, 4s, .
 
 ### Escrow
 
-Set `PAM_POCKETID_ESCROW_BACKEND` to use a native backend. Items are created or updated automatically — no extra scripts or SDK dependencies required.
+Set `PAM_POCKETID_ESCROW_BACKEND` to use a native backend. Items are created or updated automatically — no extra scripts or SDK dependencies required. Each host can only escrow for its own hostname (verified via HMAC).
 
-Each host can only escrow for its own hostname (verified via HMAC). When a backend returns an item identifier, the server stores it for use in `{item_id}` placeholders in `ESCROW_LINK_TEMPLATE`.
+The Hosts tab shows a **View** button for backends where a direct link can be derived (Vault, Bitwarden, Infisical). 1Password Connect has no web UI so no link is shown.
 
 #### 1Password Connect
 
@@ -448,8 +448,6 @@ environment:
   PAM_POCKETID_ESCROW_URL: "http://op-connect:8080"
   PAM_POCKETID_ESCROW_AUTH_SECRET_FILE: "/run/secrets/op-token"  # or ESCROW_AUTH_SECRET
   PAM_POCKETID_ESCROW_PATH: "my-vault"  # vault name or UUID
-  PAM_POCKETID_ESCROW_LINK_TEMPLATE: "https://my.1password.com/vaults/{vault_uuid}/allitems/{item_id}"
-  PAM_POCKETID_ESCROW_LINK_LABEL: "View in 1Password"
 ```
 
 Items are stored with title `breakglass-{hostname}` and updated in-place on rotation. `ESCROW_PATH` accepts a vault name (case-insensitive match) or a UUID (26–36 alphanumeric chars).
@@ -496,7 +494,7 @@ Secrets are stored as `BREAKGLASS_{HOSTNAME_UPPER}` (uppercased, hyphens become 
 
 #### Custom shell command (fallback)
 
-When `ESCROW_BACKEND` is not set, configure `PAM_POCKETID_ESCROW_COMMAND` to forward the plaintext password to any system. The command receives the password on stdin; `BREAKGLASS_HOSTNAME` is set in the environment. If the command outputs `item_id=<id>`, the server stores it for link templates.
+When `ESCROW_BACKEND` is not set, configure `PAM_POCKETID_ESCROW_COMMAND` to forward the plaintext password to any system. The command receives the password on stdin; `BREAKGLASS_HOSTNAME` is set in the environment. If the command outputs `item_id=<id>` on stdout, the server stores it.
 
 ```bash
 # AWS Secrets Manager
@@ -509,7 +507,7 @@ PAM_POCKETID_ESCROW_COMMAND: >-
 PAM_POCKETID_ESCROW_COMMAND: "cat > /secure/breakglass/$BREAKGLASS_HOSTNAME.txt"
 ```
 
-Use `PAM_POCKETID_ESCROW_ENV` to pass environment variable prefixes to the command (e.g., `AWS_,VAULT_`).
+Use `PAM_POCKETID_ESCROW_COMMAND_ENV` to specify which env var prefixes from the server process to forward to the command (e.g., `AWS_,VAULT_`). The available prefixes are whatever env vars you set in your container/systemd environment — for example, `AWS_` forwards `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc. Server secrets (`PAM_POCKETID_CLIENT_SECRET`, `PAM_POCKETID_SHARED_SECRET`, etc.) are never forwarded regardless of this setting.
 
 ### Verification
 
@@ -573,7 +571,7 @@ The PAM helper caches OIDC ID tokens locally to allow subsequent sudo invocation
 
 Requires `PAM_POCKETID_ISSUER_URL` and `PAM_POCKETID_CLIENT_ID` on the PAM helper for local JWT signature and audience verification. Tokens are stored per-username in `PAM_POCKETID_TOKEN_CACHE_DIR` (default `/run/pocketid`).
 
-The server can override client-side settings via `PAM_POCKETID_CLIENT_CONFIG` (JSON blob) or via the individual `PAM_POCKETID_CLIENT_TOKEN_CACHE`, `PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE`, and `PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS` vars. `CLIENT_CONFIG` takes precedence when both are set.
+The server can override client-side settings via `PAM_POCKETID_CLIENT_CONFIG` (JSON blob).
 
 ## Security
 

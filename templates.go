@@ -1342,7 +1342,7 @@ const adminPageHTML = `<!DOCTYPE html>
           </div>
           <div class="host-row-header-actions">
             {{if .Escrowed}}
-            {{if .EscrowLink}}<a href="{{.EscrowLink}}" target="_blank" class="host-btn">{{$.EscrowLinkLabel}}</a>{{end}}
+            {{if .EscrowLink}}<a href="{{.EscrowLink}}" target="_blank" class="host-btn">View</a>{{end}}
             <form method="POST" action="/api/hosts/rotate" style="display:inline">
               <input type="hidden" name="hostname" value="{{.Hostname}}">
               <input type="hidden" name="username" value="{{$.Username}}">

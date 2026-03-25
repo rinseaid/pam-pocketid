@@ -338,10 +338,8 @@ func TestNotifyUsersInlineJSON(t *testing.T) {
 }
 
 func TestClientConfigJSON(t *testing.T) {
-	t.Run("overrides individual breakglass vars", func(t *testing.T) {
+	t.Run("sets all fields via JSON", func(t *testing.T) {
 		serverConfigBase(t)
-		t.Setenv("PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE", "random")
-		t.Setenv("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS", "30")
 		t.Setenv("PAM_POCKETID_CLIENT_CONFIG", `{"breakglass_password_type":"passphrase","breakglass_rotation_days":90,"token_cache":true}`)
 		cfg, err := LoadServerConfig()
 		if err != nil {

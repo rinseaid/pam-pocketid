@@ -11,6 +11,44 @@ import (
 	"time"
 )
 
+// deriveEscrowLink returns a web UI link for the stored escrow item based on the
+// configured native backend. Returns "" when no link can be derived (e.g.
+// 1password-connect has no web UI).
+func deriveEscrowLink(backend, escrowURL, escrowPath, itemID, hostname string) string {
+	base := strings.TrimRight(escrowURL, "/")
+	switch backend {
+	case "vault":
+		// HashiCorp Vault UI: /ui/vault/secrets/{mount}/kv/{prefix}/{hostname}/details
+		mount, prefix, hasPrefix := strings.Cut(escrowPath, "/")
+		if hasPrefix {
+			return fmt.Sprintf("%s/ui/vault/secrets/%s/kv/%s/%s/details", base, mount, prefix, hostname)
+		}
+		return fmt.Sprintf("%s/ui/vault/secrets/%s/kv/%s/details", base, mount, hostname)
+	case "bitwarden":
+		// Bitwarden SM: vault.bitwarden.com/#/sm/{orgId}/secrets/{itemId}
+		// API URL may be "https://api.bitwarden.com" or "https://bw.example.com/api"
+		orgID, _, _ := strings.Cut(escrowPath, "/")
+		webBase := strings.TrimSuffix(base, "/api")
+		webBase = strings.ReplaceAll(webBase, "://api.", "://vault.")
+		if itemID != "" {
+			return fmt.Sprintf("%s/#/sm/%s/secrets/%s", webBase, orgID, itemID)
+		}
+		return fmt.Sprintf("%s/#/sm/%s/secrets", webBase, orgID)
+	case "infisical":
+		// Infisical: {base}/{workspaceId}/secrets/{environment}
+		workspaceID, env, _ := strings.Cut(escrowPath, "/")
+		if workspaceID == "" {
+			return ""
+		}
+		if env != "" {
+			return fmt.Sprintf("%s/%s/secrets/%s", base, workspaceID, env)
+		}
+		return fmt.Sprintf("%s/%s/secrets", base, workspaceID)
+	}
+	// 1password-connect and custom commands: no web UI link available
+	return ""
+}
+
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
@@ -664,13 +702,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 			hv.Escrowed = true
 			hv.EscrowAge = formatDuration(time.Since(escrowRecord.Timestamp))
 			hv.EscrowExpired = time.Since(escrowRecord.Timestamp) > time.Duration(rotationDays)*24*time.Hour
-			if s.cfg.EscrowLinkTemplate != "" {
-				link := strings.ReplaceAll(s.cfg.EscrowLinkTemplate, "{hostname}", h)
-				if escrowRecord.ItemID != "" {
-					link = strings.ReplaceAll(link, "{item_id}", escrowRecord.ItemID)
-				}
-				hv.EscrowLink = link
-			}
+			hv.EscrowLink = deriveEscrowLink(s.cfg.EscrowBackend, s.cfg.EscrowURL, s.cfg.EscrowPath, escrowRecord.ItemID, h)
 		}
 		if _, group, _, ok := s.hostRegistry.GetHost(h); ok {
 			hv.Group = group
@@ -764,7 +796,6 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		"Lang":             lang,
 		"Languages":        supportedLanguages,
 		"IsAdmin":          true,
-		"EscrowLinkLabel":  s.cfg.EscrowLinkLabel,
 		"HasEscrowedHosts": hasEscrowed,
 		"AllGroups":        allGroups,
 		"GroupFilter":      groupFilter,

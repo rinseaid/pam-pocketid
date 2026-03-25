@@ -142,6 +142,7 @@ s.mux.HandleFunc("/api/users/remove", s.handleRemoveUser)
 	s.mux.HandleFunc("/api/onetap/", s.handleOneTap)
 	s.mux.HandleFunc("/theme", s.handleThemeToggle)
 	s.mux.HandleFunc("/signout", s.handleSignOut)
+	s.mux.HandleFunc("/install.sh", s.handleInstallScript)
 	// Dashboard is the catch-all — register AFTER all other routes.
 	s.mux.HandleFunc("/", s.handleDashboard)
 
