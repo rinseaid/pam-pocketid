@@ -205,6 +205,7 @@
   "aria_page_size": "每页数量",
   "aria_duration": "持续时间",
   "groups": "组",
+  "permissions": "权限",
   "all_groups": "所有组",
   "clear_filter": "清除筛选",
   "user_all": "用户（全部）",

@@ -206,6 +206,7 @@
   "aria_page_size": "Taille de page",
   "aria_duration": "Durée",
   "groups": "Groupes",
+  "permissions": "Autorisations",
   "all_groups": "Tous les groupes",
   "clear_filter": "Effacer le filtre",
   "user_all": "Utilisateur (tous)",

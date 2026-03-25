@@ -205,6 +205,7 @@
   "aria_page_size": "ページサイズ",
   "aria_duration": "期間",
   "groups": "グループ",
+  "permissions": "権限",
   "all_groups": "すべてのグループ",
   "clear_filter": "フィルタをクリア",
   "user_all": "ユーザー（全員）",

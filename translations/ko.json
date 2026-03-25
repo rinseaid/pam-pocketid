@@ -205,6 +205,7 @@
   "aria_page_size": "페이지 크기",
   "aria_duration": "기간",
   "groups": "그룹",
+  "permissions": "권한",
   "all_groups": "모든 그룹",
   "clear_filter": "필터 지우기",
   "user_all": "사용자 (전체)",

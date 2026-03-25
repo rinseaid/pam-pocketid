@@ -227,7 +227,10 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		LastActive     string
 		LastActiveAgo  string
 		Groups         []pocketIDGroupInfo
-		SudoSummary    string
+		SudoCommands   []string
+		SudoHosts      []string
+		SudoAllCmds    bool
+		SudoAllHosts   bool
 	}
 
 	now := time.Now()
@@ -265,30 +268,32 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		uv.Groups = sudoGroups
-		// Build deduplicated sudo summary
-		var sudoRules []string
-		seenRules := make(map[string]bool)
+		// Build deduplicated commands and hosts lists for click-to-expand UI
+		seenCmds := make(map[string]bool)
+		seenHosts := make(map[string]bool)
 		for _, g := range uv.Groups {
-			rule := g.SudoCommands
-			if g.SudoHosts != "" && g.SudoHosts != "ALL" {
-				var hostParts []string
-				for _, p := range strings.Split(g.SudoHosts, ",") {
-					if h := strings.TrimSpace(p); h != "" {
-						hostParts = append(hostParts, h)
+			// Commands
+			if g.SudoCommands == "ALL" {
+				uv.SudoAllCmds = true
+			} else if g.SudoCommands != "" {
+				for _, c := range strings.Split(g.SudoCommands, ",") {
+					if cmd := strings.TrimSpace(c); cmd != "" && !seenCmds[cmd] {
+						uv.SudoCommands = append(uv.SudoCommands, cmd)
+						seenCmds[cmd] = true
 					}
 				}
-				rule += " on " + strings.Join(hostParts, ", ")
 			}
-			if g.SudoRunAs != "" && g.SudoRunAs != "root" {
-				rule += " as " + g.SudoRunAs
+			// Hosts
+			if g.SudoHosts == "" || g.SudoHosts == "ALL" {
+				uv.SudoAllHosts = true
+			} else {
+				for _, p := range strings.Split(g.SudoHosts, ",") {
+					if h := strings.TrimSpace(p); h != "" && !seenHosts[h] {
+						uv.SudoHosts = append(uv.SudoHosts, h)
+						seenHosts[h] = true
+					}
+				}
 			}
-			if !seenRules[rule] {
-				sudoRules = append(sudoRules, rule)
-				seenRules[rule] = true
-			}
-		}
-		if len(sudoRules) > 0 {
-			uv.SudoSummary = "Effective: " + strings.Join(sudoRules, "; ")
 		}
 		// Skip users with no sudo groups AND no pam-pocketid activity
 		hasPamActivity := uv.ActiveSessions > 0 || uv.LastActive != ""

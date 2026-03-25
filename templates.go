@@ -1041,7 +1041,22 @@ const adminPageHTML = `<!DOCTYPE html>
     .user-name { font-weight: 600; }
     .user-groups { margin-bottom: 4px; }
     .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; }
-    .sudo-detail { font-size: 0.65rem; color: var(--text-secondary); margin-top: 0; display: block; }
+    .perms-cell { min-width: 180px; }
+    .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+    .summary-chip { font-size: 0.65rem; padding: 2px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; user-select: none; display: inline-flex; align-items: center; gap: 4px; transition: opacity 0.15s; }
+    .summary-chip:hover { opacity: 0.8; }
+    .summary-chip.commands { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
+    .summary-chip.hosts { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
+    .summary-chip.all { background: rgba(99,102,241,0.12); color: #818cf8; border: 1px solid rgba(99,102,241,0.25); cursor: default; }
+    .summary-chip.single { background: var(--info-bg); color: var(--text-secondary); border: 1px solid var(--border); cursor: default; font-family: monospace; }
+    .summary-sep { font-size: 0.65rem; color: var(--text-secondary); }
+    .caret { font-size: 0.55rem; transition: transform 0.2s; display: inline-block; }
+    .summary-chip.open .caret { transform: rotate(180deg); }
+    .expanded-list { display: none; margin-top: 6px; }
+    .expanded-list.visible { display: flex; flex-wrap: wrap; gap: 3px; }
+    .pill { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+    .pill.cmd { background: rgba(59,130,246,0.1); color: #93c5fd; font-family: monospace; }
+    .pill.host { background: rgba(16,185,129,0.1); color: #6ee7b7; }
     .user-actions { white-space: nowrap; text-align: right; }
     .user-actions form { display: inline; }
     @media (max-width: 600px) {
@@ -1091,6 +1106,14 @@ const adminPageHTML = `<!DOCTYPE html>
       document.querySelectorAll('.profile-btn').forEach(function(b){b.setAttribute('aria-expanded','false');});
     });
   });
+  function togglePerms(chip){
+    var cell=chip.closest('.perms-cell');
+    var listType=chip.classList.contains('commands')?'cmd':'host';
+    var list=cell.querySelector('.expanded-list[data-type="'+listType+'"]');
+    var open=list.classList.contains('visible');
+    list.classList.toggle('visible',!open);
+    chip.classList.toggle('open',!open);
+  }
   </script>
 </head>
 <body class="wide">
@@ -1178,6 +1201,7 @@ const adminPageHTML = `<!DOCTYPE html>
         <tr>
           <th scope="col">{{call .T "user"}}</th>
           <th scope="col">{{call .T "groups"}}</th>
+          <th scope="col">{{call .T "permissions"}}</th>
           <th scope="col">{{call .T "active_sessions_count"}}</th>
           <th scope="col">{{call .T "last_active"}}</th>
           <th scope="col"></th>
@@ -1191,8 +1215,38 @@ const adminPageHTML = `<!DOCTYPE html>
             {{if .Groups}}
             <div class="user-groups">
               {{range .Groups}}<span class="group-badge">{{.Name}}</span>{{end}}
-              {{if .SudoSummary}}<div class="sudo-detail">{{.SudoSummary}}</div>{{end}}
             </div>
+            {{end}}
+          </td>
+          <td class="perms-cell">
+            {{if or .SudoAllCmds .SudoCommands}}
+            <div class="summary-line">
+              {{if .SudoAllCmds}}
+              <span class="summary-chip all">ALL commands</span>
+              {{else if eq (len .SudoCommands) 1}}
+              <span class="summary-chip single">{{index .SudoCommands 0}}</span>
+              {{else}}
+              <span class="summary-chip commands" onclick="togglePerms(this)">{{len .SudoCommands}} commands <span class="caret">▼</span></span>
+              {{end}}
+              <span class="summary-sep">on</span>
+              {{if .SudoAllHosts}}
+              <span class="summary-chip all">ALL hosts</span>
+              {{else if eq (len .SudoHosts) 1}}
+              <span class="summary-chip single">{{index .SudoHosts 0}}</span>
+              {{else}}
+              <span class="summary-chip hosts" onclick="togglePerms(this)">{{len .SudoHosts}} hosts <span class="caret">▼</span></span>
+              {{end}}
+            </div>
+            {{if and (not .SudoAllCmds) (gt (len .SudoCommands) 1)}}
+            <div class="expanded-list" data-type="cmd">
+              {{range .SudoCommands}}<span class="pill cmd">{{.}}</span>{{end}}
+            </div>
+            {{end}}
+            {{if and (not .SudoAllHosts) (gt (len .SudoHosts) 1)}}
+            <div class="expanded-list" data-type="host">
+              {{range .SudoHosts}}<span class="pill host">{{.}}</span>{{end}}
+            </div>
+            {{end}}
             {{end}}
           </td>
           <td>{{.ActiveSessions}}</td>

@@ -208,6 +208,7 @@
   "aria_page_size": "Page size",
   "aria_duration": "Duration",
   "groups": "Groups",
+  "permissions": "Permissions",
   "all_groups": "All groups",
   "clear_filter": "Clear filter",
   "user_all": "User (all)",
