@@ -393,11 +393,19 @@ func (s *Server) handleAdminGroups(w http.ResponseWriter, r *http.Request) {
 	csrfTs := fmt.Sprintf("%d", now.Unix())
 	csrfToken := computeCSRFToken(s.cfg.SharedSecret, username, csrfTs)
 
+	adminTZ := "UTC"
+	if c, err := r.Cookie("pam_tz"); err == nil && c.Value != "" {
+		if _, err := time.LoadLocation(c.Value); err == nil {
+			adminTZ = c.Value
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html")
 	if err := adminTmpl.Execute(w, map[string]interface{}{
 		"Username":   username,
 		"Initial":    strings.ToUpper(username[:1]),
 		"Avatar":     getAvatar(r),
+		"Timezone":   adminTZ,
 		"AdminTab":   "groups",
 		"Groups":     groups,
 		"Flashes":    []string{},
