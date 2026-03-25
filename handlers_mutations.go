@@ -627,7 +627,11 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 
 	expiry := time.Now().Add(duration)
 	setFlashCookie(w, fmt.Sprintf("elevated:%s:%s:%d", hostname, targetUser, expiry.Unix()))
-	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+"/admin/hosts", http.StatusSeeOther)
+	from := r.FormValue("from")
+	if from == "" || !strings.HasPrefix(from, "/") {
+		from = "/admin/hosts"
+	}
+	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+from, http.StatusSeeOther)
 }
 
 // handleRotateHost requests breakglass rotation for a single host.
