@@ -15,6 +15,7 @@
   "host_access": "Sudo Access",
   "sudo_access": "Sudo Access",
   "time_remaining": "Time remaining",
+  "sudo_time_remaining": "Sudo time remaining",
   "commands": "Commands",
   "no_sudo_session": "No sudo session",
   "pending_requests": "Pending requests",

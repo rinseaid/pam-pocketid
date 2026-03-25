@@ -351,7 +351,8 @@ const dashboardHTML = `<!DOCTYPE html>
     .row-info { min-width: 0; flex: 1; }
     .row-host { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row-sub { color: var(--text-secondary); font-size: 0.813rem; display: block; }
-    .row-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); opacity: 0.7; }
+    .row-label { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); opacity: 0.55; }
+    .row-value { color: var(--text); font-weight: 500; }
     .row-code { color: var(--text-secondary); font-size: 0.813rem; font-family: monospace; display: block; }
     .banner { padding: 10px 16px; border-radius: 8px; margin-bottom: 12px; font-size: 0.875rem; font-weight: 600; text-align: left; }
     .banner-success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success); }
@@ -531,13 +532,13 @@ const dashboardHTML = `<!DOCTYPE html>
       {{range .HostAccess}}
       <div class="row" role="listitem">
         <div class="row-info">
-          <span class="row-sub"><span class="row-label">{{call $.T "host"}}:</span> {{.Hostname}}</span>
+          <span class="row-sub"><span class="row-label">{{call $.T "host"}}:</span> <span class="row-value">{{.Hostname}}</span></span>
           {{if .Active}}
-            <span class="row-sub"><span class="row-label">{{call $.T "time_remaining"}}:</span> {{.Remaining}}</span>
+            <span class="row-sub"><span class="row-label">{{call $.T "time_remaining"}}:</span> <span class="row-value">{{.Remaining}}</span></span>
           {{else}}
             <span class="row-sub">{{call $.T "no_sudo_session"}}</span>
           {{end}}
-          {{if .SudoSummary}}<span class="row-sub"><span class="row-label">{{call $.T "commands"}}:</span> {{.SudoSummary}}</span>{{end}}
+          {{if .SudoSummary}}<span class="row-sub"><span class="row-label">{{call $.T "commands"}}:</span> <span class="row-value">{{.SudoSummary}}</span></span>{{end}}
         </div>
         {{if .Active}}
         <form method="POST" action="/api/sessions/extend" style="display:inline">
@@ -1036,14 +1037,14 @@ const adminPageHTML = `<!DOCTYPE html>
     .sort-btn { display: inline-block; padding: 4px 6px; margin-left: 4px; color: var(--border); text-decoration: none; font-size: 0.75rem; border-radius: 4px; }
     .sort-btn:hover { color: var(--text); background: var(--info-bg); }
     .sort-btn.active { color: var(--primary); }
-    .users-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; }
-    .users-table th { white-space: nowrap; }
+    .users-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .users-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; min-width: 700px; }
+    .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; white-space: nowrap; }
     .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
     .user-name { font-weight: 600; }
     .user-groups { margin-bottom: 4px; }
     .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; }
-    .perms-cell { min-width: 180px; }
+    .perms-cell { min-width: 140px; }
     .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
     .summary-chip { font-size: 0.65rem; padding: 2px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; user-select: none; display: inline-flex; align-items: center; gap: 4px; transition: opacity 0.15s; }
     .summary-chip:hover { opacity: 0.8; }
@@ -1200,6 +1201,7 @@ const adminPageHTML = `<!DOCTYPE html>
 
     {{else if eq .AdminTab "users"}}
     {{if .Users}}
+    <div class="users-table-wrap">
     <table class="users-table">
       <thead>
         <tr>
@@ -1279,6 +1281,7 @@ const adminPageHTML = `<!DOCTYPE html>
         {{end}}
       </tbody>
     </table>
+    </div>
     {{else}}
     <p class="empty-state">{{call .T "no_users"}}</p>
     {{end}}
@@ -1322,7 +1325,7 @@ const adminPageHTML = `<!DOCTYPE html>
         <div class="host-row-users">
           {{range .HostUsers}}
           <div class="session-row">
-            <span class="{{if .Active}}row-active{{else}}row-sub{{end}}">{{.Username}}{{if .Active}} — {{call $.T "time_remaining"}}: {{.Remaining}}{{else}} — {{call $.T "no_sudo_session"}}{{end}}</span>
+            <span class="{{if .Active}}row-active{{else}}row-sub{{end}}">{{.Username}}{{if .Active}} — {{call $.T "sudo_time_remaining"}}: {{.Remaining}}{{else}} — {{call $.T "no_sudo_session"}}{{end}}</span>
             <div class="session-actions">
               {{if .Active}}
               <form method="POST" action="/api/sessions/extend" style="display:inline">

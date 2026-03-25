@@ -219,6 +219,7 @@
   "host_access": "Sudoアクセス",
   "sudo_access": "Sudoアクセス",
   "time_remaining": "残り時間",
+  "sudo_time_remaining": "Sudo残り時間",
   "commands": "コマンド",
   "no_sudo_session": "Sudoセッションなし",
   "no_host_access": "ホストが見つかりません。"

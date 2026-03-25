@@ -219,6 +219,7 @@
   "host_access": "Sudo-Zugang",
   "sudo_access": "Sudo-Zugang",
   "time_remaining": "Verbleibende Zeit",
+  "sudo_time_remaining": "Verbleibende Sudo-Zeit",
   "commands": "Befehle",
   "no_sudo_session": "Keine Sudo-Sitzung",
   "no_host_access": "Keine Hosts gefunden."

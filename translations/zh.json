@@ -219,6 +219,7 @@
   "host_access": "Sudo访问",
   "sudo_access": "Sudo访问",
   "time_remaining": "剩余时间",
+  "sudo_time_remaining": "Sudo剩余时间",
   "commands": "命令",
   "no_sudo_session": "无sudo会话",
   "no_host_access": "未找到主机。"
