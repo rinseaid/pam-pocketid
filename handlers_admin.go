@@ -271,7 +271,13 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		for _, g := range uv.Groups {
 			rule := g.SudoCommands
 			if g.SudoHosts != "" && g.SudoHosts != "ALL" {
-				rule += " on " + g.SudoHosts
+				var hostParts []string
+				for _, p := range strings.Split(g.SudoHosts, ",") {
+					if h := strings.TrimSpace(p); h != "" {
+						hostParts = append(hostParts, h)
+					}
+				}
+				rule += " on " + strings.Join(hostParts, ", ")
 			}
 			if g.SudoRunAs != "" && g.SudoRunAs != "root" {
 				rule += " as " + g.SudoRunAs
