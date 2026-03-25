@@ -720,3 +720,43 @@ func TestFormatWebhookCustom(t *testing.T) {
 		t.Error("expected error on invalid template")
 	}
 }
+
+func TestNotifyInlineUsersMap(t *testing.T) {
+	// Test that inline NotifyUsers map (Config.NotifyUsers) works without a file.
+	tmp, err := os.CreateTemp("", "notify-inline-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+
+	s, ts := newNotifyTestServer(t, &Config{
+		ExternalURL:  "http://localhost:8090",
+		SharedSecret: "test-secret-that-is-long-enough",
+		ChallengeTTL: 120 * time.Second,
+		NotifyCommand: "env > " + tmp.Name(),
+		NotifyUsers: map[string]string{
+			"hazely": "tgram://bot/inline",
+			"*":      "slack://inline-fallback",
+		},
+	})
+
+	// Known user gets their specific URL
+	createChallenge(t, ts.URL, "hazely", "host-1")
+	s.WaitForNotifications(5 * time.Second)
+
+	data, _ := os.ReadFile(tmp.Name())
+	if !strings.Contains(string(data), "NOTIFY_USER_URLS=tgram://bot/inline") {
+		t.Errorf("expected per-user URL from inline map, got env:\n%s", string(data))
+	}
+
+	// Unknown user falls back to wildcard
+	os.WriteFile(tmp.Name(), []byte(""), 0644)
+	createChallenge(t, ts.URL, "stranger", "host-1")
+	s.WaitForNotifications(5 * time.Second)
+
+	data, _ = os.ReadFile(tmp.Name())
+	if !strings.Contains(string(data), "NOTIFY_USER_URLS=slack://inline-fallback") {
+		t.Errorf("expected wildcard URL from inline map, got env:\n%s", string(data))
+	}
+}

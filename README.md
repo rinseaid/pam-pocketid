@@ -296,7 +296,7 @@ Users in a group listed in `PAM_POCKETID_ADMIN_GROUPS` gain a user switcher to v
 ### One-tap approval
 
 Notification messages include a direct approval URL. When tapped:
-1. If the OIDC session is fresh (within `PAM_POCKETID_ONETAP_MAX_AGE` seconds, default 24h), the challenge is approved immediately.
+1. If the OIDC session is fresh (within `PAM_POCKETID_ONETAP_MAX_AGE` seconds, default 2h), the challenge is approved immediately.
 2. If the session has expired, the user is redirected through OIDC login first, then the approval completes.
 
 ## Push notifications

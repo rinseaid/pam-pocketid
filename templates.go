@@ -746,10 +746,10 @@ const historyPageHTML = `<!DOCTYPE html>
       }
       .history-table thead { display: none; }
       .history-table tr { padding: 12px 0; border-bottom: 1px solid var(--border); }
-      .history-table td { padding: 2px 0; border: none; }
+      .history-table td { padding: 2px 0; border: none; white-space: normal; }
       .history-table td:before { content: attr(data-label); font-weight: 600; font-size: 0.75rem; color: var(--text-secondary); display: block; }
-      .filter-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
-      .filter-toolbar .col-filter-select { flex: 1; }
+      .filter-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+      .filter-toolbar .col-filter-select { flex: 1; min-width: 0; max-width: none; }
     }
   </style>
   <script nonce="{{.CSPNonce}}">
@@ -865,6 +865,7 @@ const historyPageHTML = `<!DOCTYPE html>
         <input type="hidden" name="sort" value="{{.Sort}}">
         <input type="hidden" name="order" value="{{.Order}}">
         <input type="hidden" name="per_page" value="{{.PerPage}}">
+        {{if .HoursAgo}}<input type="hidden" name="hours_ago" value="{{.HoursAgo}}">{{end}}
         <select name="action" class="col-filter-select" aria-label="{{call .T "aria_filter_action"}}">
           <option value="">{{call .T "action_all"}}</option>
           {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
@@ -1094,12 +1095,14 @@ const adminPageHTML = `<!DOCTYPE html>
     .user-actions form { display: inline; }
     @media (max-width: 600px) {
       .users-table, .users-table thead, .users-table tbody, .users-table th, .users-table td, .users-table tr {
-        display: block; width: 100%;
+        display: block; width: 100%; min-width: 0;
       }
       .users-table thead { display: none; }
       .users-table tr { padding: 12px 0; border-bottom: 1px solid var(--border); }
       .users-table td { padding: 4px 0; border: none; }
+      .users-table td:before { content: attr(data-label); font-weight: 600; font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 2px; }
       .user-actions { text-align: left; margin-top: 8px; }
+      .user-actions:before { display: none !important; }
     }
   </style>
   <script nonce="{{.CSPNonce}}">
@@ -1246,10 +1249,10 @@ const adminPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .Users}}
         <tr>
-          <td><span class="user-name">{{.Username}}</span></td>
-          <td>{{if .Groups}}{{range .Groups}}<a href="/admin/groups#group-{{.Name}}" class="group-badge group-badge-link">{{.Name}}</a> {{end}}{{else}}—{{end}}</td>
-          <td>{{.ActiveSessions}}</td>
-          <td class="col-last-active">{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
+          <td data-label="User"><span class="user-name">{{.Username}}</span></td>
+          <td data-label="Groups">{{if .Groups}}{{range .Groups}}<a href="/admin/groups#group-{{.Name}}" class="group-badge group-badge-link">{{.Name}}</a> {{end}}{{else}}—{{end}}</td>
+          <td data-label="Sessions">{{.ActiveSessions}}</td>
+          <td class="col-last-active" data-label="Last Active">{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
           <td class="user-actions">
             {{if gt .ActiveSessions 0}}
             <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
@@ -1295,17 +1298,17 @@ const adminPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .Groups}}
         <tr id="group-{{.Name}}">
-          <td><span class="user-name">{{.Name}}</span></td>
-          <td>
+          <td data-label="Group"><span class="user-name">{{.Name}}</span></td>
+          <td data-label="Commands">
             {{if .AllCmds}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_commands"}}</span>
             {{else}}{{range .CmdList}}<span class="pill cmd" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
           </td>
-          <td>
+          <td data-label="Hosts">
             {{if .AllHosts}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_hosts"}}</span>
             {{else}}{{range .HostList}}<span class="pill host" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
           </td>
-          <td>{{if .SudoRunAs}}{{.SudoRunAs}}{{else}}—{{end}}</td>
-          <td>{{range .Members}}<span class="group-badge" style="margin-bottom:2px">{{.}}</span> {{end}}</td>
+          <td data-label="Run As">{{if .SudoRunAs}}{{.SudoRunAs}}{{else}}—{{end}}</td>
+          <td data-label="Members">{{range .Members}}<span class="group-badge" style="margin-bottom:2px">{{.}}</span> {{end}}</td>
         </tr>
         {{end}}
       </tbody>

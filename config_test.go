@@ -283,3 +283,148 @@ func TestClientTimeoutBounds(t *testing.T) {
 		t.Errorf("Timeout = %v, want 600s", cfg.Timeout)
 	}
 }
+
+// serverConfigBase sets the minimum env vars required for LoadServerConfig.
+func serverConfigBase(t *testing.T) {
+	t.Helper()
+	t.Setenv("PAM_POCKETID_ISSUER_URL", "https://id.example.com")
+	t.Setenv("PAM_POCKETID_CLIENT_ID", "test")
+	t.Setenv("PAM_POCKETID_CLIENT_SECRET", "secret")
+	t.Setenv("PAM_POCKETID_EXTERNAL_URL", "https://sudo.example.com")
+	t.Setenv("PAM_POCKETID_SHARED_SECRET", "test-secret-that-is-long-enough")
+}
+
+// Note: LoadServerConfig clears PAM_POCKETID_CLIENT_SECRET and
+// PAM_POCKETID_SHARED_SECRET after reading them (security hygiene).
+// Each sub-test that calls LoadServerConfig must call serverConfigBase(t)
+// on its own t so that t.Setenv re-registers a restore for these vars.
+
+func TestNotifyUsersInlineJSON(t *testing.T) {
+	t.Run("valid JSON parsed into map", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_NOTIFY_USERS", `{"alice":"tgram://bot/111","*":"slack://fallback"}`)
+		cfg, err := LoadServerConfig()
+		if err != nil {
+			t.Fatalf("LoadServerConfig: %v", err)
+		}
+		if cfg.NotifyUsers["alice"] != "tgram://bot/111" {
+			t.Errorf("alice URL = %q", cfg.NotifyUsers["alice"])
+		}
+		if cfg.NotifyUsers["*"] != "slack://fallback" {
+			t.Errorf("wildcard URL = %q", cfg.NotifyUsers["*"])
+		}
+	})
+
+	t.Run("invalid JSON returns error", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_NOTIFY_USERS", `not json`)
+		_, err := LoadServerConfig()
+		if err == nil {
+			t.Error("expected error for invalid NOTIFY_USERS JSON")
+		}
+	})
+
+	t.Run("unset means nil map", func(t *testing.T) {
+		serverConfigBase(t)
+		os.Unsetenv("PAM_POCKETID_NOTIFY_USERS")
+		cfg, err := LoadServerConfig()
+		if err != nil {
+			t.Fatalf("LoadServerConfig: %v", err)
+		}
+		if cfg.NotifyUsers != nil {
+			t.Errorf("expected nil NotifyUsers, got %v", cfg.NotifyUsers)
+		}
+	})
+}
+
+func TestClientConfigJSON(t *testing.T) {
+	t.Run("overrides individual breakglass vars", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_CLIENT_BREAKGLASS_PASSWORD_TYPE", "random")
+		t.Setenv("PAM_POCKETID_CLIENT_BREAKGLASS_ROTATION_DAYS", "30")
+		t.Setenv("PAM_POCKETID_CLIENT_CONFIG", `{"breakglass_password_type":"passphrase","breakglass_rotation_days":90,"token_cache":true}`)
+		cfg, err := LoadServerConfig()
+		if err != nil {
+			t.Fatalf("LoadServerConfig: %v", err)
+		}
+		if cfg.ClientBreakglassPasswordType != "passphrase" {
+			t.Errorf("PasswordType = %q, want passphrase", cfg.ClientBreakglassPasswordType)
+		}
+		if cfg.ClientBreakglassRotationDays != 90 {
+			t.Errorf("RotationDays = %d, want 90", cfg.ClientBreakglassRotationDays)
+		}
+		if cfg.ClientTokenCacheEnabled == nil || !*cfg.ClientTokenCacheEnabled {
+			t.Error("TokenCacheEnabled should be true")
+		}
+	})
+
+	t.Run("invalid password type returns error", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_CLIENT_CONFIG", `{"breakglass_password_type":"invalid"}`)
+		_, err := LoadServerConfig()
+		if err == nil {
+			t.Error("expected error for invalid breakglass_password_type")
+		}
+	})
+
+	t.Run("invalid JSON returns error", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_CLIENT_CONFIG", `not json`)
+		_, err := LoadServerConfig()
+		if err == nil {
+			t.Error("expected error for invalid CLIENT_CONFIG JSON")
+		}
+	})
+}
+
+func TestEscrowBackendValidation(t *testing.T) {
+	t.Run("invalid backend returns error", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_ESCROW_BACKEND", "s3")
+		_, err := LoadServerConfig()
+		if err == nil {
+			t.Error("expected error for unknown escrow backend")
+		}
+	})
+
+	t.Run("valid backend without URL returns error", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_ESCROW_BACKEND", "vault")
+		os.Unsetenv("PAM_POCKETID_ESCROW_URL")
+		t.Setenv("PAM_POCKETID_ESCROW_AUTH_SECRET", "tok")
+		_, err := LoadServerConfig()
+		if err == nil {
+			t.Error("expected error when ESCROW_URL is missing")
+		}
+	})
+
+	t.Run("valid backend without auth secret returns error", func(t *testing.T) {
+		serverConfigBase(t)
+		t.Setenv("PAM_POCKETID_ESCROW_BACKEND", "vault")
+		t.Setenv("PAM_POCKETID_ESCROW_URL", "http://vault:8200")
+		os.Unsetenv("PAM_POCKETID_ESCROW_AUTH_SECRET")
+		os.Unsetenv("PAM_POCKETID_ESCROW_AUTH_SECRET_FILE")
+		_, err := LoadServerConfig()
+		if err == nil {
+			t.Error("expected error when ESCROW_AUTH_SECRET is missing")
+		}
+	})
+
+	t.Run("all valid backends accepted", func(t *testing.T) {
+		for _, backend := range []string{"1password-connect", "vault", "bitwarden", "infisical"} {
+			t.Run(backend, func(t *testing.T) {
+				serverConfigBase(t)
+				t.Setenv("PAM_POCKETID_ESCROW_BACKEND", backend)
+				t.Setenv("PAM_POCKETID_ESCROW_URL", "http://backend:8080")
+				t.Setenv("PAM_POCKETID_ESCROW_AUTH_SECRET", "mysecret")
+				cfg, err := LoadServerConfig()
+				if err != nil {
+					t.Fatalf("LoadServerConfig for backend %q: %v", backend, err)
+				}
+				if cfg.EscrowBackend != backend {
+					t.Errorf("EscrowBackend = %q, want %q", cfg.EscrowBackend, backend)
+				}
+			})
+		}
+	})
+}

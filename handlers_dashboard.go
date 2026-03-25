@@ -587,6 +587,9 @@ func (s *Server) handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 		allHistory = s.store.AllActionHistoryWithUsers()
 	} else {
 		for _, e := range s.store.ActionHistory(username) {
+			if e.Action == "rotated_breakglass" {
+				continue // server-level event; not shown to non-admins
+			}
 			allHistory = append(allHistory, ActionLogEntryWithUser{
 				Username:  username,
 				Actor:     e.Actor,

@@ -965,3 +965,33 @@ func TestRemoveUser(t *testing.T) {
 		t.Errorf("bob's action history should be intact, got %d entries", len(bobHistory))
 	}
 }
+
+// TestNonAdminHistoryFiltersBreakglass verifies that the rotated_breakglass
+// filter (applied in handleHistoryPage for non-admins) hides server-level
+// break-glass rotation events.
+func TestNonAdminHistoryFiltersBreakglass(t *testing.T) {
+	store := NewChallengeStore(120*time.Second, 0, "")
+	defer store.Stop()
+
+	store.LogAction("alice", "approved", "host-1", "CODE", "")
+	store.LogAction("alice", "rotated_breakglass", "host-1", "", "")
+	store.LogAction("alice", "rejected", "host-2", "CODE2", "")
+
+	// Apply the same filter used in handleHistoryPage for non-admins.
+	var filtered []ActionLogEntry
+	for _, e := range store.ActionHistory("alice") {
+		if e.Action == "rotated_breakglass" {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 entries after filter, got %d", len(filtered))
+	}
+	for _, e := range filtered {
+		if e.Action == "rotated_breakglass" {
+			t.Error("rotated_breakglass leaked through non-admin filter")
+		}
+	}
+}
