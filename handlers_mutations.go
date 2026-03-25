@@ -440,37 +440,26 @@ func (s *Server) handleExtendAll(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		return
 	}
-	var sessions []GraceSession
 	targetUser := username
 	if s.getSessionRole(r) == "admin" {
 		if su := r.FormValue("session_username"); su != "" && validUsername.MatchString(su) {
 			targetUser = su
-			sessions = s.store.ActiveSessions(targetUser)
-		} else {
-			// Admin extend-all without specific user: extend all active sessions across all users
-			sessions = s.store.AllActiveSessions()
-			targetUser = ""
 		}
-	} else {
-		sessions = s.store.ActiveSessions(targetUser)
 	}
+	sessions := s.store.ActiveSessions(targetUser)
 	count := 0
 	for _, sess := range sessions {
-		sessUser := targetUser
-		if sessUser == "" {
-			sessUser = sess.Username
-		}
 		hostname := sess.Hostname
 		if hostname == "(unknown)" {
 			hostname = ""
 		}
-		if s.store.ExtendGraceSession(sessUser, hostname) > 0 {
-			s.store.LogAction(sessUser, "extended", sess.Hostname, "", username)
+		if s.store.ExtendGraceSession(targetUser, hostname) > 0 {
+			s.store.LogAction(targetUser, "extended", sess.Hostname, "", username)
 			count++
-			s.broadcastSSE(sessUser, "session_changed")
 		}
 	}
-	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions from %s", username, count, remoteAddr(r))
+	s.broadcastSSE(targetUser, "session_changed")
+	log.Printf("BULK_EXTEND_ALL: user %q extended %d sessions for %q from %s", username, count, targetUser, remoteAddr(r))
 
 	setFlashCookie(w, fmt.Sprintf("extended_all:%d", count))
 	dest := r.FormValue("from")

@@ -1265,13 +1265,6 @@ const adminPageHTML = `<!DOCTYPE html>
         <button type="submit" class="bulk-btn" onclick="return confirm('{{call .T "confirm_rotate_all"}}')">{{call .T "rotate_all"}}</button>
       </form>
       {{end}}
-      <form method="POST" action="/api/sessions/extend-all" style="display:inline">
-        <input type="hidden" name="username" value="{{.Username}}">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <input type="hidden" name="csrf_ts" value="{{.CSRFTs}}">
-        <input type="hidden" name="from" value="/admin/hosts">
-        <button type="submit" class="bulk-btn primary" onclick="return confirm('{{call .T "confirm_extend_all"}}')">{{call .T "extend_all"}}</button>
-      </form>
       <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
         <input type="hidden" name="username" value="{{.Username}}">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
