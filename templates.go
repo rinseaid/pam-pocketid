@@ -377,8 +377,9 @@ const dashboardHTML = `<!DOCTYPE html>
     .history-action.auto_approved, .history-action.extended, .history-action.elevated { background: var(--info-bg); color: var(--primary); }
     .history-action.revoked, .history-action.rejected { background: var(--danger-bg); color: var(--danger); }
     .history-action.rotated_breakglass { border: 1px solid var(--border); color: var(--text-secondary); }
+    .history-time { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; min-width: 56px; }
     .history-host { color: var(--text); font-size: 0.813rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .history-meta { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
+    .history-actor { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
     .seg-btn { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--primary); flex-shrink: 0; }
     .seg-btn button { background: none; border: none; border-right: 1px solid var(--primary); padding: 4px 9px; cursor: pointer; color: var(--primary); font-size: 0.75rem; font-weight: 600; font-family: inherit; line-height: 1.4; }
     .seg-btn button:last-child { border-right: none; }
@@ -598,10 +599,10 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="list">
       {{range .History}}
       <div class="history-entry">
+        <span class="history-time">{{timeAgo .Timestamp}}</span>
         <span class="history-action {{.Action}}">{{if eq .Action "auto_approved"}}{{call $.T "auto_approved"}}{{else if eq .Action "approved"}}{{call $.T "approved"}}{{else if eq .Action "revoked"}}{{call $.T "revoked"}}{{else if eq .Action "rejected"}}{{call $.T "rejected"}}{{else if eq .Action "elevated"}}{{call $.T "elevated"}}{{else if eq .Action "extended"}}{{call $.T "extended"}}{{else if eq .Action "rotated_breakglass"}}{{call $.T "rotated_breakglass"}}{{else}}{{.Action}}{{end}}</span>
         <span class="history-host">{{.Hostname}}</span>
-        {{if .Code}}<span class="row-code">{{.Code}}</span>{{end}}
-        <span class="history-meta">{{if .Actor}}{{call $.T "by"}} {{.Actor}} · {{end}}{{timeAgo .Timestamp}}</span>
+        {{if .Actor}}<span class="history-actor">{{call $.T "by"}} {{.Actor}}</span>{{end}}
       </div>
       {{end}}
     </div>
