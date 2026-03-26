@@ -288,12 +288,17 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		sort.Strings(users)
 	}
 
+	type userSessionView struct {
+		Hostname  string
+		Remaining string
+	}
 	type userView struct {
 		Username       string
 		ActiveSessions int
 		LastActive     string
 		LastActiveAgo  string
 		Groups         []pocketIDGroupInfo
+		Sessions       []userSessionView
 	}
 
 	now := time.Now()
@@ -317,11 +322,19 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			lastActive = latest.Format("2006-01-02 15:04")
 			lastActiveAgo = timeAgoI18n(latest, t)
 		}
+		var sessionViews []userSessionView
+		for _, sess := range sessions {
+			sessionViews = append(sessionViews, userSessionView{
+				Hostname:  sess.Hostname,
+				Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+			})
+		}
 		uv := userView{
 			Username:       u,
 			ActiveSessions: len(sessions),
 			LastActive:     lastActive,
 			LastActiveAgo:  lastActiveAgo,
+			Sessions:       sessionViews,
 		}
 		// Filter to only sudo-relevant groups (those with sudoCommands claim)
 		var sudoGroups []pocketIDGroupInfo

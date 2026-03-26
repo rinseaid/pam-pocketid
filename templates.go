@@ -1476,6 +1476,15 @@ const adminPageHTML = `<!DOCTYPE html>
           <span>{{call $.T "active_sessions_count"}}: {{.ActiveSessions}}</span>
           {{if .LastActiveAgo}}<span class="summary-sep">·</span><span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{end}}
         </div>
+        {{if .Sessions}}
+        <div class="host-row-users">
+          {{range .Sessions}}
+          <div class="session-row">
+            <span class="row-active">{{.Hostname}} — {{call $.T "time_remaining"}}: {{.Remaining}}</span>
+          </div>
+          {{end}}
+        </div>
+        {{end}}
       </div>
       {{end}}
     </div>
