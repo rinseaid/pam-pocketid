@@ -260,5 +260,8 @@
   "deploy_starting": "Iniciando\u2026",
   "host_required": "O host é obrigatório.",
   "key_required": "A chave privada é obrigatória.",
-  "connection_lost": "Conexão perdida."
+  "connection_lost": "Conexão perdida.",
+  "active_only": "Somente ativo",
+  "sudo_run_as": "Executar como",
+  "members": "Membros"
 }

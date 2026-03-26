@@ -260,5 +260,8 @@
   "deploy_starting": "Démarrage\u2026",
   "host_required": "Le champ hôte est requis.",
   "key_required": "La clé privée est requise.",
-  "connection_lost": "Connexion perdue."
+  "connection_lost": "Connexion perdue.",
+  "active_only": "Actif seulement",
+  "sudo_run_as": "Exécuter en tant que",
+  "members": "Membres"
 }

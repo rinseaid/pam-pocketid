@@ -65,7 +65,7 @@ func (s *Server) getSessionUser(r *http.Request) string {
 		if err != nil {
 			return ""
 		}
-		if time.Since(time.Unix(tsInt, 0)).Abs() > sessionCookieTTL {
+		if age := time.Since(time.Unix(tsInt, 0)); age < 0 || age > sessionCookieTTL {
 			return ""
 		}
 		mac := hmac.New(sha256.New, []byte(s.cfg.SharedSecret))
@@ -86,7 +86,7 @@ func (s *Server) getSessionUser(r *http.Request) string {
 		if err != nil {
 			return ""
 		}
-		if time.Since(time.Unix(tsInt, 0)).Abs() > sessionCookieTTL {
+		if age := time.Since(time.Unix(tsInt, 0)); age < 0 || age > sessionCookieTTL {
 			return ""
 		}
 		mac := hmac.New(sha256.New, []byte(s.cfg.SharedSecret))
@@ -123,7 +123,7 @@ func (s *Server) getSessionRole(r *http.Request) string {
 		if err != nil {
 			return "user"
 		}
-		if time.Since(time.Unix(tsInt, 0)).Abs() > sessionCookieTTL {
+		if age := time.Since(time.Unix(tsInt, 0)); age < 0 || age > sessionCookieTTL {
 			return "user"
 		}
 		mac := hmac.New(sha256.New, []byte(s.cfg.SharedSecret))

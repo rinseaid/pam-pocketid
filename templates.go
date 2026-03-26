@@ -574,7 +574,7 @@ const dashboardHTML = `<!DOCTYPE html>
     {{if .HostAccess}}
     <div class="host-access-header">
       <div class="section-label" style="margin-bottom:0">{{call .T "sudo_access"}}</div>
-      {{if .HasActiveSessions}}<div class="toggle-wrap" id="active-filter-btn" role="switch" aria-checked="false" tabindex="0"><span>Active only</span><div class="toggle-track"><div class="toggle-thumb"></div></div></div>{{end}}
+      {{if .HasActiveSessions}}<div class="toggle-wrap" id="active-filter-btn" role="switch" aria-checked="false" tabindex="0" aria-label="{{call .T "active_only"}}"><span>{{call .T "active_only"}}</span><div class="toggle-track"><div class="toggle-thumb"></div></div></div>{{end}}
     </div>
     <div class="list" id="host-access-list" role="list" aria-label="{{call .T "sudo_access"}}">
       {{range .HostAccess}}
@@ -999,7 +999,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .admin-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); justify-content: center; flex-wrap: wrap; }
     .admin-tabs a { padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; color: var(--text-secondary); text-decoration: none; }
     .admin-tabs a:hover { background: var(--info-bg); color: var(--text); }
-    .admin-tabs a.active { background: var(--primary); color: #fff; font-weight: 600; }
+    .admin-tabs a.active { background: var(--primary); color: var(--primary-text); font-weight: 600; }
     .info-section { margin-bottom: 24px; }
     .info-section h3 { font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 12px; }
     .info-table { width: 100%; border-collapse: collapse; }
@@ -1020,7 +1020,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .host-btn.danger:hover { background: var(--danger-bg); }
     .host-btn.primary { border-color: var(--primary); color: var(--primary); }
     .host-btn.primary:hover { background: var(--info-bg); }
-    .host-btn.filled { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .host-btn.filled { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
     .host-btn.filled:hover { background: var(--primary-hover); }
     .bulk-actions { margin: 16px 0 8px; text-align: right; }
     .bulk-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
@@ -1038,6 +1038,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .modal-field { margin-bottom: 12px; }
     .modal-field label { display: block; font-size: 0.813rem; font-weight: 600; margin-bottom: 4px; }
     .modal-field input,.modal-field select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.875rem; font-family: inherit; }
+    .modal-field input:focus,.modal-field select:focus { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
     .modal-field select { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 12px; padding-right: 30px; cursor: pointer; }
     .modal-row { display: flex; gap: 8px; }
     .modal-row .modal-field { flex: 1; }
@@ -1123,7 +1124,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .user-name { font-weight: 600; }
     .user-groups { margin-bottom: 4px; }
     .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; text-decoration: none; }
-    .group-badge-link:hover { background: var(--primary); color: #fff; }
+    .group-badge-link:hover { background: var(--primary); color: var(--primary-text); }
     .perms-cell { min-width: 140px; }
     .col-last-active { white-space: nowrap; }
     .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
@@ -1475,10 +1476,10 @@ const adminPageHTML = `<!DOCTYPE html>
       <tbody>
         {{range .Users}}
         <tr>
-          <td data-label="User"><span class="user-name">{{.Username}}</span></td>
-          <td data-label="Groups">{{if .Groups}}{{range .Groups}}<a href="/admin/groups#group-{{.Name}}" class="group-badge group-badge-link">{{.Name}}</a> {{end}}{{else}}—{{end}}</td>
-          <td data-label="Sessions">{{.ActiveSessions}}</td>
-          <td class="col-last-active" data-label="Last Active">{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
+          <td data-label="{{call $.T "user"}}"><span class="user-name">{{.Username}}</span></td>
+          <td data-label="{{call $.T "groups"}}">{{if .Groups}}{{range .Groups}}<a href="/admin/groups#group-{{.Name}}" class="group-badge group-badge-link">{{.Name}}</a> {{end}}{{else}}—{{end}}</td>
+          <td data-label="{{call $.T "active_sessions_count"}}">{{.ActiveSessions}}</td>
+          <td class="col-last-active" data-label="{{call $.T "last_active"}}">{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
           <td class="user-actions">
             {{if gt .ActiveSessions 0}}
             <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
@@ -1517,24 +1518,24 @@ const adminPageHTML = `<!DOCTYPE html>
           <th scope="col" style="width:18%">{{call .T "group"}}</th>
           <th scope="col">{{call .T "commands"}}</th>
           <th scope="col">{{call .T "hosts"}}</th>
-          <th scope="col" style="width:12%">Run as</th>
-          <th scope="col">Members</th>
+          <th scope="col" style="width:12%">{{call .T "sudo_run_as"}}</th>
+          <th scope="col">{{call .T "members"}}</th>
         </tr>
       </thead>
       <tbody>
         {{range .Groups}}
         <tr id="group-{{.Name}}">
-          <td data-label="Group"><span class="user-name">{{.Name}}</span></td>
-          <td data-label="Commands">
+          <td data-label="{{call $.T "group"}}"><span class="user-name">{{.Name}}</span></td>
+          <td data-label="{{call $.T "commands"}}">
             {{if .AllCmds}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_commands"}}</span>
             {{else}}{{range .CmdList}}<span class="pill cmd" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
           </td>
-          <td data-label="Hosts">
+          <td data-label="{{call $.T "hosts"}}">
             {{if .AllHosts}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_hosts"}}</span>
             {{else}}{{range .HostList}}<span class="pill host" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
           </td>
-          <td data-label="Run As">{{if .SudoRunAs}}{{.SudoRunAs}}{{else}}—{{end}}</td>
-          <td data-label="Members">{{range .Members}}<span class="group-badge" style="margin-bottom:2px">{{.}}</span> {{end}}</td>
+          <td data-label="{{call $.T "sudo_run_as"}}">{{if .SudoRunAs}}{{.SudoRunAs}}{{else}}—{{end}}</td>
+          <td data-label="{{call $.T "members"}}">{{range .Members}}<span class="group-badge" style="margin-bottom:2px">{{.}}</span> {{end}}</td>
         </tr>
         {{end}}
       </tbody>
@@ -1666,7 +1667,7 @@ const adminPageHTML = `<!DOCTYPE html>
     <table class="history-table">
       <thead>
         <tr>
-          <th scope="col">{{call .T "time"}} <a href="/admin/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col">{{call .T "time"}} <a href="/admin/history?sort=timestamp&order={{if eq .Sort "timestamp"}}{{if eq .Order "desc"}}asc{{else}}desc{{end}}{{else}}desc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "timestamp"}} active{{end}}" title="{{call .T "sort_by_time"}}">{{if and (eq .Sort "timestamp") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th scope="col"><form method="GET" action="/admin/history" class="col-filter-form">
   <input type="hidden" name="hostname" value="{{.HostFilter}}">
   <input type="hidden" name="q" value="{{.Query}}">
@@ -1678,7 +1679,7 @@ const adminPageHTML = `<!DOCTYPE html>
     <option value="">{{call .T "action_all"}}</option>
     {{range .ActionOptions}}<option value="{{.Value}}" {{if eq .Value $.ActionFilter}}selected{{end}}>{{.Label}}</option>{{end}}
   </select>
-</form><a href="/admin/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+</form><a href="/admin/history?sort=action&order={{if eq .Sort "action"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "action"}} active{{end}}" title="{{call .T "sort_by_action"}}">{{if and (eq .Sort "action") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
           <th scope="col"><form method="GET" action="/admin/history" class="col-filter-form">
   <input type="hidden" name="q" value="{{.Query}}">
   <input type="hidden" name="action" value="{{.ActionFilter}}">
@@ -1702,8 +1703,8 @@ const adminPageHTML = `<!DOCTYPE html>
     <option value="">{{call .T "host_all"}}</option>
     {{range .HostOptions}}<option value="{{.}}" {{if eq . $.HostFilter}}selected{{end}}>{{.}}</option>{{end}}
   </select>
-</form><a href="/admin/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
-          <th scope="col">{{call .T "code"}} <a href="/admin/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+</form><a href="/admin/history?sort=hostname&order={{if eq .Sort "hostname"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "hostname"}} active{{end}}" title="{{call .T "sort_by_host"}}">{{if and (eq .Sort "hostname") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
+          <th scope="col">{{call .T "code"}} <a href="/admin/history?sort=code&order={{if eq .Sort "code"}}{{if eq .Order "asc"}}desc{{else}}asc{{end}}{{else}}asc{{end}}&q={{.Query}}&action={{.ActionFilter}}&hostname={{.HostFilter}}&user={{.UserFilter}}&per_page={{.PerPage}}" class="sort-btn{{if eq .Sort "code"}} active{{end}}" title="{{call .T "sort_by_code"}}">{{if and (eq .Sort "code") (eq .Order "asc")}}&#x25b2;{{else}}&#x25bc;{{end}}</a></th>
         </tr>
       </thead>
       <tbody>

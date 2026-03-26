@@ -439,6 +439,7 @@ func runDeployJob(job *deployJob, hostname string, port int, sshUser string, sig
 
 	// Stream stdout and stderr back to the job buffer via a pipe
 	pr, pw := io.Pipe()
+	defer pr.Close()
 	sess.Stdout = pw
 	sess.Stderr = pw
 

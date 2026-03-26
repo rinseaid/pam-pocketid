@@ -260,5 +260,8 @@
   "deploy_starting": "Starte\u2026",
   "host_required": "Host ist erforderlich.",
   "key_required": "Privater Schlüssel ist erforderlich.",
-  "connection_lost": "Verbindung getrennt."
+  "connection_lost": "Verbindung getrennt.",
+  "active_only": "Nur aktive",
+  "sudo_run_as": "Ausführen als",
+  "members": "Mitglieder"
 }

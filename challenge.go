@@ -978,8 +978,10 @@ func (s *ChallengeStore) loadState() {
 				}
 				if converted, err := json.Marshal(newFormat); err == nil {
 					raw["escrowed_hosts"] = converted
-					data, _ = json.Marshal(raw)
-					log.Printf("Migrated %d escrowed_hosts entries to new format", len(oldFormat))
+					if migrated, merr := json.Marshal(raw); merr == nil {
+						data = migrated
+						log.Printf("Migrated %d escrowed_hosts entries to new format", len(oldFormat))
+					}
 				}
 			}
 		}

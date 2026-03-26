@@ -128,6 +128,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.mux.HandleFunc("/sessions", s.handleSessionsRedirect)
 	s.mux.HandleFunc("/sessions/login", s.handleSessionsLogin)
 	s.mux.HandleFunc("/history", s.handleHistoryPage)
+	s.mux.HandleFunc("/admin/history", s.handleHistoryPage)
 	s.mux.HandleFunc("/admin", s.handleAdmin)
 	s.mux.HandleFunc("/admin/info", s.handleAdminInfo)
 	s.mux.HandleFunc("/admin/users", s.handleAdminUsers)

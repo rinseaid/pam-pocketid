@@ -260,5 +260,8 @@
   "deploy_starting": "시작 중\u2026",
   "host_required": "호스트를 입력해야 합니다.",
   "key_required": "개인 키를 입력해야 합니다.",
-  "connection_lost": "연결이 끊겼습니다."
+  "connection_lost": "연결이 끊겼습니다.",
+  "active_only": "활성만",
+  "sudo_run_as": "실행 사용자",
+  "members": "멤버"
 }

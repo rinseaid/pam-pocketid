@@ -260,5 +260,8 @@
   "deploy_starting": "開始中\u2026",
   "host_required": "ホストは必須です。",
   "key_required": "秘密鍵は必須です。",
-  "connection_lost": "接続が切れました。"
+  "connection_lost": "接続が切れました。",
+  "active_only": "アクティブのみ",
+  "sudo_run_as": "実行ユーザー",
+  "members": "メンバー"
 }

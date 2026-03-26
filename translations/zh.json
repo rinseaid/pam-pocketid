@@ -260,5 +260,8 @@
   "deploy_starting": "启动中\u2026",
   "host_required": "主机是必填项。",
   "key_required": "私钥是必填项。",
-  "connection_lost": "连接已断开。"
+  "connection_lost": "连接已断开。",
+  "active_only": "仅活跃",
+  "sudo_run_as": "以…身份运行",
+  "members": "成员"
 }
