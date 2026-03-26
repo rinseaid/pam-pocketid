@@ -292,7 +292,12 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	s.deployJobs[jobID] = job
 	s.deployMu.Unlock()
 
-	installCmd := fmt.Sprintf("curl -fsSL %s/install.sh | sudo bash", strings.TrimRight(s.cfg.ExternalURL, "/"))
+	// Use sudo only when not connecting as root; many systems (e.g. Proxmox) don't have sudo.
+	sudoPrefix := ""
+	if req.SSHUser != "root" {
+		sudoPrefix = "sudo "
+	}
+	installCmd := fmt.Sprintf("curl -fsSL %s/install.sh | %sbash", strings.TrimRight(s.cfg.ExternalURL, "/"), sudoPrefix)
 
 	go func() {
 		defer func() { <-deploySemaphore }()
