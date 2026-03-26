@@ -208,6 +208,7 @@
   "permissions": "Sudo権限",
   "all_groups": "すべてのグループ",
   "clear_filter": "フィルタをクリア",
+  "install_client": "クライアントをインストール",
   "user_all": "ユーザー（全員）",
   "by": "による",
   "request_expired": "リクエスト期限切れ",

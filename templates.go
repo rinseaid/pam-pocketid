@@ -1010,6 +1010,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .bulk-btn.danger { border-color: var(--danger-border); color: var(--danger); }
     .bulk-btn.danger:hover { background: var(--danger-bg); }
     .host-group { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--info-bg); color: var(--text-secondary); margin-left: 8px; vertical-align: middle; }
+    .hosts-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
     .group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.813rem; }
     .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
     .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
@@ -1319,17 +1320,20 @@ const adminPageHTML = `<!DOCTYPE html>
     {{end}}
 
     {{else if eq .AdminTab "hosts"}}
-    {{if .AllGroups}}
-    <div class="group-filter">
-      <form method="GET" action="/admin/hosts">
-        <select name="group" class="col-filter-select" aria-label="{{call .T "aria_filter_group"}}">
-          <option value="">{{call .T "all_groups"}}</option>
-          {{range .AllGroups}}<option value="{{.}}" {{if eq . $.GroupFilter}}selected{{end}}>{{.}}</option>{{end}}
-        </select>
-      </form>
-      {{if .GroupFilter}}<a href="/admin/hosts" style="font-size:0.813rem;color:var(--text-secondary)">{{call .T "clear_filter"}}</a>{{end}}
+    <div class="hosts-toolbar">
+      {{if .AllGroups}}
+      <div class="group-filter" style="margin-bottom:0">
+        <form method="GET" action="/admin/hosts">
+          <select name="group" class="col-filter-select" aria-label="{{call .T "aria_filter_group"}}">
+            <option value="">{{call .T "all_groups"}}</option>
+            {{range .AllGroups}}<option value="{{.}}" {{if eq . $.GroupFilter}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+        </form>
+        {{if .GroupFilter}}<a href="/admin/hosts" style="font-size:0.813rem;color:var(--text-secondary)">{{call .T "clear_filter"}}</a>{{end}}
+      </div>
+      {{end}}
+      <a href="{{.InstallURL}}" class="host-btn primary" style="margin-left:auto">{{call .T "install_client"}}</a>
     </div>
-    {{end}}
 
     {{if .Hosts}}
     <div class="list" role="list" aria-label="{{call .T "known_hosts"}}">

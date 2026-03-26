@@ -208,6 +208,7 @@
   "permissions": "Sudo-Berechtigungen",
   "all_groups": "Alle Gruppen",
   "clear_filter": "Filter zurücksetzen",
+  "install_client": "Client installieren",
   "user_all": "Benutzer (alle)",
   "by": "von",
   "request_expired": "Anfrage abgelaufen",

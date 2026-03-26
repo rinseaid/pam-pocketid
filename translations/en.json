@@ -216,6 +216,7 @@
   "permissions": "Sudo Permissions",
   "all_groups": "All groups",
   "clear_filter": "Clear filter",
+  "install_client": "Install client",
   "user_all": "User (all)",
   "by": "by",
   "request_expired": "Request expired",

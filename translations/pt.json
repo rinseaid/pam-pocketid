@@ -208,6 +208,7 @@
   "permissions": "Permissões Sudo",
   "all_groups": "Todos os grupos",
   "clear_filter": "Limpar filtro",
+  "install_client": "Instalar cliente",
   "user_all": "Usuário (todos)",
   "by": "por",
   "request_expired": "Solicitação expirada",

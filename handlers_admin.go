@@ -822,6 +822,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		"HasEscrowedHosts": hasEscrowed,
 		"AllGroups":        allGroups,
 		"GroupFilter":      groupFilter,
+		"InstallURL":       strings.TrimRight(s.cfg.ExternalURL, "/") + "/install.sh",
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}
