@@ -104,12 +104,15 @@ func TestOpConnectBackendCreate(t *testing.T) {
 		client:  newEscrowHTTPClient(),
 	}
 
-	id, err := b.Store(context.Background(), "web-prod-1", "s3cr3t")
+	id, vid, err := b.Store(context.Background(), "web-prod-1", "s3cr3t")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if id != itemID {
 		t.Errorf("itemID = %q, want %q", id, itemID)
+	}
+	if vid != vaultID {
+		t.Errorf("vaultID = %q, want %q", vid, vaultID)
 	}
 }
 
@@ -139,12 +142,15 @@ func TestOpConnectBackendUpdate(t *testing.T) {
 		client:  newEscrowHTTPClient(),
 	}
 
-	id, err := b.Store(context.Background(), "web-prod-1", "newpassword")
+	id, vid, err := b.Store(context.Background(), "web-prod-1", "newpassword")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if id != updatedID {
 		t.Errorf("itemID = %q, want %q", id, updatedID)
+	}
+	if vid != vaultID {
+		t.Errorf("vaultID = %q, want %q", vid, vaultID)
 	}
 }
 
@@ -178,12 +184,15 @@ func TestOpConnectBackendResolveVaultByName(t *testing.T) {
 		client:  newEscrowHTTPClient(),
 	}
 
-	id, err := b.Store(context.Background(), "db-1", "pw")
+	id, vid, err := b.Store(context.Background(), "db-1", "pw")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if id != itemID {
 		t.Errorf("itemID = %q, want %q", id, itemID)
+	}
+	if vid != vaultID {
+		t.Errorf("vaultID = %q, want %q", vid, vaultID)
 	}
 }
 
@@ -213,7 +222,7 @@ func TestHCVaultBackendDirectToken(t *testing.T) {
 		client:   newEscrowHTTPClient(),
 	}
 
-	itemID, err := b.Store(context.Background(), "host-1", "password")
+	itemID, _, err := b.Store(context.Background(), "host-1", "password")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}

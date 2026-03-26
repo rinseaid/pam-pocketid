@@ -540,12 +540,12 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), escrowTimeout)
 	defer cancel()
 
-	var itemID string
+	var itemID, vaultID string
 
 	if hasNativeEscrow {
 		backend := newEscrowBackend(s.cfg)
 		var err error
-		itemID, err = backend.Store(ctx, req.Hostname, req.Password)
+		itemID, vaultID, err = backend.Store(ctx, req.Hostname, req.Password)
 		if err != nil {
 			breakglassEscrowTotal.WithLabelValues("failure").Inc()
 			log.Printf("BREAKGLASS: %s escrow failed for host %q: %v", s.cfg.EscrowBackend, req.Hostname, err)
@@ -610,7 +610,7 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	s.store.RecordEscrow(req.Hostname, itemID)
+	s.store.RecordEscrow(req.Hostname, itemID, vaultID)
 	// Log the escrow as a "rotated_breakglass" action visible in the history page.
 	// Since escrow is a machine-level operation (no user session), log it for all
 	// users who have activity on this host so it appears in their history.

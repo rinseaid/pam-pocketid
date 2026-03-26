@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"runtime"
 	"sort"
 	"strconv"
@@ -12,11 +13,33 @@ import (
 )
 
 // deriveEscrowLink returns a web UI link for the stored escrow item based on the
-// configured native backend. Returns "" when no link can be derived (e.g.
-// 1password-connect has no web UI).
-func deriveEscrowLink(backend, escrowURL, escrowPath, itemID, hostname string) string {
+// configured native backend. Returns "" when no link can be derived.
+//
+// For 1password-connect, webURL must be set to the 1Password web app URL
+// including the account UUID fragment, e.g.:
+//
+//	https://my.1password.com/app#/ACCOUNTUUID
+//
+// The account UUID is extracted from the fragment and combined with the
+// resolved vault UUID (stored in vaultID) and item UUID to form a direct link.
+func deriveEscrowLink(backend, escrowURL, escrowPath, itemID, vaultID, webURL, hostname string) string {
 	base := strings.TrimRight(escrowURL, "/")
 	switch backend {
+	case "1password-connect":
+		// Requires ESCROW_WEB_URL = https://my.1password.com/app#/ACCOUNTUUID
+		// Link format: {webURL}/Vault/{accountUUID}:{vaultUUID}:{itemUUID}
+		if webURL == "" || itemID == "" || vaultID == "" {
+			return ""
+		}
+		parsed, err := url.Parse(webURL)
+		if err != nil {
+			return ""
+		}
+		accountUUID := strings.TrimLeft(parsed.Fragment, "/")
+		if accountUUID == "" {
+			return ""
+		}
+		return fmt.Sprintf("%s/Vault/%s:%s:%s", strings.TrimRight(webURL, "/"), accountUUID, vaultID, itemID)
 	case "vault":
 		// HashiCorp Vault UI: /ui/vault/secrets/{mount}/kv/{prefix}/{hostname}/details
 		mount, prefix, hasPrefix := strings.Cut(escrowPath, "/")
@@ -45,7 +68,7 @@ func deriveEscrowLink(backend, escrowURL, escrowPath, itemID, hostname string) s
 		}
 		return fmt.Sprintf("%s/%s/secrets", base, workspaceID)
 	}
-	// 1password-connect and custom commands: no web UI link available
+	// Custom escrow commands: no web UI link available
 	return ""
 }
 
@@ -702,7 +725,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 			hv.Escrowed = true
 			hv.EscrowAge = formatDuration(time.Since(escrowRecord.Timestamp))
 			hv.EscrowExpired = time.Since(escrowRecord.Timestamp) > time.Duration(rotationDays)*24*time.Hour
-			hv.EscrowLink = deriveEscrowLink(s.cfg.EscrowBackend, s.cfg.EscrowURL, s.cfg.EscrowPath, escrowRecord.ItemID, h)
+			hv.EscrowLink = deriveEscrowLink(s.cfg.EscrowBackend, s.cfg.EscrowURL, s.cfg.EscrowPath, escrowRecord.ItemID, escrowRecord.VaultID, s.cfg.EscrowWebURL, h)
 		}
 		if _, group, _, ok := s.hostRegistry.GetHost(h); ok {
 			hv.Group = group
@@ -735,10 +758,10 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		Selected bool
 	}
 	allDurations := []durationOption{
-		{3600, t("1_hour"), false},
-		{14400, t("4_hours"), false},
-		{28800, t("8_hours"), true},
-		{86400, t("1_day"), false},
+		{3600, "1h", false},
+		{14400, "4h", false},
+		{28800, "8h", true},
+		{86400, "1d", false},
 	}
 	var durations []durationOption
 	graceSec := int(s.cfg.GracePeriod.Seconds())

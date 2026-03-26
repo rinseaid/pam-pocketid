@@ -219,6 +219,7 @@ $ sudo systemctl restart nginx
 | `PAM_POCKETID_ESCROW_AUTH_SECRET` | *(empty)* | Backend auth secret — token (1Password Connect), secret_id or token (Vault), client_secret (Bitwarden/Infisical) |
 | `PAM_POCKETID_ESCROW_AUTH_SECRET_FILE` | *(empty)* | File path to read `ESCROW_AUTH_SECRET` from (used when the secret lives in a Docker secret or volume) |
 | `PAM_POCKETID_ESCROW_PATH` | *(empty)* | Storage location — vault name/UUID (1Password Connect), KV path prefix (Vault), `{orgId}/{projectId}` (Bitwarden), `{workspaceId}/{environment}` (Infisical) |
+| `PAM_POCKETID_ESCROW_WEB_URL` | *(empty)* | **1Password Connect only** — 1Password web app URL including account UUID fragment (e.g., `https://my.1password.com/app#/ACCOUNTUUID`). When set, the Hosts tab shows a **View** button linking directly to the item in the 1Password web UI. |
 | `PAM_POCKETID_ESCROW_COMMAND` | *(empty)* | Shell command to escrow break-glass passwords (fallback when `ESCROW_BACKEND` is not set; receives plaintext on stdin) |
 | `PAM_POCKETID_ESCROW_COMMAND_ENV` | *(empty)* | Comma-separated prefixes of env vars from the server process to forward to `ESCROW_COMMAND` (e.g., `AWS_,VAULT_`). Only vars matching these prefixes are passed; server secrets are never forwarded. Only relevant when `ESCROW_COMMAND` is set. |
 | `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` | *(empty)* | RFC3339 timestamp; clients with hash files older than this will rotate on next sudo |
@@ -451,6 +452,8 @@ environment:
 ```
 
 Items are stored with title `breakglass-{hostname}` and updated in-place on rotation. `ESCROW_PATH` accepts a vault name (case-insensitive match) or a UUID (26–36 alphanumeric chars).
+
+To get a **View** button in the Hosts tab, set `ESCROW_WEB_URL` to your 1Password web app URL including the account UUID (visible in the URL when you're logged in): `https://my.1password.com/app#/ACCOUNTUUID`.
 
 #### HashiCorp Vault (KV v2)
 

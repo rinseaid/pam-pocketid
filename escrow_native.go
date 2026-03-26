@@ -14,10 +14,10 @@ import (
 
 // escrowBackend is the interface implemented by native escrow backends.
 // Store saves the break-glass password for the given hostname and returns
-// an opaque item identifier (URL, path, UUID, etc.) for recording in the
-// escrow log. Returns empty string if the backend doesn't provide an ID.
+// an opaque item identifier (URL, path, UUID, etc.) and an optional vault/
+// container identifier for recording in the escrow log. Both may be empty.
 type escrowBackend interface {
-	Store(ctx context.Context, hostname, password string) (itemID string, err error)
+	Store(ctx context.Context, hostname, password string) (itemID, vaultID string, err error)
 }
 
 // newEscrowBackend returns the configured native escrow backend, or nil if
@@ -141,10 +141,10 @@ type opConnectBackend struct {
 	client  *http.Client
 }
 
-func (b *opConnectBackend) Store(ctx context.Context, hostname, password string) (string, error) {
+func (b *opConnectBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
 	vaultID, err := b.resolveVault(ctx)
 	if err != nil {
-		return "", fmt.Errorf("1password-connect: resolve vault: %w", err)
+		return "", "", fmt.Errorf("1password-connect: resolve vault: %w", err)
 	}
 
 	title := "breakglass-" + hostname
@@ -152,7 +152,7 @@ func (b *opConnectBackend) Store(ctx context.Context, hostname, password string)
 	// Search for an existing item with this title.
 	existingID, err := b.findItem(ctx, vaultID, title)
 	if err != nil {
-		return "", fmt.Errorf("1password-connect: search items: %w", err)
+		return "", "", fmt.Errorf("1password-connect: search items: %w", err)
 	}
 
 	item := map[string]interface{}{
@@ -176,30 +176,31 @@ func (b *opConnectBackend) Store(ctx context.Context, hostname, password string)
 		path := fmt.Sprintf("%s/v1/vaults/%s/items/%s", b.baseURL, vaultID, existingID)
 		respData, err := doJSONRequest(ctx, b.client, "PUT", path, item, auth)
 		if err != nil {
-			return "", fmt.Errorf("1password-connect: update item: %w", err)
+			return "", "", fmt.Errorf("1password-connect: update item: %w", err)
 		}
 		var updated struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(respData, &updated); err != nil {
-			return "", fmt.Errorf("1password-connect: parse update response: %w", err)
+			return "", "", fmt.Errorf("1password-connect: parse update response: %w", err)
 		}
 		itemID = updated.ID
 	} else {
 		path := fmt.Sprintf("%s/v1/vaults/%s/items", b.baseURL, vaultID)
 		respData, err := doJSONRequest(ctx, b.client, "POST", path, item, auth)
 		if err != nil {
-			return "", fmt.Errorf("1password-connect: create item: %w", err)
+			return "", "", fmt.Errorf("1password-connect: create item: %w", err)
 		}
 		var created struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(respData, &created); err != nil {
-			return "", fmt.Errorf("1password-connect: parse create response: %w", err)
+			return "", "", fmt.Errorf("1password-connect: parse create response: %w", err)
 		}
 		itemID = created.ID
 	}
-	return itemID, nil
+	// Return the resolved vault UUID so callers can construct web UI links.
+	return itemID, vaultID, nil
 }
 
 func (b *opConnectBackend) resolveVault(ctx context.Context) (string, error) {
@@ -263,10 +264,10 @@ type hcVaultBackend struct {
 	client   *http.Client
 }
 
-func (b *hcVaultBackend) Store(ctx context.Context, hostname, password string) (string, error) {
+func (b *hcVaultBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
 	token, err := b.getToken(ctx)
 	if err != nil {
-		return "", fmt.Errorf("vault: auth: %w", err)
+		return "", "", fmt.Errorf("vault: auth: %w", err)
 	}
 
 	// Split path into mount + prefix. e.g., "secret/pam-pocketid" → "secret", "pam-pocketid"
@@ -284,9 +285,9 @@ func (b *hcVaultBackend) Store(ctx context.Context, hostname, password string) (
 	// Vault uses X-Vault-Token for auth; use doJSONRequest with the token as Bearer
 	// (we repurpose the auth header field and set the correct header in a wrapper).
 	if err := b.writeSecret(ctx, kvPath, token, payload); err != nil {
-		return "", fmt.Errorf("vault: write secret: %w", err)
+		return "", "", fmt.Errorf("vault: write secret: %w", err)
 	}
-	return b.baseURL + kvPath, nil
+	return b.baseURL + kvPath, "", nil
 }
 
 // writeSecret writes to Vault KV v2, trying POST then PUT (some Vault versions
@@ -381,10 +382,10 @@ func (b *bitwardenBackend) identityURL() string {
 	return base + "/identity"
 }
 
-func (b *bitwardenBackend) Store(ctx context.Context, hostname, password string) (string, error) {
+func (b *bitwardenBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
 	accessToken, err := b.getToken(ctx)
 	if err != nil {
-		return "", fmt.Errorf("bitwarden: auth: %w", err)
+		return "", "", fmt.Errorf("bitwarden: auth: %w", err)
 	}
 
 	orgID, projectID, _ := strings.Cut(b.orgProject, "/")
@@ -394,7 +395,7 @@ func (b *bitwardenBackend) Store(ctx context.Context, hostname, password string)
 	// Check for existing secret
 	existingID, err := b.findSecret(ctx, orgID, key, auth)
 	if err != nil {
-		return "", fmt.Errorf("bitwarden: search secrets: %w", err)
+		return "", "", fmt.Errorf("bitwarden: search secrets: %w", err)
 	}
 
 	var secretID string
@@ -410,13 +411,13 @@ func (b *bitwardenBackend) Store(ctx context.Context, hostname, password string)
 		}
 		respData, err := doJSONRequest(ctx, b.client, "PUT", b.apiURL+"/secrets/"+existingID, payload, auth)
 		if err != nil {
-			return "", fmt.Errorf("bitwarden: update secret: %w", err)
+			return "", "", fmt.Errorf("bitwarden: update secret: %w", err)
 		}
 		var updated struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(respData, &updated); err != nil {
-			return "", fmt.Errorf("bitwarden: parse update response: %w", err)
+			return "", "", fmt.Errorf("bitwarden: parse update response: %w", err)
 		}
 		secretID = updated.ID
 	} else {
@@ -431,17 +432,17 @@ func (b *bitwardenBackend) Store(ctx context.Context, hostname, password string)
 		}
 		respData, err := doJSONRequest(ctx, b.client, "POST", b.apiURL+"/secrets", payload, auth)
 		if err != nil {
-			return "", fmt.Errorf("bitwarden: create secret: %w", err)
+			return "", "", fmt.Errorf("bitwarden: create secret: %w", err)
 		}
 		var created struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(respData, &created); err != nil {
-			return "", fmt.Errorf("bitwarden: parse create response: %w", err)
+			return "", "", fmt.Errorf("bitwarden: parse create response: %w", err)
 		}
 		secretID = created.ID
 	}
-	return secretID, nil
+	return secretID, "", nil
 }
 
 func (b *bitwardenBackend) getToken(ctx context.Context) (string, error) {
@@ -521,10 +522,10 @@ type infisicalBackend struct {
 	client       *http.Client
 }
 
-func (b *infisicalBackend) Store(ctx context.Context, hostname, password string) (string, error) {
+func (b *infisicalBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
 	token, err := b.getToken(ctx)
 	if err != nil {
-		return "", fmt.Errorf("infisical: auth: %w", err)
+		return "", "", fmt.Errorf("infisical: auth: %w", err)
 	}
 
 	workspaceID, environment, _ := strings.Cut(b.projectEnv, "/")
@@ -553,11 +554,11 @@ func (b *infisicalBackend) Store(ctx context.Context, hostname, password string)
 			b.baseURL, url.PathEscape(secretName), url.QueryEscape(workspaceID), url.QueryEscape(environment))
 		_, err2 := doJSONRequest(ctx, b.client, "POST", createURL, payload, auth)
 		if err2 != nil {
-			return "", fmt.Errorf("infisical: store secret: %w", err2)
+			return "", "", fmt.Errorf("infisical: store secret: %w", err2)
 		}
 	}
 
-	return fmt.Sprintf("%s/%s/%s", workspaceID, environment, secretName), nil
+	return fmt.Sprintf("%s/%s/%s", workspaceID, environment, secretName), "", nil
 }
 
 func (b *infisicalBackend) getToken(ctx context.Context) (string, error) {

@@ -299,10 +299,10 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Label string
 	}
 	allDurations := []durationOption{
-		{3600, t("1_hour")},
-		{14400, t("4_hours")},
-		{28800, t("8_hours")},
-		{86400, t("1_day")},
+		{3600, "1h"},
+		{14400, "4h"},
+		{28800, "8h"},
+		{86400, "1d"},
 	}
 	var elevateDurations []durationOption
 	graceSec := int(s.cfg.GracePeriod.Seconds())

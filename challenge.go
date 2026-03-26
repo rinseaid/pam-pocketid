@@ -105,7 +105,8 @@ const maxActionLogPrune = 1000
 // EscrowRecord stores metadata about a host's escrowed break-glass password.
 type EscrowRecord struct {
 	Timestamp time.Time `json:"timestamp"`
-	ItemID    string    `json:"item_id,omitempty"` // external secrets manager item ID
+	ItemID    string    `json:"item_id,omitempty"`   // external secrets manager item ID
+	VaultID   string    `json:"vault_id,omitempty"`  // resolved vault/container UUID (1password-connect)
 }
 
 // ChallengeStore manages in-memory sudo challenges with TTL expiration.
@@ -653,10 +654,10 @@ func (s *ChallengeStore) CreateGraceSession(username, hostname string, duration 
 }
 
 // RecordEscrow records that a host has escrowed a break-glass password.
-func (s *ChallengeStore) RecordEscrow(hostname, itemID string) {
+func (s *ChallengeStore) RecordEscrow(hostname, itemID, vaultID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.escrowedHosts[hostname] = EscrowRecord{Timestamp: time.Now(), ItemID: itemID}
+	s.escrowedHosts[hostname] = EscrowRecord{Timestamp: time.Now(), ItemID: itemID, VaultID: vaultID}
 	s.saveStateLocked()
 }
 

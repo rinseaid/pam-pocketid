@@ -774,8 +774,8 @@ func TestEscrowedHosts(t *testing.T) {
 		t.Errorf("expected empty, got %v", got)
 	}
 
-	store.RecordEscrow("host-1", "item-abc")
-	store.RecordEscrow("host-2", "item-def")
+	store.RecordEscrow("host-1", "item-abc", "vault-123")
+	store.RecordEscrow("host-2", "item-def", "")
 
 	escrowed := store.EscrowedHosts()
 	if len(escrowed) != 2 {
