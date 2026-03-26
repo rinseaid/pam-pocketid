@@ -1115,18 +1115,9 @@ const adminPageHTML = `<!DOCTYPE html>
     .sort-btn { display: inline-block; padding: 4px 6px; margin-left: 4px; color: var(--border); text-decoration: none; font-size: 0.75rem; border-radius: 4px; }
     .sort-btn:hover { color: var(--text); background: var(--info-bg); }
     .sort-btn.active { color: var(--primary); }
-    .users-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .users-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; min-width: 700px; table-layout: fixed; }
-    .users-table th { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); text-align: left; white-space: nowrap; }
-    .users-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    .groups-table-wrap .users-table td { vertical-align: middle; }
     .user-name { font-weight: 600; }
-    .user-groups { margin-bottom: 4px; }
     .group-badge { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 8px; background: var(--info-bg); color: var(--text-secondary); white-space: nowrap; margin-right: 3px; margin-bottom: 2px; text-decoration: none; }
     .group-badge-link:hover { background: var(--primary); color: var(--primary-text); }
-    .perms-cell { min-width: 140px; }
-    .col-last-active { white-space: nowrap; }
-    .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
     .summary-chip { font-size: 0.65rem; padding: 2px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; user-select: none; display: inline-flex; align-items: center; gap: 4px; transition: opacity 0.15s; }
     .summary-chip:hover { opacity: 0.8; }
     .summary-chip.commands { background: var(--chip-cmd-bg); color: var(--primary); border: 1px solid var(--chip-cmd-border); }
@@ -1141,19 +1132,10 @@ const adminPageHTML = `<!DOCTYPE html>
     .pill { display: inline-block; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
     .pill.cmd { background: rgba(59,130,246,0.1); color: #93c5fd; font-family: monospace; }
     .pill.host { background: rgba(16,185,129,0.1); color: #6ee7b7; }
-    .user-actions { white-space: nowrap; text-align: right; }
-    .user-actions form { display: inline; }
-    @media (max-width: 600px) {
-      .users-table, .users-table thead, .users-table tbody, .users-table th, .users-table td, .users-table tr {
-        display: block; width: 100%; min-width: 0;
-      }
-      .users-table thead { display: none; }
-      .users-table tr { padding: 12px 0; border-bottom: 1px solid var(--border); }
-      .users-table td { padding: 4px 0; border: none; }
-      .users-table td:before { content: attr(data-label); font-weight: 600; font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 2px; }
-      .user-actions { text-align: left; margin-top: 8px; }
-      .user-actions:before { display: none !important; }
-    }
+    .user-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-secondary); padding: 4px 0 2px; }
+    .user-card-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .group-card-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.8rem; padding: 2px 0; }
+    .group-card-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); white-space: nowrap; }
   </style>
   <script nonce="{{.CSPNonce}}">
   if(!document.cookie.split(';').some(function(c){return c.trim().indexOf('pam_tz=')===0;})){
@@ -1461,27 +1443,17 @@ const adminPageHTML = `<!DOCTYPE html>
 
     {{else if eq .AdminTab "users"}}
     {{if .Users}}
-    <div class="users-table-wrap">
-    <table class="users-table">
-      <thead>
-        <tr>
-          <th scope="col" style="width:18%">{{call .T "user"}}</th>
-          <th scope="col">{{call .T "groups"}}</th>
-          <th scope="col" style="width:9%">{{call .T "active_sessions_count"}}</th>
-          <th scope="col" class="col-last-active" style="width:16%">{{call .T "last_active"}}</th>
-          <th scope="col" style="width:22%"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Users}}
-        <tr>
-          <td data-label="{{call $.T "user"}}"><span class="user-name">{{.Username}}</span></td>
-          <td data-label="{{call $.T "groups"}}">{{if .Groups}}{{range .Groups}}<a href="/admin/groups#group-{{.Name}}" class="group-badge group-badge-link">{{.Name}}</a> {{end}}{{else}}—{{end}}</td>
-          <td data-label="{{call $.T "active_sessions_count"}}">{{.ActiveSessions}}</td>
-          <td class="col-last-active" data-label="{{call $.T "last_active"}}">{{if .LastActiveAgo}}<span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{else}}—{{end}}</td>
-          <td class="user-actions">
+    <div class="list" role="list">
+      {{range .Users}}
+      <div class="row" role="listitem" style="flex-direction:column;align-items:stretch;gap:0">
+        <div class="host-row-header">
+          <div class="host-row-header-info">
+            <span class="user-name">{{.Username}}</span>
+            {{if .Groups}}{{range .Groups}}<a href="/admin/groups#group-{{.Name}}" class="group-badge group-badge-link">{{.Name}}</a>{{end}}{{end}}
+          </div>
+          <div class="host-row-header-actions">
             {{if gt .ActiveSessions 0}}
-            <form method="POST" action="/api/sessions/revoke-all" style="display:inline;margin-right:4px">
+            <form method="POST" action="/api/sessions/revoke-all" style="display:inline">
               <input type="hidden" name="username" value="{{$.Username}}">
               <input type="hidden" name="session_username" value="{{.Username}}">
               <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
@@ -1490,7 +1462,7 @@ const adminPageHTML = `<!DOCTYPE html>
               <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_all_user") .Username}}')">{{call $.T "revoke_all"}}</button>
             </form>
             {{end}}
-            <a href="/history?user={{.Username}}" class="host-btn" style="margin-right:4px">{{call $.T "history"}}</a>
+            <a href="/history?user={{.Username}}" class="host-btn">{{call $.T "history"}}</a>
             <form method="POST" action="/api/users/remove" style="display:inline">
               <input type="hidden" name="target_user" value="{{.Username}}">
               <input type="hidden" name="username" value="{{$.Username}}">
@@ -1498,11 +1470,14 @@ const adminPageHTML = `<!DOCTYPE html>
               <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
               <button type="submit" class="host-btn danger" onclick="return confirm('{{call $.T "confirm_remove_user"}}')">{{call $.T "remove_user"}}</button>
             </form>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+          </div>
+        </div>
+        <div class="user-card-meta">
+          <span>{{call $.T "active_sessions_count"}}: {{.ActiveSessions}}</span>
+          {{if .LastActiveAgo}}<span class="summary-sep">·</span><span class="timestamp">{{.LastActive}}</span><span class="time-ago">{{.LastActiveAgo}}</span>{{end}}
+        </div>
+      </div>
+      {{end}}
     </div>
     {{else}}
     <p class="empty-state">{{call .T "no_users"}}</p>
@@ -1510,35 +1485,29 @@ const adminPageHTML = `<!DOCTYPE html>
 
     {{else if eq .AdminTab "groups"}}
     {{if .Groups}}
-    <div class="groups-table-wrap">
-    <table class="users-table" style="table-layout:auto">
-      <thead>
-        <tr>
-          <th scope="col" style="width:18%">{{call .T "group"}}</th>
-          <th scope="col">{{call .T "commands"}}</th>
-          <th scope="col">{{call .T "hosts"}}</th>
-          <th scope="col" style="width:12%">{{call .T "sudo_run_as"}}</th>
-          <th scope="col">{{call .T "members"}}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Groups}}
-        <tr id="group-{{.Name}}">
-          <td data-label="{{call $.T "group"}}"><span class="user-name">{{.Name}}</span></td>
-          <td data-label="{{call $.T "commands"}}">
-            {{if .AllCmds}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_commands"}}</span>
-            {{else}}{{range .CmdList}}<span class="pill cmd" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
-          </td>
-          <td data-label="{{call $.T "hosts"}}">
-            {{if .AllHosts}}<span class="summary-chip all" style="cursor:default">{{call $.T "all_hosts"}}</span>
-            {{else}}{{range .HostList}}<span class="pill host" style="display:inline-block;margin:1px 2px">{{.}}</span>{{end}}{{end}}
-          </td>
-          <td data-label="{{call $.T "sudo_run_as"}}">{{if .SudoRunAs}}{{.SudoRunAs}}{{else}}—{{end}}</td>
-          <td data-label="{{call $.T "members"}}">{{range .Members}}<span class="group-badge" style="margin-bottom:2px">{{.}}</span> {{end}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+    <div class="list" role="list">
+      {{range .Groups}}
+      <div class="row" id="group-{{.Name}}" role="listitem" style="flex-direction:column;align-items:stretch;gap:4px">
+        <span class="user-name">{{.Name}}</span>
+        <div class="group-card-row">
+          <span class="group-card-label">{{call $.T "commands"}}</span>
+          {{if .AllCmds}}<span class="summary-chip all">{{call $.T "all_commands"}}</span>
+          {{else}}{{range .CmdList}}<span class="pill cmd">{{.}}</span>{{end}}{{end}}
+        </div>
+        <div class="group-card-row">
+          <span class="group-card-label">{{call $.T "hosts"}}</span>
+          {{if .AllHosts}}<span class="summary-chip all">{{call $.T "all_hosts"}}</span>
+          {{else}}{{range .HostList}}<span class="pill host">{{.}}</span>{{end}}{{end}}
+        </div>
+        <div class="group-card-row">
+          <span class="group-card-label">{{call $.T "sudo_run_as"}}</span>
+          <span>{{if .SudoRunAs}}{{.SudoRunAs}}{{else}}—{{end}}</span>
+          <span class="summary-sep">·</span>
+          <span class="group-card-label">{{call $.T "members"}}</span>
+          {{range .Members}}<span class="group-badge">{{.}}</span>{{end}}
+        </div>
+      </div>
+      {{end}}
     </div>
     {{else}}
     <p class="empty-state">{{call .T "no_groups"}}</p>
