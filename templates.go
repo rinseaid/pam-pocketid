@@ -1017,11 +1017,22 @@ const adminPageHTML = `<!DOCTYPE html>
     .modal-box h3 { margin: 0 0 16px; font-size: 1rem; }
     .modal-field { margin-bottom: 12px; }
     .modal-field label { display: block; font-size: 0.813rem; font-weight: 600; margin-bottom: 4px; }
-    .modal-field input,.modal-field select,.modal-field textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.875rem; font-family: inherit; }
-    .modal-field textarea { font-family: monospace; font-size: 0.75rem; resize: vertical; }
+    .modal-field input,.modal-field select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.875rem; font-family: inherit; }
+    .modal-field select { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 12px; padding-right: 30px; cursor: pointer; }
     .modal-row { display: flex; gap: 8px; }
     .modal-row .modal-field { flex: 1; }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .modal-actions .host-btn:not(.primary) { background: var(--bg); }
+    .key-upload-row { display: flex; gap: 8px; }
+    .key-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.813rem; font-weight: 600; font-family: inherit; cursor: pointer; }
+    .key-action-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .key-info-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--success); border-radius: 8px; background: var(--success-bg, rgba(34,197,94,.08)); margin-bottom: 8px; }
+    .key-info-icon { color: var(--success); font-size: 1rem; flex-shrink: 0; }
+    .key-info-text { min-width: 0; }
+    .key-info-type { font-size: 0.75rem; font-weight: 700; color: var(--success); text-transform: uppercase; letter-spacing: .05em; }
+    .key-info-fp { font-size: 0.75rem; font-family: monospace; color: var(--text-secondary); word-break: break-all; }
+    .key-clear-btn { font-size: 0.75rem; color: var(--text-secondary); background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
+    .key-clear-btn:hover { color: var(--text); }
     .deploy-log { background: var(--code-bg, #1a1a2e); color: #c8f0c8; font-family: monospace; font-size: 0.75rem; border-radius: 8px; padding: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; display: none; }
     .deploy-log.visible { display: block; }
     .deploy-status { font-size: 0.813rem; font-weight: 600; margin-top: 8px; }
@@ -1182,6 +1193,45 @@ const adminPageHTML = `<!DOCTYPE html>
     var deployCancelBtn=document.getElementById('deploy-cancel-btn');
     var deploySubmitBtn=document.getElementById('deploy-submit-btn');
     var deployCloseBtn=document.getElementById('deploy-close-btn');
+    var deployPrivKey=''; // in-memory only, never written to DOM
+
+    function deployResetKey(){
+      deployPrivKey='';
+      document.getElementById('deploy-key-empty').style.display='';
+      document.getElementById('deploy-key-loaded').style.display='none';
+      document.getElementById('deploy-key-validating').style.display='none';
+      document.getElementById('deploy-key-invalid').style.display='none';
+      document.getElementById('deploy-key-file').value='';
+      if(deploySubmitBtn) deploySubmitBtn.disabled=true;
+    }
+
+    function deployValidateKey(pem){
+      document.getElementById('deploy-key-validating').style.display='';
+      document.getElementById('deploy-key-invalid').style.display='none';
+      fetch('/api/deploy/pubkey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({private_key:pem})})
+      .then(function(r){
+        if(!r.ok){return r.text().then(function(t){throw new Error(t||r.statusText);});}
+        return r.json();
+      })
+      .then(function(d){
+        deployPrivKey=pem;
+        document.getElementById('deploy-key-validating').style.display='none';
+        document.getElementById('deploy-key-empty').style.display='none';
+        document.getElementById('deploy-key-type').textContent=d.type;
+        document.getElementById('deploy-key-fp').textContent=d.fingerprint;
+        document.getElementById('deploy-key-loaded').style.display='';
+        if(deploySubmitBtn) deploySubmitBtn.disabled=false;
+      })
+      .catch(function(err){
+        deployPrivKey='';
+        document.getElementById('deploy-key-validating').style.display='none';
+        var inv=document.getElementById('deploy-key-invalid');
+        inv.textContent=err.message||'Invalid key';
+        inv.style.display='';
+        if(deploySubmitBtn) deploySubmitBtn.disabled=true;
+      });
+    }
+
     function openDeployModal(){
       deployModal.classList.add('open');
       document.getElementById('deploy-form-area').style.display='';
@@ -1190,15 +1240,16 @@ const adminPageHTML = `<!DOCTYPE html>
       document.getElementById('deploy-log').textContent='';
       document.getElementById('deploy-status').textContent='';
       document.getElementById('deploy-status').className='deploy-status';
+      deployResetKey();
       // Load PocketID users with SSH keys
       var sel=document.getElementById('deploy-pocketid-user');
-      sel.innerHTML='<option value="">Loading…</option>';
+      sel.innerHTML='<option value="">Loading\u2026</option>';
       fetch('/api/deploy/users').then(function(r){return r.json();}).then(function(users){
         sel.innerHTML='<option value="">(none)</option>';
         (users||[]).forEach(function(u){
           var o=document.createElement('option');
           o.value=u.username;
-          o.textContent=u.username+(u.email?' ('+u.email+')':'');
+          o.textContent=u.username+(u.email?' \u2014 '+u.email:'');
           sel.appendChild(o);
         });
       }).catch(function(){sel.innerHTML='<option value="">(unavailable)</option>';});
@@ -1211,24 +1262,46 @@ const adminPageHTML = `<!DOCTYPE html>
       deployCancelBtn.addEventListener('click',closeDeployModal);
       deployCloseBtn.addEventListener('click',closeDeployModal);
       deployModal.addEventListener('click',function(e){if(e.target===deployModal)closeDeployModal();});
+      // Paste key from clipboard
+      document.getElementById('deploy-key-paste-btn').addEventListener('click',function(){
+        navigator.clipboard.readText().then(function(text){
+          if(text.trim()) deployValidateKey(text.trim());
+          else{var inv=document.getElementById('deploy-key-invalid');inv.textContent='Clipboard is empty.';inv.style.display='';}
+        }).catch(function(){
+          var inv=document.getElementById('deploy-key-invalid');
+          inv.textContent='Could not read clipboard — try uploading the file instead.';
+          inv.style.display='';
+        });
+      });
+      // Upload key from file
+      document.getElementById('deploy-key-file').addEventListener('change',function(){
+        var f=this.files[0];
+        if(!f) return;
+        var reader=new FileReader();
+        reader.onload=function(e){deployValidateKey(e.target.result.trim());};
+        reader.readAsText(f);
+      });
+      // Clear key
+      document.getElementById('deploy-key-clear-btn').addEventListener('click',deployResetKey);
+      // Submit
       deploySubmitBtn.addEventListener('click',function(){
         var host=document.getElementById('deploy-host').value.trim();
         var port=parseInt(document.getElementById('deploy-port').value)||22;
         var sshUser=document.getElementById('deploy-ssh-user').value.trim()||'root';
         var pocketidUser=document.getElementById('deploy-pocketid-user').value;
-        var privKey=document.getElementById('deploy-key').value.trim();
         var errEl=document.getElementById('deploy-error');
         if(!host){errEl.textContent='Host is required.';errEl.style.display='';return;}
-        if(!privKey){errEl.textContent='Private key is required.';errEl.style.display='';return;}
+        if(!deployPrivKey){errEl.textContent='Private key is required.';errEl.style.display='';return;}
         errEl.style.display='none';
         deploySubmitBtn.disabled=true;
-        deploySubmitBtn.textContent='Starting…';
-        fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hostname:host,port:port,ssh_user:sshUser,private_key:privKey,pocketid_user:pocketidUser})})
+        deploySubmitBtn.textContent='Starting\u2026';
+        fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hostname:host,port:port,ssh_user:sshUser,private_key:deployPrivKey,pocketid_user:pocketidUser})})
         .then(function(r){
           if(!r.ok){return r.text().then(function(t){throw new Error(t||r.statusText);});}
           return r.json();
         })
         .then(function(data){
+          deployPrivKey=''; // clear key from memory once submitted
           deploySubmitBtn.disabled=false;
           deploySubmitBtn.textContent='Deploy';
           document.getElementById('deploy-form-area').style.display='none';
@@ -1242,8 +1315,8 @@ const adminPageHTML = `<!DOCTYPE html>
           });
           es.addEventListener('status',function(e){
             es.close();
-            if(e.data==='done'){statusEl.textContent='✓ Deploy completed successfully.';statusEl.className='deploy-status ok';}
-            else{statusEl.textContent='✗ Deploy failed.';statusEl.className='deploy-status err';}
+            if(e.data==='done'){statusEl.textContent='\u2713 Deploy completed successfully.';statusEl.className='deploy-status ok';}
+            else{statusEl.textContent='\u2717 Deploy failed.';statusEl.className='deploy-status err';}
           });
           es.onerror=function(){es.close();if(!statusEl.textContent){statusEl.textContent='Connection lost.';statusEl.className='deploy-status err';}};
         })
@@ -1660,13 +1733,31 @@ const adminPageHTML = `<!DOCTYPE html>
           </div>
         </div>
         <div class="modal-field">
-          <label for="deploy-key">{{call .T "deploy_key"}}</label>
-          <textarea id="deploy-key" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..." autocomplete="off" spellcheck="false"></textarea>
+          <label>{{call .T "deploy_key"}}</label>
+          <div id="deploy-key-empty">
+            <div class="key-upload-row">
+              <button type="button" class="key-action-btn" id="deploy-key-paste-btn"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>{{call .T "deploy_key_paste"}}</button>
+              <label class="key-action-btn" for="deploy-key-file"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>{{call .T "deploy_key_upload"}}</label>
+              <input type="file" id="deploy-key-file" style="display:none" accept=".pem,.key,.pub,*">
+            </div>
+            <div id="deploy-key-validating" style="display:none;font-size:0.813rem;color:var(--text-secondary);margin-top:8px">{{call .T "deploy_key_validating"}}</div>
+            <div id="deploy-key-invalid" style="display:none;font-size:0.813rem;color:var(--danger);margin-top:8px"></div>
+          </div>
+          <div id="deploy-key-loaded" style="display:none">
+            <div class="key-info-card">
+              <div class="key-info-icon">&#10003;</div>
+              <div class="key-info-text">
+                <div class="key-info-type" id="deploy-key-type"></div>
+                <div class="key-info-fp" id="deploy-key-fp"></div>
+              </div>
+            </div>
+            <button type="button" class="key-clear-btn" id="deploy-key-clear-btn">{{call .T "deploy_key_change"}}</button>
+          </div>
         </div>
-        <div id="deploy-error" style="color:var(--danger);font-size:0.813rem;display:none"></div>
+        <div id="deploy-error" style="color:var(--danger);font-size:0.813rem;margin-top:8px;display:none"></div>
         <div class="modal-actions">
           <button type="button" class="host-btn" id="deploy-cancel-btn">{{call .T "cancel"}}</button>
-          <button type="button" class="host-btn primary" id="deploy-submit-btn">{{call .T "deploy_run"}}</button>
+          <button type="button" class="host-btn primary" id="deploy-submit-btn" disabled>{{call .T "deploy_run"}}</button>
         </div>
       </div>
       <div id="deploy-log-area" style="display:none">

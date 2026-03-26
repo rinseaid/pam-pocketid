@@ -244,5 +244,9 @@
   "deploy_user_loading": "加载中…",
   "deploy_key": "私钥",
   "deploy_run": "部署",
-  "close": "关闭"
+  "close": "关闭",
+  "deploy_key_paste": "从剪贴板粘贴",
+  "deploy_key_upload": "上传文件",
+  "deploy_key_validating": "正在验证密钥…",
+  "deploy_key_change": "更换密钥"
 }

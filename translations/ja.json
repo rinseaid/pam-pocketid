@@ -244,5 +244,9 @@
   "deploy_user_loading": "読込中…",
   "deploy_key": "秘密鍵",
   "deploy_run": "デプロイ",
-  "close": "閉じる"
+  "close": "閉じる",
+  "deploy_key_paste": "クリップボードから貼り付け",
+  "deploy_key_upload": "ファイルをアップロード",
+  "deploy_key_validating": "キーを検証中…",
+  "deploy_key_change": "キーを変更"
 }

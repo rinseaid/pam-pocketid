@@ -244,5 +244,9 @@
   "deploy_user_loading": "Laden…",
   "deploy_key": "Privater Schlüssel",
   "deploy_run": "Deployen",
-  "close": "Schließen"
+  "close": "Schließen",
+  "deploy_key_paste": "Aus Zwischenablage einfügen",
+  "deploy_key_upload": "Datei hochladen",
+  "deploy_key_validating": "Schlüssel wird geprüft…",
+  "deploy_key_change": "Schlüssel ändern"
 }

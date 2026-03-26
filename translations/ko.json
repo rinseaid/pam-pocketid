@@ -244,5 +244,9 @@
   "deploy_user_loading": "로딩 중…",
   "deploy_key": "개인 키",
   "deploy_run": "배포",
-  "close": "닫기"
+  "close": "닫기",
+  "deploy_key_paste": "클립보드에서 붙여넣기",
+  "deploy_key_upload": "파일 업로드",
+  "deploy_key_validating": "키 검증 중…",
+  "deploy_key_change": "키 변경"
 }

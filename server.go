@@ -151,6 +151,7 @@ s.mux.HandleFunc("/api/users/remove", s.handleRemoveUser)
 	s.mux.HandleFunc("/signout", s.handleSignOut)
 	s.mux.HandleFunc("/install.sh", s.handleInstallScript)
 	s.mux.HandleFunc("/api/deploy/users", s.handleDeployUsers)
+	s.mux.HandleFunc("/api/deploy/pubkey", s.handleDeployPubkey)
 	s.mux.HandleFunc("/api/deploy/stream/", s.handleDeployStream)
 	s.mux.HandleFunc("/api/deploy", s.handleDeploy)
 	// Dashboard is the catch-all — register AFTER all other routes.

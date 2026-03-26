@@ -244,5 +244,9 @@
   "deploy_user_loading": "Loading…",
   "deploy_key": "Private key",
   "deploy_run": "Deploy",
-  "close": "Close"
+  "close": "Close",
+  "deploy_key_paste": "Paste from clipboard",
+  "deploy_key_upload": "Upload file",
+  "deploy_key_validating": "Validating key…",
+  "deploy_key_change": "Change key"
 }

@@ -244,5 +244,9 @@
   "deploy_user_loading": "Carregando…",
   "deploy_key": "Chave privada",
   "deploy_run": "Implantar",
-  "close": "Fechar"
+  "close": "Fechar",
+  "deploy_key_paste": "Colar da área de transferência",
+  "deploy_key_upload": "Fazer upload de arquivo",
+  "deploy_key_validating": "Validando chave…",
+  "deploy_key_change": "Alterar chave"
 }

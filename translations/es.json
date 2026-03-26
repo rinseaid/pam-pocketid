@@ -244,5 +244,9 @@
   "deploy_user_loading": "Cargando…",
   "deploy_key": "Clave privada",
   "deploy_run": "Desplegar",
-  "close": "Cerrar"
+  "close": "Cerrar",
+  "deploy_key_paste": "Pegar del portapapeles",
+  "deploy_key_upload": "Subir archivo",
+  "deploy_key_validating": "Validando clave…",
+  "deploy_key_change": "Cambiar clave"
 }

@@ -244,5 +244,9 @@
   "deploy_user_loading": "Chargement…",
   "deploy_key": "Clé privée",
   "deploy_run": "Déployer",
-  "close": "Fermer"
+  "close": "Fermer",
+  "deploy_key_paste": "Coller depuis le presse-papiers",
+  "deploy_key_upload": "Téléverser un fichier",
+  "deploy_key_validating": "Validation de la clé…",
+  "deploy_key_change": "Changer de clé"
 }

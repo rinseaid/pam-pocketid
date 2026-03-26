@@ -121,6 +121,36 @@ func (r *deployRateLimiter) allow(ip string) bool {
 
 // --- Handlers ---
 
+// handleDeployPubkey parses a private key and returns its type and SHA256 fingerprint.
+// POST /api/deploy/pubkey — admin-only; used by the browser to validate a key before deploying.
+func (s *Server) handleDeployPubkey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.getSessionUser(r) == "" || s.getSessionRole(r) != "admin" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		PrivateKey string `json:"private_key"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, deployRequestMaxBody)).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	signer, err := gossh.ParsePrivateKey([]byte(req.PrivateKey))
+	if err != nil {
+		http.Error(w, "invalid key: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"type":        signer.PublicKey().Type(),
+		"fingerprint": gossh.FingerprintSHA256(signer.PublicKey()),
+	})
+}
+
 // handleDeployUsers returns PocketID users with at least one sshPublicKey* claim.
 // GET /api/deploy/users — admin-only
 func (s *Server) handleDeployUsers(w http.ResponseWriter, r *http.Request) {
