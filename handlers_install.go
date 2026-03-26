@@ -101,7 +101,31 @@ fi
 # ── Config file ─────────────────────────────────────────────────────────────
 
 if [ -f "$CONFIG_FILE" ]; then
-    echo "Config file already exists: $CONFIG_FILE — skipping."
+    conf_url=$(grep -E '^PAM_POCKETID_SERVER_URL=' "$CONFIG_FILE" | cut -d= -f2- || true)
+    conf_secret=$(grep -E '^PAM_POCKETID_SHARED_SECRET=' "$CONFIG_FILE" | cut -d= -f2- || true)
+    echo "Config file exists: $CONFIG_FILE"
+    if [ -z "$conf_url" ]; then
+        echo "  WARNING: PAM_POCKETID_SERVER_URL missing"
+    else
+        echo "  PAM_POCKETID_SERVER_URL=$conf_url"
+    fi
+    if [ -z "$conf_secret" ]; then
+        echo "  WARNING: PAM_POCKETID_SHARED_SECRET missing"
+    else
+        echo "  PAM_POCKETID_SHARED_SECRET=${conf_secret:0:4}****"
+    fi
+    # Overwrite if SHARED_SECRET provided and config differs
+    NEW_SECRET="${SHARED_SECRET:-}"
+    if [ -n "$NEW_SECRET" ] && { [ "$conf_url" != "$SERVER_URL" ] || [ "$conf_secret" != "$NEW_SECRET" ]; }; then
+        cat > "$CONFIG_FILE" <<EOF
+PAM_POCKETID_SERVER_URL=$SERVER_URL
+PAM_POCKETID_SHARED_SECRET=$NEW_SECRET
+EOF
+        chmod 600 "$CONFIG_FILE"
+        echo "  Updated $CONFIG_FILE with current values."
+    else
+        echo "  Config is up to date."
+    fi
     CONFIG_WRITTEN=1
 else
     SECRET="${SHARED_SECRET:-}"
