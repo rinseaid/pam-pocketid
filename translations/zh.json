@@ -248,5 +248,6 @@
   "deploy_key_paste": "从剪贴板粘贴",
   "deploy_key_upload": "上传文件",
   "deploy_key_validating": "正在验证密钥…",
-  "deploy_key_change": "更换密钥"
+  "deploy_key_change": "更换密钥",
+  "cancel": "取消"
 }

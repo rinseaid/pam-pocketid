@@ -248,5 +248,6 @@
   "deploy_key_paste": "クリップボードから貼り付け",
   "deploy_key_upload": "ファイルをアップロード",
   "deploy_key_validating": "キーを検証中…",
-  "deploy_key_change": "キーを変更"
+  "deploy_key_change": "キーを変更",
+  "cancel": "キャンセル"
 }

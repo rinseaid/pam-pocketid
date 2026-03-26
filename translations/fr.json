@@ -248,5 +248,6 @@
   "deploy_key_paste": "Coller depuis le presse-papiers",
   "deploy_key_upload": "Téléverser un fichier",
   "deploy_key_validating": "Validation de la clé…",
-  "deploy_key_change": "Changer de clé"
+  "deploy_key_change": "Changer de clé",
+  "cancel": "Annuler"
 }

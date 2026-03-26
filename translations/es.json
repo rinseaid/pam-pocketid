@@ -248,5 +248,6 @@
   "deploy_key_paste": "Pegar del portapapeles",
   "deploy_key_upload": "Subir archivo",
   "deploy_key_validating": "Validando clave…",
-  "deploy_key_change": "Cambiar clave"
+  "deploy_key_change": "Cambiar clave",
+  "cancel": "Cancelar"
 }

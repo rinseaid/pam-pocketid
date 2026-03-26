@@ -248,5 +248,6 @@
   "deploy_key_paste": "Paste from clipboard",
   "deploy_key_upload": "Upload file",
   "deploy_key_validating": "Validating key…",
-  "deploy_key_change": "Change key"
+  "deploy_key_change": "Change key",
+  "cancel": "Cancel"
 }

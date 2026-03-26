@@ -1022,9 +1022,11 @@ const adminPageHTML = `<!DOCTYPE html>
     .modal-row { display: flex; gap: 8px; }
     .modal-row .modal-field { flex: 1; }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .modal-actions .host-btn { min-width: 90px; justify-content: center; }
     .modal-actions .host-btn:not(.primary) { background: var(--bg); }
+    .host-btn:disabled { opacity: 0.38; cursor: not-allowed; }
     .key-upload-row { display: flex; gap: 8px; }
-    .key-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.813rem; font-weight: 600; font-family: inherit; cursor: pointer; }
+    .key-action-btn { display: flex; align-items: center; justify-content: center; gap: 6px; flex: 1; padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.813rem; font-weight: 600; font-family: inherit; cursor: pointer; text-align: center; }
     .key-action-btn:hover { border-color: var(--primary); color: var(--primary); }
     .key-info-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--success); border-radius: 8px; background: var(--success-bg, rgba(34,197,94,.08)); margin-bottom: 8px; }
     .key-info-icon { color: var(--success); font-size: 1rem; flex-shrink: 0; }
@@ -1195,6 +1197,11 @@ const adminPageHTML = `<!DOCTYPE html>
     var deployCloseBtn=document.getElementById('deploy-close-btn');
     var deployPrivKey=''; // in-memory only, never written to DOM
 
+    function deployCheckReady(){
+      var host=document.getElementById('deploy-host').value.trim();
+      if(deploySubmitBtn) deploySubmitBtn.disabled=!(host && deployPrivKey);
+    }
+
     function deployResetKey(){
       deployPrivKey='';
       document.getElementById('deploy-key-empty').style.display='';
@@ -1202,7 +1209,7 @@ const adminPageHTML = `<!DOCTYPE html>
       document.getElementById('deploy-key-validating').style.display='none';
       document.getElementById('deploy-key-invalid').style.display='none';
       document.getElementById('deploy-key-file').value='';
-      if(deploySubmitBtn) deploySubmitBtn.disabled=true;
+      deployCheckReady();
     }
 
     function deployValidateKey(pem){
@@ -1220,7 +1227,7 @@ const adminPageHTML = `<!DOCTYPE html>
         document.getElementById('deploy-key-type').textContent=d.type;
         document.getElementById('deploy-key-fp').textContent=d.fingerprint;
         document.getElementById('deploy-key-loaded').style.display='';
-        if(deploySubmitBtn) deploySubmitBtn.disabled=false;
+        deployCheckReady();
       })
       .catch(function(err){
         deployPrivKey='';
@@ -1262,6 +1269,7 @@ const adminPageHTML = `<!DOCTYPE html>
       deployCancelBtn.addEventListener('click',closeDeployModal);
       deployCloseBtn.addEventListener('click',closeDeployModal);
       deployModal.addEventListener('click',function(e){if(e.target===deployModal)closeDeployModal();});
+      document.getElementById('deploy-host').addEventListener('input',deployCheckReady);
       // Paste key from clipboard
       document.getElementById('deploy-key-paste-btn').addEventListener('click',function(){
         navigator.clipboard.readText().then(function(text){
@@ -1737,7 +1745,7 @@ const adminPageHTML = `<!DOCTYPE html>
           <div id="deploy-key-empty">
             <div class="key-upload-row">
               <button type="button" class="key-action-btn" id="deploy-key-paste-btn"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>{{call .T "deploy_key_paste"}}</button>
-              <label class="key-action-btn" for="deploy-key-file"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>{{call .T "deploy_key_upload"}}</label>
+              <label class="key-action-btn" for="deploy-key-file"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>{{call .T "deploy_key_upload"}}</span></label>
               <input type="file" id="deploy-key-file" style="display:none" accept=".pem,.key,.pub,*">
             </div>
             <div id="deploy-key-validating" style="display:none;font-size:0.813rem;color:var(--text-secondary);margin-top:8px">{{call .T "deploy_key_validating"}}</div>
