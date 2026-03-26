@@ -41,48 +41,52 @@ fi
 echo "Latest version: $VERSION"
 
 # Check if already installed at this version
+SKIP_DOWNLOAD=false
 if [ -f "$INSTALL_DIR/pam-pocketid" ]; then
     CURRENT=$("$INSTALL_DIR/pam-pocketid" --version 2>/dev/null || echo "unknown")
     if [ "$CURRENT" = "$VERSION" ]; then
-        echo "Already at $VERSION — nothing to do."
-        exit 0
+        echo "Binary already at $VERSION — skipping download."
+        SKIP_DOWNLOAD=true
+    else
+        echo "Upgrading from $CURRENT to $VERSION"
     fi
-    echo "Upgrading from $CURRENT to $VERSION"
 else
     echo "Installing $VERSION"
 fi
 
-# Download
-URL="https://github.com/$REPO/releases/download/$VERSION/pam-pocketid-$SUFFIX"
-echo "Downloading $URL..."
-TMP_BIN="/tmp/pam-pocketid-$SUFFIX"
-TMP_SUMS="/tmp/pam-pocketid-checksums"
-trap 'rm -f "$TMP_BIN" "$TMP_SUMS"' EXIT
-curl -fsSL -o "$TMP_BIN" "$URL"
+# Download and install binary (skip if already at target version)
+if [ "$SKIP_DOWNLOAD" = false ]; then
+    URL="https://github.com/$REPO/releases/download/$VERSION/pam-pocketid-$SUFFIX"
+    echo "Downloading $URL..."
+    TMP_BIN="/tmp/pam-pocketid-$SUFFIX"
+    TMP_SUMS="/tmp/pam-pocketid-checksums"
+    trap 'rm -f "$TMP_BIN" "$TMP_SUMS"' EXIT
+    curl -fsSL -o "$TMP_BIN" "$URL"
 
-# Download checksum file
-curl -fsSL -o "$TMP_SUMS" \
-  "https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
+    # Download checksum file
+    curl -fsSL -o "$TMP_SUMS" \
+      "https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
 
-# Verify
-cd /tmp
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c --ignore-missing pam-pocketid-checksums || {
-    echo "ERROR: checksum verification failed"
-    exit 1
-  }
-elif command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 -c --ignore-missing pam-pocketid-checksums || {
-    echo "ERROR: checksum verification failed"
-    exit 1
-  }
-else
-  echo "WARNING: no sha256sum or shasum available, skipping checksum verification"
+    # Verify
+    cd /tmp
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum -c --ignore-missing pam-pocketid-checksums || {
+        echo "ERROR: checksum verification failed"
+        exit 1
+      }
+    elif command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 -c --ignore-missing pam-pocketid-checksums || {
+        echo "ERROR: checksum verification failed"
+        exit 1
+      }
+    else
+      echo "WARNING: no sha256sum or shasum available, skipping checksum verification"
+    fi
+
+    # Install binary
+    install -m 755 "$TMP_BIN" "$INSTALL_DIR/pam-pocketid"
+    echo "Installed $INSTALL_DIR/pam-pocketid ($VERSION)"
 fi
-
-# Install binary
-install -m 755 "$TMP_BIN" "$INSTALL_DIR/pam-pocketid"
-echo "Installed $INSTALL_DIR/pam-pocketid ($VERSION)"
 
 # Install systemd timer (if systemd is available)
 if command -v systemctl >/dev/null 2>&1; then
@@ -131,6 +135,31 @@ if [ ! -f /etc/pam-pocketid.conf ]; then
     fi
 else
     echo "Config file exists: /etc/pam-pocketid.conf"
+    # Validate contents
+    conf_url=$(grep -E '^PAM_POCKETID_SERVER_URL=' /etc/pam-pocketid.conf | cut -d= -f2- || true)
+    conf_secret=$(grep -E '^PAM_POCKETID_SHARED_SECRET=' /etc/pam-pocketid.conf | cut -d= -f2- || true)
+    if [ -z "$conf_url" ]; then
+        echo "  WARNING: PAM_POCKETID_SERVER_URL is not set in /etc/pam-pocketid.conf"
+    else
+        echo "  PAM_POCKETID_SERVER_URL=$conf_url"
+    fi
+    if [ -z "$conf_secret" ]; then
+        echo "  WARNING: PAM_POCKETID_SHARED_SECRET is not set in /etc/pam-pocketid.conf"
+    else
+        redacted="${conf_secret:0:4}****"
+        echo "  PAM_POCKETID_SHARED_SECRET=$redacted"
+    fi
+    # Overwrite if env vars were provided and differ from what's on disk
+    if [ -n "${PAM_POCKETID_SERVER_URL:-}" ] && [ -n "${PAM_POCKETID_SHARED_SECRET:-}" ]; then
+        if [ "$conf_url" != "$PAM_POCKETID_SERVER_URL" ] || [ "$conf_secret" != "$PAM_POCKETID_SHARED_SECRET" ]; then
+            printf 'PAM_POCKETID_SERVER_URL=%s\nPAM_POCKETID_SHARED_SECRET=%s\n' \
+                "$PAM_POCKETID_SERVER_URL" "$PAM_POCKETID_SHARED_SECRET" > /etc/pam-pocketid.conf
+            chmod 600 /etc/pam-pocketid.conf
+            echo "  Updated /etc/pam-pocketid.conf with new values."
+        else
+            echo "  Config is up to date."
+        fi
+    fi
 fi
 
 echo ""
