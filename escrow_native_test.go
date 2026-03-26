@@ -104,7 +104,7 @@ func TestOpConnectBackendCreate(t *testing.T) {
 		client:  newEscrowHTTPClient(),
 	}
 
-	id, vid, err := b.Store(context.Background(), "web-prod-1", "s3cr3t")
+	id, vid, err := b.Store(context.Background(), "web-prod-1", "s3cr3t", "")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestOpConnectBackendUpdate(t *testing.T) {
 		client:  newEscrowHTTPClient(),
 	}
 
-	id, vid, err := b.Store(context.Background(), "web-prod-1", "newpassword")
+	id, vid, err := b.Store(context.Background(), "web-prod-1", "newpassword", "")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestOpConnectBackendResolveVaultByName(t *testing.T) {
 		client:  newEscrowHTTPClient(),
 	}
 
-	id, vid, err := b.Store(context.Background(), "db-1", "pw")
+	id, vid, err := b.Store(context.Background(), "db-1", "pw", "")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestHCVaultBackendDirectToken(t *testing.T) {
 		client:   newEscrowHTTPClient(),
 	}
 
-	itemID, _, err := b.Store(context.Background(), "host-1", "password")
+	itemID, _, err := b.Store(context.Background(), "host-1", "password", "")
 	if err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -231,5 +231,83 @@ func TestHCVaultBackendDirectToken(t *testing.T) {
 	}
 	if writeCount == 0 {
 		t.Error("expected at least one write request")
+	}
+}
+
+// TestResolveEscrowVault covers the hostname→vault routing logic.
+func TestResolveEscrowVault(t *testing.T) {
+	vaultMap := map[string]string{
+		"web-*":        "web-vault",
+		"db-*":         "db-vault",
+		"db-primary":   "db-primary-vault", // more specific exact match
+		"*-prod":       "prod-vault",
+		"default":      "default-vault",
+	}
+	tests := []struct {
+		hostname string
+		want     string
+	}{
+		{"db-primary", "db-primary-vault"},   // exact beats glob
+		{"web-frontend", "web-vault"},         // prefix glob
+		{"web-backend", "web-vault"},          // prefix glob
+		{"db-replica", "db-vault"},            // prefix glob
+		{"api-prod", "prod-vault"},            // suffix glob
+		{"unknown-host", "default-vault"},     // "default" key fallback
+		{"web-api-prod", "prod-vault"},         // both web-* and *-prod match; *-prod (6 chars) beats web-* (5 chars)
+	}
+	for _, tc := range tests {
+		got := resolveEscrowVault(tc.hostname, vaultMap, "global-vault")
+		if got != tc.want {
+			t.Errorf("resolveEscrowVault(%q) = %q, want %q", tc.hostname, got, tc.want)
+		}
+	}
+
+	// Empty map falls back to defaultVault
+	if got := resolveEscrowVault("anything", nil, "global-vault"); got != "global-vault" {
+		t.Errorf("empty map: got %q, want global-vault", got)
+	}
+
+	// No match and no "default" key falls back to defaultVault
+	sparse := map[string]string{"web-*": "web-vault"}
+	if got := resolveEscrowVault("db-1", sparse, "global-vault"); got != "global-vault" {
+		t.Errorf("no match: got %q, want global-vault", got)
+	}
+}
+
+// TestOpConnectVaultOverride verifies Store uses the vault parameter over b.vault.
+func TestOpConnectVaultOverride(t *testing.T) {
+	const defaultVault = "default-vault-id00000000"
+	const overrideVault = "override-vault-id000000"
+	const itemID = "newitem0000000000000002b"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/"+overrideVault+"/items"):
+			json.NewEncoder(w).Encode([]struct{}{})
+		case r.Method == "POST" && strings.Contains(r.URL.Path, "/"+overrideVault+"/items"):
+			json.NewEncoder(w).Encode(map[string]string{"id": itemID})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "not found", 404)
+		}
+	}))
+	defer srv.Close()
+
+	b := &opConnectBackend{
+		baseURL: srv.URL,
+		token:   "tok",
+		vault:   defaultVault,
+		client:  newEscrowHTTPClient(),
+	}
+
+	id, vid, err := b.Store(context.Background(), "host-1", "pw", overrideVault)
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if id != itemID {
+		t.Errorf("itemID = %q, want %q", id, itemID)
+	}
+	if vid != overrideVault {
+		t.Errorf("vaultID = %q, want %q", vid, overrideVault)
 	}
 }

@@ -16,8 +16,58 @@ import (
 // Store saves the break-glass password for the given hostname and returns
 // an opaque item identifier (URL, path, UUID, etc.) and an optional vault/
 // container identifier for recording in the escrow log. Both may be empty.
+//
+// vault overrides the backend's default storage location for this call —
+// vault name/UUID for 1password-connect, KV path prefix for Vault,
+// {orgId}/{projectId} for Bitwarden, {workspaceId}/{env} for Infisical.
+// Pass empty string to use the backend's configured default (ESCROW_PATH).
 type escrowBackend interface {
-	Store(ctx context.Context, hostname, password string) (itemID, vaultID string, err error)
+	Store(ctx context.Context, hostname, password, vault string) (itemID, vaultID string, err error)
+}
+
+// resolveEscrowVault returns the vault/path to use for a given hostname by
+// consulting the vault map from ESCROW_VAULT_MAP. Lookup order:
+//  1. Exact hostname match
+//  2. Best glob match — "prefix*" or "*suffix"; longest pattern wins
+//  3. "default" key in the map
+//  4. defaultVault (the global ESCROW_PATH)
+func resolveEscrowVault(hostname string, vaultMap map[string]string, defaultVault string) string {
+	if len(vaultMap) == 0 {
+		return defaultVault
+	}
+	// 1. Exact match
+	if v, ok := vaultMap[hostname]; ok {
+		return v
+	}
+	// 2. Best glob match (longest pattern = most specific)
+	best, bestLen := "", -1
+	for pattern, vault := range vaultMap {
+		if pattern == "default" {
+			continue
+		}
+		var matched bool
+		if strings.HasSuffix(pattern, "*") {
+			if strings.HasPrefix(hostname, strings.TrimSuffix(pattern, "*")) {
+				matched = true
+			}
+		} else if strings.HasPrefix(pattern, "*") {
+			if strings.HasSuffix(hostname, strings.TrimPrefix(pattern, "*")) {
+				matched = true
+			}
+		}
+		if matched && len(pattern) > bestLen {
+			best, bestLen = vault, len(pattern)
+		}
+	}
+	if bestLen >= 0 {
+		return best
+	}
+	// 3. Explicit "default" key
+	if v, ok := vaultMap["default"]; ok {
+		return v
+	}
+	// 4. Global default
+	return defaultVault
 }
 
 // newEscrowBackend returns the configured native escrow backend, or nil if
@@ -141,8 +191,11 @@ type opConnectBackend struct {
 	client  *http.Client
 }
 
-func (b *opConnectBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
-	vaultID, err := b.resolveVault(ctx)
+func (b *opConnectBackend) Store(ctx context.Context, hostname, password, vault string) (string, string, error) {
+	if vault == "" {
+		vault = b.vault
+	}
+	vaultID, err := b.resolveVaultName(ctx, vault)
 	if err != nil {
 		return "", "", fmt.Errorf("1password-connect: resolve vault: %w", err)
 	}
@@ -203,9 +256,9 @@ func (b *opConnectBackend) Store(ctx context.Context, hostname, password string)
 	return itemID, vaultID, nil
 }
 
-func (b *opConnectBackend) resolveVault(ctx context.Context) (string, error) {
-	if looksLikeID(b.vault) {
-		return b.vault, nil
+func (b *opConnectBackend) resolveVaultName(ctx context.Context, name string) (string, error) {
+	if looksLikeID(name) {
+		return name, nil
 	}
 	respData, err := doJSONRequest(ctx, b.client, "GET", b.baseURL+"/v1/vaults", nil, "Bearer "+b.token)
 	if err != nil {
@@ -219,11 +272,11 @@ func (b *opConnectBackend) resolveVault(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("parsing vaults: %w", err)
 	}
 	for _, v := range vaults {
-		if strings.EqualFold(v.Name, b.vault) {
+		if strings.EqualFold(v.Name, name) {
 			return v.ID, nil
 		}
 	}
-	return "", fmt.Errorf("vault %q not found", b.vault)
+	return "", fmt.Errorf("vault %q not found", name)
 }
 
 func (b *opConnectBackend) findItem(ctx context.Context, vaultID, title string) (string, error) {
@@ -264,14 +317,18 @@ type hcVaultBackend struct {
 	client   *http.Client
 }
 
-func (b *hcVaultBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
+func (b *hcVaultBackend) Store(ctx context.Context, hostname, password, vault string) (string, string, error) {
 	token, err := b.getToken(ctx)
 	if err != nil {
 		return "", "", fmt.Errorf("vault: auth: %w", err)
 	}
 
+	path := vault
+	if path == "" {
+		path = b.path
+	}
 	// Split path into mount + prefix. e.g., "secret/pam-pocketid" → "secret", "pam-pocketid"
-	mount, prefix, hasPrefix := strings.Cut(b.path, "/")
+	mount, prefix, hasPrefix := strings.Cut(path, "/")
 	var kvPath string
 	if hasPrefix {
 		kvPath = fmt.Sprintf("/v1/%s/data/%s/%s", mount, prefix, hostname)
@@ -382,13 +439,17 @@ func (b *bitwardenBackend) identityURL() string {
 	return base + "/identity"
 }
 
-func (b *bitwardenBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
+func (b *bitwardenBackend) Store(ctx context.Context, hostname, password, vault string) (string, string, error) {
 	accessToken, err := b.getToken(ctx)
 	if err != nil {
 		return "", "", fmt.Errorf("bitwarden: auth: %w", err)
 	}
 
-	orgID, projectID, _ := strings.Cut(b.orgProject, "/")
+	orgProject := vault
+	if orgProject == "" {
+		orgProject = b.orgProject
+	}
+	orgID, projectID, _ := strings.Cut(orgProject, "/")
 	key := "breakglass-" + hostname
 	auth := "Bearer " + accessToken
 
@@ -522,13 +583,17 @@ type infisicalBackend struct {
 	client       *http.Client
 }
 
-func (b *infisicalBackend) Store(ctx context.Context, hostname, password string) (string, string, error) {
+func (b *infisicalBackend) Store(ctx context.Context, hostname, password, vault string) (string, string, error) {
 	token, err := b.getToken(ctx)
 	if err != nil {
 		return "", "", fmt.Errorf("infisical: auth: %w", err)
 	}
 
-	workspaceID, environment, _ := strings.Cut(b.projectEnv, "/")
+	projectEnv := vault
+	if projectEnv == "" {
+		projectEnv = b.projectEnv
+	}
+	workspaceID, environment, _ := strings.Cut(projectEnv, "/")
 	if environment == "" {
 		environment = "prod"
 	}

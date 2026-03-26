@@ -544,8 +544,9 @@ func (s *Server) handleBreakglassEscrow(w http.ResponseWriter, r *http.Request) 
 
 	if hasNativeEscrow {
 		backend := newEscrowBackend(s.cfg)
+		vault := resolveEscrowVault(req.Hostname, s.cfg.EscrowVaultMap, s.cfg.EscrowPath)
 		var err error
-		itemID, vaultID, err = backend.Store(ctx, req.Hostname, req.Password)
+		itemID, vaultID, err = backend.Store(ctx, req.Hostname, req.Password, vault)
 		if err != nil {
 			breakglassEscrowTotal.WithLabelValues("failure").Inc()
 			log.Printf("BREAKGLASS: %s escrow failed for host %q: %v", s.cfg.EscrowBackend, req.Hostname, err)

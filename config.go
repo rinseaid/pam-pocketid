@@ -73,7 +73,8 @@ type Config struct {
 	EscrowAuthID         string    // Backend auth identifier (role_id, client_id, etc.)
 	EscrowAuthSecret     string    // Backend auth secret (token, secret_id, etc.)
 	EscrowPath           string    // Storage location (vault name/UUID, KV path prefix, org/project, etc.)
-	EscrowWebURL         string    // Optional: web UI base URL for direct item links (1password-connect only)
+	EscrowWebURL         string            // Optional: web UI base URL for direct item links (1password-connect only)
+	EscrowVaultMap       map[string]string // Optional: hostname→vault routing map (PAM_POCKETID_ESCROW_VAULT_MAP JSON)
 	BreakglassRotateBefore time.Time // Tell clients to rotate if their hash file is older than this
 
 	// History page settings (server mode)
@@ -313,6 +314,11 @@ func LoadServerConfig() (*Config, error) {
 		}
 		cfg.EscrowPath = os.Getenv("PAM_POCKETID_ESCROW_PATH")
 		cfg.EscrowWebURL = os.Getenv("PAM_POCKETID_ESCROW_WEB_URL")
+		if v := os.Getenv("PAM_POCKETID_ESCROW_VAULT_MAP"); v != "" {
+			if err := json.Unmarshal([]byte(v), &cfg.EscrowVaultMap); err != nil {
+				return nil, fmt.Errorf("PAM_POCKETID_ESCROW_VAULT_MAP: invalid JSON: %w", err)
+			}
+		}
 		if cfg.EscrowURL == "" {
 			return nil, fmt.Errorf("PAM_POCKETID_ESCROW_URL is required when ESCROW_BACKEND is set")
 		}
