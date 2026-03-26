@@ -233,5 +233,16 @@
   "breakglass_alphanumeric": "alphanumeric",
   "sudo": "Sudo",
   "group": "Group",
-  "no_groups": "No groups configured"
+  "no_groups": "No groups configured",
+  "deploy_btn": "Deploy to host",
+  "deploy_title": "SSH remote install of pam-pocketid client",
+  "deploy_modal_title": "Deploy client to host",
+  "deploy_host": "Host",
+  "deploy_port": "Port",
+  "deploy_ssh_user": "SSH user",
+  "deploy_pocketid_user": "PocketID user",
+  "deploy_user_loading": "Loading…",
+  "deploy_key": "Private key",
+  "deploy_run": "Deploy",
+  "close": "Close"
 }

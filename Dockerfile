@@ -11,7 +11,7 @@ RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.vers
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates python3 python3-pip wget && \
-    pip3 install --no-cache-dir --break-system-packages onepassword-sdk==0.4.0 apprise==1.9.1 && \
+    pip3 install --no-cache-dir --break-system-packages apprise==1.9.1 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r pampocketid && useradd -r -g pampocketid -s /sbin/nologin pampocketid && \

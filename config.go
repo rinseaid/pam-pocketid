@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -101,6 +102,9 @@ type Config struct {
 	ClientBreakglassPasswordType string // Override client's breakglass password type
 	ClientBreakglassRotationDays int    // Override client's breakglass rotation days
 	ClientTokenCacheEnabled      *bool  // Override client's token cache setting (nil = unset)
+
+	// Auto-deploy settings (server mode)
+	DeployAllowCIDRs []*net.IPNet // CIDRs allowed to trigger SSH remote install (empty = feature disabled)
 
 	// Token cache settings (client mode)
 	TokenCacheEnabled  bool   // Whether token caching is enabled (default true)
@@ -392,6 +396,22 @@ func LoadServerConfig() (*Config, error) {
 		}
 		if cc.TokenCache != nil {
 			cfg.ClientTokenCacheEnabled = cc.TokenCache
+		}
+	}
+
+	// PAM_POCKETID_DEPLOY_ALLOW_CIDR: comma-separated CIDRs allowed to call /api/deploy.
+	// If unset, the auto-deploy feature is disabled.
+	if v := os.Getenv("PAM_POCKETID_DEPLOY_ALLOW_CIDR"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			_, cidr, err := net.ParseCIDR(s)
+			if err != nil {
+				return nil, fmt.Errorf("PAM_POCKETID_DEPLOY_ALLOW_CIDR: invalid CIDR %q: %w", s, err)
+			}
+			cfg.DeployAllowCIDRs = append(cfg.DeployAllowCIDRs, cidr)
 		}
 	}
 

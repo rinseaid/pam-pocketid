@@ -1011,6 +1011,22 @@ const adminPageHTML = `<!DOCTYPE html>
     .bulk-btn.danger:hover { background: var(--danger-bg); }
     .host-group { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--info-bg); color: var(--text-secondary); margin-left: 8px; vertical-align: middle; }
     .hosts-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000; overflow-y: auto; }
+    .modal-overlay.open { display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; }
+    .modal-box { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 24px; width: 100%; max-width: 520px; }
+    .modal-box h3 { margin: 0 0 16px; font-size: 1rem; }
+    .modal-field { margin-bottom: 12px; }
+    .modal-field label { display: block; font-size: 0.813rem; font-weight: 600; margin-bottom: 4px; }
+    .modal-field input,.modal-field select,.modal-field textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.875rem; font-family: inherit; }
+    .modal-field textarea { font-family: monospace; font-size: 0.75rem; resize: vertical; }
+    .modal-row { display: flex; gap: 8px; }
+    .modal-row .modal-field { flex: 1; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .deploy-log { background: var(--code-bg, #1a1a2e); color: #c8f0c8; font-family: monospace; font-size: 0.75rem; border-radius: 8px; padding: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; display: none; }
+    .deploy-log.visible { display: block; }
+    .deploy-status { font-size: 0.813rem; font-weight: 600; margin-top: 8px; }
+    .deploy-status.ok { color: var(--success); }
+    .deploy-status.err { color: var(--danger); }
     .group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.813rem; }
     .group-filter select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: 0.813rem; cursor: pointer; }
     .elevate-form { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
@@ -1157,6 +1173,85 @@ const adminPageHTML = `<!DOCTYPE html>
           try{document.execCommand('copy');installBtn.innerHTML='&#10003; Copied!';}catch(e){}
           document.body.removeChild(ta);
           setTimeout(function(){installBtn.innerHTML=orig;},2000);
+        });
+      });
+    }
+    // Deploy modal
+    var deployOpenBtn=document.getElementById('deploy-open-btn');
+    var deployModal=document.getElementById('deploy-modal');
+    var deployCancelBtn=document.getElementById('deploy-cancel-btn');
+    var deploySubmitBtn=document.getElementById('deploy-submit-btn');
+    var deployCloseBtn=document.getElementById('deploy-close-btn');
+    function openDeployModal(){
+      deployModal.classList.add('open');
+      document.getElementById('deploy-form-area').style.display='';
+      document.getElementById('deploy-log-area').style.display='none';
+      document.getElementById('deploy-error').style.display='none';
+      document.getElementById('deploy-log').textContent='';
+      document.getElementById('deploy-status').textContent='';
+      document.getElementById('deploy-status').className='deploy-status';
+      // Load PocketID users with SSH keys
+      var sel=document.getElementById('deploy-pocketid-user');
+      sel.innerHTML='<option value="">Loading…</option>';
+      fetch('/api/deploy/users').then(function(r){return r.json();}).then(function(users){
+        sel.innerHTML='<option value="">(none)</option>';
+        (users||[]).forEach(function(u){
+          var o=document.createElement('option');
+          o.value=u.username;
+          o.textContent=u.username+(u.email?' ('+u.email+')':'');
+          sel.appendChild(o);
+        });
+      }).catch(function(){sel.innerHTML='<option value="">(unavailable)</option>';});
+    }
+    function closeDeployModal(){
+      deployModal.classList.remove('open');
+    }
+    if(deployOpenBtn){
+      deployOpenBtn.addEventListener('click',openDeployModal);
+      deployCancelBtn.addEventListener('click',closeDeployModal);
+      deployCloseBtn.addEventListener('click',closeDeployModal);
+      deployModal.addEventListener('click',function(e){if(e.target===deployModal)closeDeployModal();});
+      deploySubmitBtn.addEventListener('click',function(){
+        var host=document.getElementById('deploy-host').value.trim();
+        var port=parseInt(document.getElementById('deploy-port').value)||22;
+        var sshUser=document.getElementById('deploy-ssh-user').value.trim()||'root';
+        var pocketidUser=document.getElementById('deploy-pocketid-user').value;
+        var privKey=document.getElementById('deploy-key').value.trim();
+        var errEl=document.getElementById('deploy-error');
+        if(!host){errEl.textContent='Host is required.';errEl.style.display='';return;}
+        if(!privKey){errEl.textContent='Private key is required.';errEl.style.display='';return;}
+        errEl.style.display='none';
+        deploySubmitBtn.disabled=true;
+        deploySubmitBtn.textContent='Starting…';
+        fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hostname:host,port:port,ssh_user:sshUser,private_key:privKey,pocketid_user:pocketidUser})})
+        .then(function(r){
+          if(!r.ok){return r.text().then(function(t){throw new Error(t||r.statusText);});}
+          return r.json();
+        })
+        .then(function(data){
+          deploySubmitBtn.disabled=false;
+          deploySubmitBtn.textContent='Deploy';
+          document.getElementById('deploy-form-area').style.display='none';
+          document.getElementById('deploy-log-area').style.display='';
+          var logEl=document.getElementById('deploy-log');
+          var statusEl=document.getElementById('deploy-status');
+          var es=new EventSource('/api/deploy/stream/'+data.id);
+          es.addEventListener('message',function(e){
+            logEl.textContent+=e.data+'\n';
+            logEl.scrollTop=logEl.scrollHeight;
+          });
+          es.addEventListener('status',function(e){
+            es.close();
+            if(e.data==='done'){statusEl.textContent='✓ Deploy completed successfully.';statusEl.className='deploy-status ok';}
+            else{statusEl.textContent='✗ Deploy failed.';statusEl.className='deploy-status err';}
+          });
+          es.onerror=function(){es.close();if(!statusEl.textContent){statusEl.textContent='Connection lost.';statusEl.className='deploy-status err';}};
+        })
+        .catch(function(err){
+          deploySubmitBtn.disabled=false;
+          deploySubmitBtn.textContent='Deploy';
+          errEl.textContent=err.message||'Request failed.';
+          errEl.style.display='';
         });
       });
     }
@@ -1351,6 +1446,7 @@ const adminPageHTML = `<!DOCTYPE html>
       </div>
       {{end}}
       <button id="install-copy-btn" class="host-btn primary" style="margin-left:auto" data-cmd="curl -fsSL {{.InstallURL}} | sudo bash" title="{{call .T "install_client_title"}}"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:5px"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>{{call .T "install_client"}}</button>
+      {{if .DeployEnabled}}<button id="deploy-open-btn" class="host-btn primary" title="{{call .T "deploy_title"}}">{{call .T "deploy_btn"}}</button>{{end}}
     </div>
 
     {{if .Hosts}}
@@ -1535,6 +1631,54 @@ const adminPageHTML = `<!DOCTYPE html>
     {{end}}
     {{end}}
   </div>
+
+  {{if .DeployEnabled}}
+  <div id="deploy-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="deploy-modal-title">
+    <div class="modal-box">
+      <h3 id="deploy-modal-title">{{call .T "deploy_modal_title"}}</h3>
+      <div id="deploy-form-area">
+        <div class="modal-row">
+          <div class="modal-field">
+            <label for="deploy-host">{{call .T "deploy_host"}}</label>
+            <input id="deploy-host" type="text" placeholder="192.168.1.10" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="modal-field" style="max-width:90px">
+            <label for="deploy-port">{{call .T "deploy_port"}}</label>
+            <input id="deploy-port" type="number" value="22" min="1" max="65535">
+          </div>
+        </div>
+        <div class="modal-row">
+          <div class="modal-field">
+            <label for="deploy-ssh-user">{{call .T "deploy_ssh_user"}}</label>
+            <input id="deploy-ssh-user" type="text" value="root" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="modal-field">
+            <label for="deploy-pocketid-user">{{call .T "deploy_pocketid_user"}}</label>
+            <select id="deploy-pocketid-user">
+              <option value="">{{call .T "deploy_user_loading"}}</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-field">
+          <label for="deploy-key">{{call .T "deploy_key"}}</label>
+          <textarea id="deploy-key" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..." autocomplete="off" spellcheck="false"></textarea>
+        </div>
+        <div id="deploy-error" style="color:var(--danger);font-size:0.813rem;display:none"></div>
+        <div class="modal-actions">
+          <button type="button" class="host-btn" id="deploy-cancel-btn">{{call .T "cancel"}}</button>
+          <button type="button" class="host-btn primary" id="deploy-submit-btn">{{call .T "deploy_run"}}</button>
+        </div>
+      </div>
+      <div id="deploy-log-area" style="display:none">
+        <div id="deploy-log" class="deploy-log visible"></div>
+        <div id="deploy-status" class="deploy-status"></div>
+        <div class="modal-actions" style="margin-top:8px">
+          <button type="button" class="host-btn" id="deploy-close-btn">{{call .T "close"}}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {{end}}
 </body>
 </html>`
 

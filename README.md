@@ -226,6 +226,7 @@ $ sudo systemctl restart nginx
 | `PAM_POCKETID_BREAKGLASS_ROTATE_BEFORE` | *(empty)* | RFC3339 timestamp; clients with hash files older than this will rotate on next sudo |
 | `PAM_POCKETID_CLIENT_CONFIG` | *(none)* | JSON blob to override client settings server-wide: `{"breakglass_password_type":"...","breakglass_rotation_days":N,"token_cache":true/false}` |
 | `PAM_POCKETID_INSECURE` | `false` | Allow unauthenticated API — not for production |
+| `PAM_POCKETID_DEPLOY_ALLOW_CIDR` | *(empty)* | Comma-separated CIDRs allowed to trigger SSH remote installs from the admin UI (e.g., `10.0.0.0/8,192.168.1.0/24`). If unset, the auto-deploy feature is disabled. |
 
 ### PAM helper configuration
 
@@ -282,6 +283,8 @@ Full audit log with sortable columns, filter dropdowns, live search, configurabl
 - **Escrow status** — password age and whether it has exceeded the rotation interval
 - **Escrow view** — a **View** button links directly to the stored credential in the backend's web UI (Vault, Bitwarden, Infisical); no button is shown for 1Password Connect (no web UI) or when no backend is configured
 - **Host registry** — registered hosts, their per-host secrets, and authorized users; each host displays its group badge if one was set at registration; a group filter dropdown narrows the list
+- **Copy install command** — clipboard button copies `curl -fsSL {server}/install.sh | sudo bash` for quick manual client deployment
+- **Deploy to host** — SSH remote install directly from the browser (see [Auto-deploy](#auto-deploy) below)
 
 ### Info tab (`/info` → redirects to `/admin/info`)
 
@@ -518,6 +521,41 @@ Use `PAM_POCKETID_ESCROW_COMMAND_ENV` to specify which env var prefixes from the
 ```bash
 pam-pocketid verify-breakglass
 ```
+
+## Auto-deploy
+
+The **Deploy to host** button on the Hosts tab lets admins SSH into a machine and run the pam-pocketid install script directly from the browser — no manual copy-paste required.
+
+### How it works
+
+1. Admin clicks **Deploy to host**, fills in the target hostname/IP, SSH port (default 22), SSH username (default `root`), and pastes an SSH private key.
+2. An optional **PocketID user** dropdown lists users who have `sshPublicKey*` custom claims registered in PocketID — for reference/confirmation only; it does not affect SSH auth.
+3. The server dials the target via SSH using the provided key, then runs: `curl -fsSL {server}/install.sh | sudo bash`
+4. Live output streams back to the browser via SSE in real time.
+
+The private key is held in memory only for the duration of the deploy job — it is never written to disk, logged, or persisted.
+
+### Security controls
+
+| Control | Detail |
+|---|---|
+| Admin-only | Requires an active admin session |
+| CIDR allowlist | Only requests from IPs in `PAM_POCKETID_DEPLOY_ALLOW_CIDR` reach the endpoint; requests from other IPs get 403 |
+| Rate limit | 15-second cooldown per source IP |
+| Concurrency cap | Max 3 simultaneous deploys server-wide |
+| Timeout | 3-minute hard timeout per deploy; SSH session is killed on expiry |
+| Output cap | 1 MB of output stored per job |
+
+### Configuration
+
+Set `PAM_POCKETID_DEPLOY_ALLOW_CIDR` to enable the feature:
+
+```yaml
+environment:
+  PAM_POCKETID_DEPLOY_ALLOW_CIDR: "10.0.0.0/8,192.168.1.0/24"
+```
+
+If unset, the Deploy button is hidden and the endpoint returns 403.
 
 ## Host registry
 

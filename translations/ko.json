@@ -233,5 +233,16 @@
   "breakglass_alphanumeric": "영숫자",
   "sudo": "Sudo",
   "group": "그룹",
-  "no_groups": "그룹이 구성되지 않았습니다"
+  "no_groups": "그룹이 구성되지 않았습니다",
+  "deploy_btn": "호스트에 배포",
+  "deploy_title": "pam-pocketid 클라이언트 SSH 원격 설치",
+  "deploy_modal_title": "호스트에 클라이언트 배포",
+  "deploy_host": "호스트",
+  "deploy_port": "포트",
+  "deploy_ssh_user": "SSH 사용자",
+  "deploy_pocketid_user": "PocketID 사용자",
+  "deploy_user_loading": "로딩 중…",
+  "deploy_key": "개인 키",
+  "deploy_run": "배포",
+  "close": "닫기"
 }

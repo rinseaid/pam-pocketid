@@ -6,9 +6,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 )
+
+var sshKeyClaimRe = regexp.MustCompile(`^sshPublicKey\d*$`)
 
 // PocketIDClient fetches user and group data from the Pocket ID REST API.
 type PocketIDClient struct {
@@ -229,6 +232,60 @@ func (c *PocketIDClient) fetchGroupData() (*pocketIDData, error) {
 	}
 
 	return &pocketIDData{Groups: groups, UserGroups: userGroups}, nil
+}
+
+// SSHUser is a PocketID user who has at least one sshPublicKey* custom claim.
+type SSHUser struct {
+	Username string
+	Email    string
+}
+
+// UsersWithSSHKeys returns all PocketID users who have at least one non-empty
+// sshPublicKey* custom claim (sshPublicKey, sshPublicKey1 … sshPublicKey99).
+// Results are NOT cached — the deploy modal always needs fresh data.
+func (c *PocketIDClient) UsersWithSSHKeys() ([]SSHUser, error) {
+	if c == nil {
+		return nil, nil
+	}
+
+	var out []SSHUser
+	page := 1
+	for {
+		url := fmt.Sprintf("%s/api/users?pagination[page]=%d&pagination[limit]=100", c.baseURL, page)
+		resp, err := c.apiGet(url)
+		if err != nil {
+			return nil, fmt.Errorf("listing users: %w", err)
+		}
+
+		var result struct {
+			Data []struct {
+				Username     string          `json:"username"`
+				Email        string          `json:"email"`
+				CustomClaims []pocketIDClaim `json:"customClaims"`
+			} `json:"data"`
+			Pagination struct {
+				TotalPages int `json:"totalPages"`
+			} `json:"pagination"`
+		}
+		if err := json.Unmarshal(resp, &result); err != nil {
+			return nil, fmt.Errorf("parsing users: %w", err)
+		}
+
+		for _, u := range result.Data {
+			for _, cl := range u.CustomClaims {
+				if sshKeyClaimRe.MatchString(cl.Key) && cl.Value != "" {
+					out = append(out, SSHUser{Username: u.Username, Email: u.Email})
+					break
+				}
+			}
+		}
+
+		if page >= result.Pagination.TotalPages || result.Pagination.TotalPages == 0 {
+			break
+		}
+		page++
+	}
+	return out, nil
 }
 
 func (c *PocketIDClient) apiGet(url string) ([]byte, error) {

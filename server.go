@@ -44,6 +44,11 @@ type Server struct {
 	sseClients     map[string][]chan string // username -> list of SSE channels
 	sseMu          sync.Mutex
 	pocketIDClient *PocketIDClient
+
+	// auto-deploy
+	deployJobs map[string]*deployJob
+	deployMu   sync.Mutex
+	deployRL   *deployRateLimiter
 }
 
 // validUsername restricts usernames to safe characters, preventing log injection
@@ -98,6 +103,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		mux:           http.NewServeMux(),
 		sessionNonces: make(map[string]time.Time),
 		sseClients:    make(map[string][]chan string),
+		deployJobs:    make(map[string]*deployJob),
+		deployRL:      newDeployRateLimiter(),
 	}
 
 	s.pocketIDClient = NewPocketIDClient(cfg.PocketIDAPIURL, cfg.PocketIDAPIKey)
@@ -143,6 +150,9 @@ s.mux.HandleFunc("/api/users/remove", s.handleRemoveUser)
 	s.mux.HandleFunc("/theme", s.handleThemeToggle)
 	s.mux.HandleFunc("/signout", s.handleSignOut)
 	s.mux.HandleFunc("/install.sh", s.handleInstallScript)
+	s.mux.HandleFunc("/api/deploy/users", s.handleDeployUsers)
+	s.mux.HandleFunc("/api/deploy/stream/", s.handleDeployStream)
+	s.mux.HandleFunc("/api/deploy", s.handleDeploy)
 	// Dashboard is the catch-all — register AFTER all other routes.
 	s.mux.HandleFunc("/", s.handleDashboard)
 

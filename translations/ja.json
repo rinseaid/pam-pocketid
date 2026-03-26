@@ -233,5 +233,16 @@
   "breakglass_alphanumeric": "英数字",
   "sudo": "Sudo",
   "group": "グループ",
-  "no_groups": "グループが設定されていません"
+  "no_groups": "グループが設定されていません",
+  "deploy_btn": "ホストにデプロイ",
+  "deploy_title": "pam-pocketidクライアントのSSHリモートインストール",
+  "deploy_modal_title": "ホストにクライアントをデプロイ",
+  "deploy_host": "ホスト",
+  "deploy_port": "ポート",
+  "deploy_ssh_user": "SSHユーザー",
+  "deploy_pocketid_user": "PocketIDユーザー",
+  "deploy_user_loading": "読込中…",
+  "deploy_key": "秘密鍵",
+  "deploy_run": "デプロイ",
+  "close": "閉じる"
 }

@@ -233,5 +233,16 @@
   "breakglass_alphanumeric": "alfanumérico",
   "sudo": "Sudo",
   "group": "Grupo",
-  "no_groups": "No hay grupos configurados"
+  "no_groups": "No hay grupos configurados",
+  "deploy_btn": "Desplegar en host",
+  "deploy_title": "Instalación remota SSH del cliente pam-pocketid",
+  "deploy_modal_title": "Desplegar cliente en host",
+  "deploy_host": "Host",
+  "deploy_port": "Puerto",
+  "deploy_ssh_user": "Usuario SSH",
+  "deploy_pocketid_user": "Usuario PocketID",
+  "deploy_user_loading": "Cargando…",
+  "deploy_key": "Clave privada",
+  "deploy_run": "Desplegar",
+  "close": "Cerrar"
 }

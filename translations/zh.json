@@ -233,5 +233,16 @@
   "breakglass_alphanumeric": "字母数字",
   "sudo": "Sudo",
   "group": "组",
-  "no_groups": "未配置任何组"
+  "no_groups": "未配置任何组",
+  "deploy_btn": "部署到主机",
+  "deploy_title": "pam-pocketid客户端SSH远程安装",
+  "deploy_modal_title": "将客户端部署到主机",
+  "deploy_host": "主机",
+  "deploy_port": "端口",
+  "deploy_ssh_user": "SSH用户",
+  "deploy_pocketid_user": "PocketID用户",
+  "deploy_user_loading": "加载中…",
+  "deploy_key": "私钥",
+  "deploy_run": "部署",
+  "close": "关闭"
 }
