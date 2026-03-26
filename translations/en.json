@@ -263,5 +263,6 @@
   "connection_lost": "Connection lost.",
   "active_only": "Active only",
   "sudo_run_as": "Run as",
-  "members": "Members"
+  "members": "Members",
+  "deploy_forbidden": "Network security conditions not met. Contact your administrator."
 }

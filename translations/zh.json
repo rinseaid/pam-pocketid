@@ -263,5 +263,6 @@
   "connection_lost": "连接已断开。",
   "active_only": "仅活跃",
   "sudo_run_as": "以…身份运行",
-  "members": "成员"
+  "members": "成员",
+  "deploy_forbidden": "网络安全条件不满足。请联系您的管理员。"
 }

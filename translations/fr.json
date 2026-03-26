@@ -263,5 +263,6 @@
   "connection_lost": "Connexion perdue.",
   "active_only": "Actif seulement",
   "sudo_run_as": "Exécuter en tant que",
-  "members": "Membres"
+  "members": "Membres",
+  "deploy_forbidden": "Conditions de sécurité réseau non remplies. Contactez votre administrateur."
 }

@@ -1161,7 +1161,7 @@ const adminPageHTML = `<!DOCTYPE html>
     var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
     if(tz){var d=new Date();d.setTime(d.getTime()+86400000);document.cookie='pam_tz='+tz+';path=/;expires='+d.toUTCString()+';SameSite=Lax';}
   }
-  var _t={copied:'{{call .T "copied"}}',deployOk:'{{call .T "deploy_success"}}',deployFailed:'{{call .T "deploy_failed"}}',requestFailed:'{{call .T "request_failed"}}',clipboardEmpty:'{{call .T "clipboard_empty"}}',clipboardError:'{{call .T "clipboard_error"}}',loadingUsers:'{{call .T "deploy_user_loading"}}',unavailable:'{{call .T "deploy_user_unavailable"}}',deployRun:'{{call .T "deploy_run"}}',starting:'{{call .T "deploy_starting"}}',hostRequired:'{{call .T "host_required"}}',keyRequired:'{{call .T "key_required"}}',connLost:'{{call .T "connection_lost"}}'};
+  var _t={copied:'{{call .T "copied"}}',deployOk:'{{call .T "deploy_success"}}',deployFailed:'{{call .T "deploy_failed"}}',requestFailed:'{{call .T "request_failed"}}',clipboardEmpty:'{{call .T "clipboard_empty"}}',clipboardError:'{{call .T "clipboard_error"}}',loadingUsers:'{{call .T "deploy_user_loading"}}',unavailable:'{{call .T "deploy_user_unavailable"}}',deployRun:'{{call .T "deploy_run"}}',starting:'{{call .T "deploy_starting"}}',hostRequired:'{{call .T "host_required"}}',keyRequired:'{{call .T "key_required"}}',connLost:'{{call .T "connection_lost"}}',deployForbidden:'{{call .T "deploy_forbidden"}}'};
   document.addEventListener('DOMContentLoaded',function(){
     // Auto-dismiss success banners after 5 seconds
     document.querySelectorAll('.banner-success').forEach(function(el){
@@ -1337,7 +1337,7 @@ const adminPageHTML = `<!DOCTYPE html>
         deploySubmitBtn.textContent=_t.starting;
         fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hostname:host,port:port,ssh_user:sshUser,private_key:deployPrivKey,pocketid_user:pocketidUser})})
         .then(function(r){
-          if(!r.ok){return r.text().then(function(t){throw new Error(t||r.statusText);});}
+          if(!r.ok){if(r.status===403){throw new Error(_t.deployForbidden);}return r.text().then(function(t){throw new Error(t||r.statusText);});}
           return r.json();
         })
         .then(function(data){

@@ -263,5 +263,6 @@
   "connection_lost": "Verbindung getrennt.",
   "active_only": "Nur aktive",
   "sudo_run_as": "Ausführen als",
-  "members": "Mitglieder"
+  "members": "Mitglieder",
+  "deploy_forbidden": "Netzwerksicherheitsbedingungen nicht erfüllt. Wenden Sie sich an Ihren Administrator."
 }

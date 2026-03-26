@@ -263,5 +263,6 @@
   "connection_lost": "연결이 끊겼습니다.",
   "active_only": "활성만",
   "sudo_run_as": "실행 사용자",
-  "members": "멤버"
+  "members": "멤버",
+  "deploy_forbidden": "네트워크 보안 조건이 충족되지 않았습니다. 관리자에게 문의하세요."
 }
