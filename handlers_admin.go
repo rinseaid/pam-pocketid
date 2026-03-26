@@ -823,7 +823,7 @@ func (s *Server) handleAdminHosts(w http.ResponseWriter, r *http.Request) {
 		"AllGroups":        allGroups,
 		"GroupFilter":      groupFilter,
 		"InstallURL":       strings.TrimRight(s.cfg.ExternalURL, "/") + "/install.sh",
-		"DeployEnabled":    len(s.cfg.DeployAllowCIDRs) > 0,
+		"DeployEnabled":    true,
 	}); err != nil {
 		log.Printf("ERROR: template execution: %v", err)
 	}

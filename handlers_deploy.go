@@ -205,7 +205,7 @@ func (s *Server) handleDeployUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeploy starts an SSH remote-install job.
-// POST /api/deploy — admin-only; caller IP must be in DeployAllowCIDRs.
+// POST /api/deploy — admin-only.
 func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -218,19 +218,8 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CIDR allowlist — if unconfigured, feature is disabled
-	if len(s.cfg.DeployAllowCIDRs) == 0 {
-		http.Error(w, "auto-deploy not configured (PAM_POCKETID_DEPLOY_ALLOW_CIDR not set)", http.StatusForbidden)
-		return
-	}
-	callerIP := clientIP(r)
-	if !cidrContains(s.cfg.DeployAllowCIDRs, callerIP) {
-		log.Printf("deploy: rejected request from %s (not in allow-list)", callerIP)
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
 	// Per-IP rate limit
+	callerIP := clientIP(r)
 	if !s.deployRL.allow(callerIP) {
 		http.Error(w, "too many requests — wait before retrying", http.StatusTooManyRequests)
 		return
