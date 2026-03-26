@@ -209,6 +209,7 @@
   "all_groups": "Todos os grupos",
   "clear_filter": "Limpar filtro",
   "install_client": "Instalar cliente",
+  "install_client_title": "Copiar comando de instalação",
   "user_all": "Usuário (todos)",
   "by": "por",
   "request_expired": "Solicitação expirada",

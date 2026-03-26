@@ -209,6 +209,7 @@
   "all_groups": "모든 그룹",
   "clear_filter": "필터 지우기",
   "install_client": "클라이언트 설치",
+  "install_client_title": "설치 명령 복사",
   "user_all": "사용자 (전체)",
   "by": "에 의해",
   "request_expired": "요청 만료됨",

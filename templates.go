@@ -1142,6 +1142,24 @@ const adminPageHTML = `<!DOCTYPE html>
       document.querySelectorAll('.profile-dropdown').forEach(function(d){d.style.display='none';});
       document.querySelectorAll('.profile-btn').forEach(function(b){b.setAttribute('aria-expanded','false');});
     });
+    var installBtn=document.getElementById('install-copy-btn');
+    if(installBtn){
+      installBtn.addEventListener('click',function(){
+        var cmd=installBtn.getAttribute('data-cmd');
+        var orig=installBtn.innerHTML;
+        navigator.clipboard.writeText(cmd).then(function(){
+          installBtn.innerHTML='&#10003; Copied!';
+          setTimeout(function(){installBtn.innerHTML=orig;},2000);
+        }).catch(function(){
+          var ta=document.createElement('textarea');
+          ta.value=cmd;ta.style.position='fixed';ta.style.opacity='0';
+          document.body.appendChild(ta);ta.select();
+          try{document.execCommand('copy');installBtn.innerHTML='&#10003; Copied!';}catch(e){}
+          document.body.removeChild(ta);
+          setTimeout(function(){installBtn.innerHTML=orig;},2000);
+        });
+      });
+    }
   });
   document.addEventListener('click',function(e){
     var chip=e.target.closest('.summary-chip.expandable');
@@ -1332,7 +1350,7 @@ const adminPageHTML = `<!DOCTYPE html>
         {{if .GroupFilter}}<a href="/admin/hosts" style="font-size:0.813rem;color:var(--text-secondary)">{{call .T "clear_filter"}}</a>{{end}}
       </div>
       {{end}}
-      <a href="{{.InstallURL}}" class="host-btn primary" style="margin-left:auto">{{call .T "install_client"}}</a>
+      <button id="install-copy-btn" class="host-btn primary" style="margin-left:auto" data-cmd="curl -fsSL {{.InstallURL}} | sudo bash" title="{{call .T "install_client_title"}}"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:5px"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>{{call .T "install_client"}}</button>
     </div>
 
     {{if .Hosts}}
