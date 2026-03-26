@@ -297,7 +297,11 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if req.SSHUser != "root" {
 		sudoPrefix = "sudo "
 	}
-	installCmd := fmt.Sprintf("curl -fsSL %s/install.sh | %sbash", strings.TrimRight(s.cfg.ExternalURL, "/"), sudoPrefix)
+	baseURL := strings.TrimRight(s.cfg.ExternalURL, "/")
+	installCmd := fmt.Sprintf(
+		"PAM_POCKETID_SERVER_URL=%s PAM_POCKETID_SHARED_SECRET=%s curl -fsSL %s/install.sh | %sbash",
+		shellQuote(baseURL), shellQuote(s.cfg.SharedSecret), baseURL, sudoPrefix,
+	)
 
 	go func() {
 		defer func() { <-deploySemaphore }()
@@ -484,6 +488,12 @@ func runDeployJob(job *deployJob, hostname string, port int, sshUser string, sig
 		job.appendLine("ERROR: timed out after " + deployTimeout.String())
 		job.finish(true)
 	}
+}
+
+// shellQuote wraps s in single quotes safe for POSIX shell, escaping any
+// single quotes within the value.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // privateIP reports whether ip is a loopback or RFC1918 address (i.e. from a

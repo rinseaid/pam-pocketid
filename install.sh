@@ -105,23 +105,30 @@ else
     echo "  Set up a weekly cron job: 0 3 * * 0 root /usr/local/bin/pam-pocketid rotate-breakglass"
 fi
 
-# Check for config file
+# Check for config file — auto-write if env vars were provided (e.g. by remote deploy)
 if [ ! -f /etc/pam-pocketid.conf ]; then
-    echo ""
-    echo "Next steps:"
-    echo "  1. Create /etc/pam-pocketid.conf:"
-    echo ""
-    echo "     cat > /etc/pam-pocketid.conf <<EOF"
-    echo "     PAM_POCKETID_SERVER_URL=https://your-server.example.com"
-    echo "     PAM_POCKETID_SHARED_SECRET=your-shared-secret-here"
-    echo "     EOF"
-    echo "     chmod 600 /etc/pam-pocketid.conf"
-    echo ""
-    echo "  2. Configure PAM (/etc/pam.d/sudo):"
-    echo ""
-    echo "     auth required pam_exec.so stdout /usr/local/bin/pam-pocketid"
-    echo ""
-    echo "  See https://github.com/$REPO#readme for full documentation."
+    if [ -n "${PAM_POCKETID_SERVER_URL:-}" ] && [ -n "${PAM_POCKETID_SHARED_SECRET:-}" ]; then
+        printf 'PAM_POCKETID_SERVER_URL=%s\nPAM_POCKETID_SHARED_SECRET=%s\n' \
+            "$PAM_POCKETID_SERVER_URL" "$PAM_POCKETID_SHARED_SECRET" > /etc/pam-pocketid.conf
+        chmod 600 /etc/pam-pocketid.conf
+        echo "Created /etc/pam-pocketid.conf"
+    else
+        echo ""
+        echo "NOTE: SHARED_SECRET not set and stdin is not a terminal."
+        echo "Create /etc/pam-pocketid.conf manually after this script completes:"
+        echo ""
+        echo "    cat > /etc/pam-pocketid.conf <<'EOF'"
+        echo "    PAM_POCKETID_SERVER_URL=https://your-server.example.com"
+        echo "    PAM_POCKETID_SHARED_SECRET=<your-shared-secret>"
+        echo "    EOF"
+        echo "    chmod 600 /etc/pam-pocketid.conf"
+        echo ""
+        echo "  2. Configure PAM (/etc/pam.d/sudo):"
+        echo ""
+        echo "     auth required pam_exec.so stdout /usr/local/bin/pam-pocketid"
+        echo ""
+        echo "  See https://github.com/$REPO#readme for full documentation."
+    fi
 else
     echo "Config file exists: /etc/pam-pocketid.conf"
 fi
