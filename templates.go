@@ -1044,7 +1044,6 @@ const adminPageHTML = `<!DOCTYPE html>
     .modal-row .modal-field { flex: 1; }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
     .modal-actions .host-btn { min-width: 90px; justify-content: center; }
-    .modal-actions .host-btn:not(.primary) { background: var(--bg); }
     .host-btn:disabled { opacity: 0.38; cursor: not-allowed; }
     .key-upload-row { display: flex; gap: 8px; }
     .key-action-btn { display: flex; align-items: center; justify-content: center; gap: 6px; flex: 1; padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.813rem; font-weight: 600; font-family: inherit; cursor: pointer; text-align: center; }
