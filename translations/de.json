@@ -264,5 +264,5 @@
   "active_only": "Nur aktive",
   "sudo_run_as": "Ausführen als",
   "members": "Mitglieder",
-  "deploy_forbidden": "Netzwerksicherheitsbedingungen nicht erfüllt. Wenden Sie sich an Ihren Administrator."
+  "deploy_forbidden": "Diese Funktion erfordert Zugriff von einem autorisierten Netzwerk."
 }

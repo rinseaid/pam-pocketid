@@ -264,5 +264,5 @@
   "active_only": "활성만",
   "sudo_run_as": "실행 사용자",
   "members": "멤버",
-  "deploy_forbidden": "네트워크 보안 조건이 충족되지 않았습니다. 관리자에게 문의하세요."
+  "deploy_forbidden": "이 기능은 승인된 네트워크에서만 접근할 수 있습니다."
 }

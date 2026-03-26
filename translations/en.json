@@ -264,5 +264,5 @@
   "active_only": "Active only",
   "sudo_run_as": "Run as",
   "members": "Members",
-  "deploy_forbidden": "Network security conditions not met. Contact your administrator."
+  "deploy_forbidden": "This feature requires access from an authorized network."
 }

@@ -264,5 +264,5 @@
   "active_only": "Solo activos",
   "sudo_run_as": "Ejecutar como",
   "members": "Miembros",
-  "deploy_forbidden": "Condiciones de seguridad de red no cumplidas. Contacte a su administrador."
+  "deploy_forbidden": "Esta función requiere acceso desde una red autorizada."
 }
