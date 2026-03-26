@@ -299,8 +299,8 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	baseURL := strings.TrimRight(s.cfg.ExternalURL, "/")
 	installCmd := fmt.Sprintf(
-		"PAM_POCKETID_SERVER_URL=%s PAM_POCKETID_SHARED_SECRET=%s curl -fsSL %s/install.sh | %sbash",
-		shellQuote(baseURL), shellQuote(s.cfg.SharedSecret), baseURL, sudoPrefix,
+		"curl -fsSL %s/install.sh | PAM_POCKETID_SERVER_URL=%s PAM_POCKETID_SHARED_SECRET=%s %sbash",
+		baseURL, shellQuote(baseURL), shellQuote(s.cfg.SharedSecret), sudoPrefix,
 	)
 
 	go func() {
