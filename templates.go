@@ -1481,6 +1481,17 @@ const adminPageHTML = `<!DOCTYPE html>
           {{range .Sessions}}
           <div class="session-row">
             <span class="row-active">{{.Hostname}} — {{call $.T "time_remaining"}}: {{.Remaining}}</span>
+            <div class="session-actions">
+              <form method="POST" action="/api/sessions/revoke" style="display:inline">
+                <input type="hidden" name="hostname" value="{{.Hostname}}">
+                <input type="hidden" name="username" value="{{$.Username}}">
+                <input type="hidden" name="session_username" value="{{.SessionUsername}}">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <input type="hidden" name="csrf_ts" value="{{$.CSRFTs}}">
+                <input type="hidden" name="from" value="/admin/users">
+                <button type="submit" class="host-btn danger" onclick="return confirm('{{printf (call $.T "confirm_revoke_session") .Hostname}}')">{{call $.T "revoke"}}</button>
+              </form>
+            </div>
           </div>
           {{end}}
         </div>

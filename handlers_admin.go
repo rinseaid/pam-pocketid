@@ -289,8 +289,9 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type userSessionView struct {
-		Hostname  string
-		Remaining string
+		Hostname        string
+		Remaining       string
+		SessionUsername string
 	}
 	type userView struct {
 		Username       string
@@ -325,8 +326,9 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		var sessionViews []userSessionView
 		for _, sess := range sessions {
 			sessionViews = append(sessionViews, userSessionView{
-				Hostname:  sess.Hostname,
-				Remaining: formatDuration(time.Until(sess.ExpiresAt)),
+				Hostname:        sess.Hostname,
+				Remaining:       formatDuration(time.Until(sess.ExpiresAt)),
+				SessionUsername: u,
 			})
 		}
 		uv := userView{
