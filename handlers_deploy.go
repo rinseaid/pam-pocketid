@@ -492,12 +492,43 @@ func runDeployJob(job *deployJob, hostname string, port int, sshUser string, sig
 	}
 }
 
+// privateIP reports whether ip is a loopback or RFC1918 address (i.e. from a
+// reverse proxy rather than a real client).
+func privateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	private := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7"}
+	for _, cidr := range private {
+		_, network, _ := net.ParseCIDR(cidr)
+		if network != nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // clientIP extracts the real client IP from the request.
+// When RemoteAddr is a private/loopback address (i.e. a reverse proxy), the
+// leftmost entry in X-Forwarded-For is used as the real client IP.
 func clientIP(r *http.Request) string {
-	// Trust X-Forwarded-For only if behind a known proxy — for now use RemoteAddr.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if privateIP(net.ParseIP(host)) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// X-Forwarded-For may be "client, proxy1, proxy2" — take leftmost.
+			if idx := strings.IndexByte(xff, ','); idx != -1 {
+				xff = xff[:idx]
+			}
+			if candidate := strings.TrimSpace(xff); candidate != "" {
+				return candidate
+			}
+		}
 	}
 	return host
 }
