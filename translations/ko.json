@@ -249,5 +249,16 @@
   "deploy_key_upload": "파일 업로드",
   "deploy_key_validating": "키 검증 중…",
   "deploy_key_change": "키 변경",
-  "cancel": "취소"
+  "cancel": "취소",
+  "copied": "복사됨!",
+  "deploy_success": "배포가 성공적으로 완료되었습니다.",
+  "deploy_failed": "배포에 실패했습니다.",
+  "request_failed": "요청에 실패했습니다.",
+  "clipboard_empty": "클립보드가 비어 있습니다.",
+  "clipboard_error": "클립보드를 읽을 수 없습니다 — 파일을 업로드해 보세요.",
+  "deploy_user_unavailable": "(사용 불가)",
+  "deploy_starting": "시작 중\u2026",
+  "host_required": "호스트를 입력해야 합니다.",
+  "key_required": "개인 키를 입력해야 합니다.",
+  "connection_lost": "연결이 끊겼습니다."
 }

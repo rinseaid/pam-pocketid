@@ -249,5 +249,16 @@
   "deploy_key_upload": "Fazer upload de arquivo",
   "deploy_key_validating": "Validando chave…",
   "deploy_key_change": "Alterar chave",
-  "cancel": "Cancelar"
+  "cancel": "Cancelar",
+  "copied": "Copiado!",
+  "deploy_success": "Implantação concluída com sucesso.",
+  "deploy_failed": "Falha na implantação.",
+  "request_failed": "Falha na requisição.",
+  "clipboard_empty": "A área de transferência está vazia.",
+  "clipboard_error": "Não foi possível ler a área de transferência — tente fazer upload do arquivo.",
+  "deploy_user_unavailable": "(indisponível)",
+  "deploy_starting": "Iniciando\u2026",
+  "host_required": "O host é obrigatório.",
+  "key_required": "A chave privada é obrigatória.",
+  "connection_lost": "Conexão perdida."
 }

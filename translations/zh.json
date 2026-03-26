@@ -249,5 +249,16 @@
   "deploy_key_upload": "上传文件",
   "deploy_key_validating": "正在验证密钥…",
   "deploy_key_change": "更换密钥",
-  "cancel": "取消"
+  "cancel": "取消",
+  "copied": "已复制！",
+  "deploy_success": "部署成功完成。",
+  "deploy_failed": "部署失败。",
+  "request_failed": "请求失败。",
+  "clipboard_empty": "剪贴板为空。",
+  "clipboard_error": "无法读取剪贴板 — 请尝试上传文件。",
+  "deploy_user_unavailable": "（不可用）",
+  "deploy_starting": "启动中\u2026",
+  "host_required": "主机是必填项。",
+  "key_required": "私钥是必填项。",
+  "connection_lost": "连接已断开。"
 }

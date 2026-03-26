@@ -33,7 +33,7 @@ func (s *Server) handleThemeToggle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dest := r.URL.Query().Get("from")
-	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") || strings.ContainsAny(dest, "?#\\") {
 		dest = "/"
 	}
 	http.Redirect(w, r, dest, http.StatusSeeOther)

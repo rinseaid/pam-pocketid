@@ -629,7 +629,7 @@ func (s *Server) handleElevate(w http.ResponseWriter, r *http.Request) {
 	expiry := time.Now().Add(duration)
 	setFlashCookie(w, fmt.Sprintf("elevated:%s:%s:%d", hostname, targetUser, expiry.Unix()))
 	from := r.FormValue("from")
-	if from == "" || !strings.HasPrefix(from, "/") {
+	if from == "" || !strings.HasPrefix(from, "/") || strings.HasPrefix(from, "//") || strings.ContainsAny(from, "?#\\") {
 		from = "/admin/hosts"
 	}
 	http.Redirect(w, r, strings.TrimRight(s.cfg.ExternalURL, "/")+from, http.StatusSeeOther)

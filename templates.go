@@ -58,6 +58,11 @@ const sharedCSS = `
       --code-border: #d1d5db;
       --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 24px rgba(0,0,0,0.05);
       --focus-ring: 0 0 0 3px rgba(59,130,246,0.4);
+      --terminal-bg: #1a1a2e;
+      --terminal-text: #c8f0c8;
+      --chip-cmd-bg: rgba(59,130,246,0.12); --chip-cmd-border: rgba(59,130,246,0.25);
+      --chip-host-bg: rgba(16,185,129,0.12); --chip-host-border: rgba(16,185,129,0.25);
+      --chip-all-bg: rgba(99,102,241,0.12); --chip-all-text: #6366f1; --chip-all-border: rgba(99,102,241,0.25);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -83,6 +88,11 @@ const sharedCSS = `
         --code-bg: #0f172a;
         --code-border: #475569;
         --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 24px rgba(0,0,0,0.2);
+        --terminal-bg: #1a1a2e;
+        --terminal-text: #c8f0c8;
+        --chip-cmd-bg: rgba(96,165,250,0.12); --chip-cmd-border: rgba(96,165,250,0.25);
+        --chip-host-bg: rgba(52,211,153,0.12); --chip-host-border: rgba(52,211,153,0.25);
+        --chip-all-bg: rgba(129,140,248,0.12); --chip-all-text: #818cf8; --chip-all-border: rgba(129,140,248,0.25);
       }
       .approve-btn { color: #022c22; }
     }
@@ -110,6 +120,11 @@ const sharedCSS = `
       --code-border: #d1d5db;
       --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 24px rgba(0,0,0,0.05);
       --focus-ring: 0 0 0 3px rgba(59,130,246,0.4);
+      --terminal-bg: #1a1a2e;
+      --terminal-text: #c8f0c8;
+      --chip-cmd-bg: rgba(59,130,246,0.12); --chip-cmd-border: rgba(59,130,246,0.25);
+      --chip-host-bg: rgba(16,185,129,0.12); --chip-host-border: rgba(16,185,129,0.25);
+      --chip-all-bg: rgba(99,102,241,0.12); --chip-all-text: #6366f1; --chip-all-border: rgba(99,102,241,0.25);
     }
     .theme-dark {
       --bg: #0f172a;
@@ -135,6 +150,11 @@ const sharedCSS = `
       --code-border: #475569;
       --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 24px rgba(0,0,0,0.2);
       --focus-ring: 0 0 0 3px rgba(96,165,250,0.4);
+      --terminal-bg: #1a1a2e;
+      --terminal-text: #c8f0c8;
+      --chip-cmd-bg: rgba(96,165,250,0.12); --chip-cmd-border: rgba(96,165,250,0.25);
+      --chip-host-bg: rgba(52,211,153,0.12); --chip-host-border: rgba(52,211,153,0.25);
+      --chip-all-bg: rgba(129,140,248,0.12); --chip-all-text: #818cf8; --chip-all-border: rgba(129,140,248,0.25);
     }
     .theme-dark .approve-btn { color: #022c22; }
     *, *::before, *::after { box-sizing: border-box; }
@@ -259,7 +279,7 @@ const navCSS = `
     .theme-options { display: flex; gap: 4px; padding: 4px 12px 8px; }
     .theme-option { flex: 1; text-align: center; padding: 5px 8px; border-radius: 6px; font-size: 0.75rem; color: var(--text); text-decoration: none; border: 1px solid var(--border); cursor: pointer; font-weight: 500; }
     .theme-option:hover { background: var(--info-bg); }
-    .theme-option.active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; font-weight: 600; }
+    .theme-option.active { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
     .profile-menu { position: relative; }
     .profile-btn {
       width: 32px; height: 32px; border-radius: 50%;
@@ -284,7 +304,7 @@ const navCSS = `
     }
     .profile-dropdown-item:hover { background: var(--info-bg); }
     .profile-dropdown-divider { border-top: 1px solid var(--border); margin: 8px 0; }
-    .admin-pill { display: inline-block; font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; background: #1d4ed8; color: #fff; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; vertical-align: middle; margin-left: 6px; }
+    .admin-pill { display: inline-block; font-size: 0.6rem; padding: 2px 8px; border-radius: 10px; background: var(--primary); color: var(--primary-text); font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; vertical-align: middle; margin-left: 6px; }
     .profile-dropdown-label {
       padding: 4px 16px; font-size: 0.75rem; color: var(--text-secondary);
       font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
@@ -357,7 +377,7 @@ const dashboardHTML = `<!DOCTYPE html>
     .toggle-wrap { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
     .toggle-wrap span { font-size: 0.7rem; font-weight: 600; color: var(--text-secondary); }
     .toggle-track { width: 44px; height: 26px; border-radius: 13px; background: var(--border); position: relative; transition: background 0.2s; flex-shrink: 0; }
-    .toggle-thumb { width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3); position: absolute; top: 3px; left: 3px; transition: left 0.2s; }
+    .toggle-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--card-bg); box-shadow: 0 1px 3px rgba(0,0,0,0.3); position: absolute; top: 3px; left: 3px; transition: left 0.2s; }
     .toggle-wrap.active .toggle-track { background: var(--primary); }
     .toggle-wrap.active .toggle-thumb { left: 21px; }
     .list.active-only [data-active="false"] { display: none; }
@@ -1035,7 +1055,7 @@ const adminPageHTML = `<!DOCTYPE html>
     .key-info-fp { font-size: 0.75rem; font-family: monospace; color: var(--text-secondary); word-break: break-all; }
     .key-clear-btn { font-size: 0.75rem; color: var(--text-secondary); background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
     .key-clear-btn:hover { color: var(--text); }
-    .deploy-log { background: var(--code-bg, #1a1a2e); color: #c8f0c8; font-family: monospace; font-size: 0.75rem; border-radius: 8px; padding: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; display: none; }
+    .deploy-log { background: var(--terminal-bg); color: var(--terminal-text); font-family: monospace; font-size: 0.75rem; border-radius: 8px; padding: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 12px; display: none; }
     .deploy-log.visible { display: block; }
     .deploy-status { font-size: 0.813rem; font-weight: 600; margin-top: 8px; }
     .deploy-status.ok { color: var(--success); }
@@ -1109,9 +1129,9 @@ const adminPageHTML = `<!DOCTYPE html>
     .summary-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
     .summary-chip { font-size: 0.65rem; padding: 2px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; user-select: none; display: inline-flex; align-items: center; gap: 4px; transition: opacity 0.15s; }
     .summary-chip:hover { opacity: 0.8; }
-    .summary-chip.commands { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
-    .summary-chip.hosts { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
-    .summary-chip.all { background: rgba(99,102,241,0.12); color: #818cf8; border: 1px solid rgba(99,102,241,0.25); cursor: default; }
+    .summary-chip.commands { background: var(--chip-cmd-bg); color: var(--primary); border: 1px solid var(--chip-cmd-border); }
+    .summary-chip.hosts { background: var(--chip-host-bg); color: var(--success); border: 1px solid var(--chip-host-border); }
+    .summary-chip.all { background: var(--chip-all-bg); color: var(--chip-all-text); border: 1px solid var(--chip-all-border); cursor: default; }
     .summary-chip.single { background: var(--info-bg); color: var(--text-secondary); border: 1px solid var(--border); cursor: default; font-family: monospace; }
     .summary-sep { font-size: 0.65rem; color: var(--text-secondary); }
     .caret { font-size: 0.55rem; transition: transform 0.2s; display: inline-block; }
@@ -1140,7 +1160,12 @@ const adminPageHTML = `<!DOCTYPE html>
     var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
     if(tz){var d=new Date();d.setTime(d.getTime()+86400000);document.cookie='pam_tz='+tz+';path=/;expires='+d.toUTCString()+';SameSite=Lax';}
   }
+  var _t={copied:'{{call .T "copied"}}',deployOk:'{{call .T "deploy_success"}}',deployFailed:'{{call .T "deploy_failed"}}',requestFailed:'{{call .T "request_failed"}}',clipboardEmpty:'{{call .T "clipboard_empty"}}',clipboardError:'{{call .T "clipboard_error"}}',loadingUsers:'{{call .T "deploy_user_loading"}}',unavailable:'{{call .T "deploy_user_unavailable"}}',deployRun:'{{call .T "deploy_run"}}',starting:'{{call .T "deploy_starting"}}',hostRequired:'{{call .T "host_required"}}',keyRequired:'{{call .T "key_required"}}',connLost:'{{call .T "connection_lost"}}'};
   document.addEventListener('DOMContentLoaded',function(){
+    // Auto-dismiss success banners after 5 seconds
+    document.querySelectorAll('.banner-success').forEach(function(el){
+      setTimeout(function(){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.style.display='none';},400);},5000);
+    });
     var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
     document.querySelectorAll('.col-filter-select,.page-size-select,.tz-select,.lang-select').forEach(function(el){el.addEventListener('change',function(){this.form.submit();});});
     document.querySelectorAll('.tz-select').forEach(function(sel){
@@ -1177,13 +1202,13 @@ const adminPageHTML = `<!DOCTYPE html>
         var cmd=installBtn.getAttribute('data-cmd');
         var orig=installBtn.innerHTML;
         navigator.clipboard.writeText(cmd).then(function(){
-          installBtn.innerHTML='&#10003; Copied!';
+          installBtn.innerHTML='&#10003; '+_t.copied;
           setTimeout(function(){installBtn.innerHTML=orig;},2000);
         }).catch(function(){
           var ta=document.createElement('textarea');
           ta.value=cmd;ta.style.position='fixed';ta.style.opacity='0';
           document.body.appendChild(ta);ta.select();
-          try{document.execCommand('copy');installBtn.innerHTML='&#10003; Copied!';}catch(e){}
+          try{document.execCommand('copy');installBtn.innerHTML='&#10003; '+_t.copied;}catch(e){}
           document.body.removeChild(ta);
           setTimeout(function(){installBtn.innerHTML=orig;},2000);
         });
@@ -1239,7 +1264,9 @@ const adminPageHTML = `<!DOCTYPE html>
       });
     }
 
+    var _deployPrevFocus=null;
     function openDeployModal(){
+      _deployPrevFocus=document.activeElement;
       deployModal.classList.add('open');
       document.getElementById('deploy-form-area').style.display='';
       document.getElementById('deploy-log-area').style.display='none';
@@ -1248,9 +1275,11 @@ const adminPageHTML = `<!DOCTYPE html>
       document.getElementById('deploy-status').textContent='';
       document.getElementById('deploy-status').className='deploy-status';
       deployResetKey();
+      // Focus first field
+      setTimeout(function(){var h=document.getElementById('deploy-host');if(h)h.focus();},50);
       // Load PocketID users with SSH keys
       var sel=document.getElementById('deploy-pocketid-user');
-      sel.innerHTML='<option value="">Loading\u2026</option>';
+      sel.innerHTML='<option value="">'+_t.loadingUsers+'</option>';
       fetch('/api/deploy/users').then(function(r){return r.json();}).then(function(users){
         sel.innerHTML='<option value="">(none)</option>';
         (users||[]).forEach(function(u){
@@ -1259,25 +1288,27 @@ const adminPageHTML = `<!DOCTYPE html>
           o.textContent=u.username+(u.email?' \u2014 '+u.email:'');
           sel.appendChild(o);
         });
-      }).catch(function(){sel.innerHTML='<option value="">(unavailable)</option>';});
+      }).catch(function(){sel.innerHTML='<option value="">'+_t.unavailable+'</option>';});
     }
     function closeDeployModal(){
       deployModal.classList.remove('open');
+      if(_deployPrevFocus)_deployPrevFocus.focus();
     }
     if(deployOpenBtn){
       deployOpenBtn.addEventListener('click',openDeployModal);
       deployCancelBtn.addEventListener('click',closeDeployModal);
       deployCloseBtn.addEventListener('click',closeDeployModal);
       deployModal.addEventListener('click',function(e){if(e.target===deployModal)closeDeployModal();});
+      document.addEventListener('keydown',function(e){if(e.key==='Escape'&&deployModal.classList.contains('open'))closeDeployModal();});
       document.getElementById('deploy-host').addEventListener('input',deployCheckReady);
       // Paste key from clipboard
       document.getElementById('deploy-key-paste-btn').addEventListener('click',function(){
         navigator.clipboard.readText().then(function(text){
           if(text.trim()) deployValidateKey(text.trim());
-          else{var inv=document.getElementById('deploy-key-invalid');inv.textContent='Clipboard is empty.';inv.style.display='';}
+          else{var inv=document.getElementById('deploy-key-invalid');inv.textContent=_t.clipboardEmpty;inv.style.display='';}
         }).catch(function(){
           var inv=document.getElementById('deploy-key-invalid');
-          inv.textContent='Could not read clipboard — try uploading the file instead.';
+          inv.textContent=_t.clipboardError;
           inv.style.display='';
         });
       });
@@ -1298,11 +1329,11 @@ const adminPageHTML = `<!DOCTYPE html>
         var sshUser=document.getElementById('deploy-ssh-user').value.trim()||'root';
         var pocketidUser=document.getElementById('deploy-pocketid-user').value;
         var errEl=document.getElementById('deploy-error');
-        if(!host){errEl.textContent='Host is required.';errEl.style.display='';return;}
-        if(!deployPrivKey){errEl.textContent='Private key is required.';errEl.style.display='';return;}
+        if(!host){errEl.textContent=_t.hostRequired;errEl.style.display='';return;}
+        if(!deployPrivKey){errEl.textContent=_t.keyRequired;errEl.style.display='';return;}
         errEl.style.display='none';
         deploySubmitBtn.disabled=true;
-        deploySubmitBtn.textContent='Starting\u2026';
+        deploySubmitBtn.textContent=_t.starting;
         fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hostname:host,port:port,ssh_user:sshUser,private_key:deployPrivKey,pocketid_user:pocketidUser})})
         .then(function(r){
           if(!r.ok){return r.text().then(function(t){throw new Error(t||r.statusText);});}
@@ -1311,7 +1342,7 @@ const adminPageHTML = `<!DOCTYPE html>
         .then(function(data){
           deployPrivKey=''; // clear key from memory once submitted
           deploySubmitBtn.disabled=false;
-          deploySubmitBtn.textContent='Deploy';
+          deploySubmitBtn.textContent=_t.deployRun;
           document.getElementById('deploy-form-area').style.display='none';
           document.getElementById('deploy-log-area').style.display='';
           var logEl=document.getElementById('deploy-log');
@@ -1323,15 +1354,15 @@ const adminPageHTML = `<!DOCTYPE html>
           });
           es.addEventListener('status',function(e){
             es.close();
-            if(e.data==='done'){statusEl.textContent='\u2713 Deploy completed successfully.';statusEl.className='deploy-status ok';}
-            else{statusEl.textContent='\u2717 Deploy failed.';statusEl.className='deploy-status err';}
+            if(e.data==='done'){statusEl.textContent='\u2713 '+_t.deployOk;statusEl.className='deploy-status ok';}
+            else{statusEl.textContent='\u2717 '+_t.deployFailed;statusEl.className='deploy-status err';}
           });
-          es.onerror=function(){es.close();if(!statusEl.textContent){statusEl.textContent='Connection lost.';statusEl.className='deploy-status err';}};
+          es.onerror=function(){es.close();if(!statusEl.textContent){statusEl.textContent=_t.connLost;statusEl.className='deploy-status err';}};
         })
         .catch(function(err){
           deploySubmitBtn.disabled=false;
-          deploySubmitBtn.textContent='Deploy';
-          errEl.textContent=err.message||'Request failed.';
+          deploySubmitBtn.textContent=_t.deployRun;
+          errEl.textContent=err.message||_t.requestFailed;
           errEl.style.display='';
         });
       });
@@ -1769,7 +1800,7 @@ const adminPageHTML = `<!DOCTYPE html>
         </div>
       </div>
       <div id="deploy-log-area" style="display:none">
-        <div id="deploy-log" class="deploy-log visible"></div>
+        <div id="deploy-log" class="deploy-log visible" role="log" aria-live="polite" aria-label="{{call .T "deploy_title"}}"></div>
         <div id="deploy-status" class="deploy-status"></div>
         <div class="modal-actions" style="margin-top:8px">
           <button type="button" class="host-btn" id="deploy-close-btn">{{call .T "close"}}</button>

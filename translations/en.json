@@ -249,5 +249,16 @@
   "deploy_key_upload": "Upload file",
   "deploy_key_validating": "Validating key…",
   "deploy_key_change": "Change key",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "copied": "Copied!",
+  "deploy_success": "Deploy completed successfully.",
+  "deploy_failed": "Deploy failed.",
+  "request_failed": "Request failed.",
+  "clipboard_empty": "Clipboard is empty.",
+  "clipboard_error": "Could not read clipboard — try uploading the file instead.",
+  "deploy_user_unavailable": "(unavailable)",
+  "deploy_starting": "Starting\u2026",
+  "host_required": "Host is required.",
+  "key_required": "Private key is required.",
+  "connection_lost": "Connection lost."
 }

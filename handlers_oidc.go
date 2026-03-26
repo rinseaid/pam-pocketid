@@ -206,10 +206,11 @@ func (s *Server) handleSessionsCallback(w http.ResponseWriter, r *http.Request) 
 
 	// Set session cookie and avatar cookie, then redirect to dashboard.
 	s.setSessionCookie(w, username, role)
-	if claims.Picture != "" {
+	// Only store avatar URLs with safe schemes to prevent javascript: XSS.
+	if p := claims.Picture; p != "" && (strings.HasPrefix(p, "https://") || strings.HasPrefix(p, "http://")) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "pam_avatar",
-			Value:    claims.Picture,
+			Value:    p,
 			Path:     "/",
 			MaxAge:   2592000, // 30 days — outlasts session cookie so avatar persists
 			HttpOnly: false,   // needs to be readable for display

@@ -249,5 +249,16 @@
   "deploy_key_upload": "Téléverser un fichier",
   "deploy_key_validating": "Validation de la clé…",
   "deploy_key_change": "Changer de clé",
-  "cancel": "Annuler"
+  "cancel": "Annuler",
+  "copied": "Copié !",
+  "deploy_success": "Déploiement terminé avec succès.",
+  "deploy_failed": "Échec du déploiement.",
+  "request_failed": "Échec de la requête.",
+  "clipboard_empty": "Le presse-papiers est vide.",
+  "clipboard_error": "Impossible de lire le presse-papiers — essayez d'uploader le fichier.",
+  "deploy_user_unavailable": "(indisponible)",
+  "deploy_starting": "Démarrage\u2026",
+  "host_required": "Le champ hôte est requis.",
+  "key_required": "La clé privée est requise.",
+  "connection_lost": "Connexion perdue."
 }

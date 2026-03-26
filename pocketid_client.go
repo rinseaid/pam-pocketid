@@ -180,12 +180,12 @@ func (c *PocketIDClient) fetchGroupData() (*pocketIDData, error) {
 		if err := json.Unmarshal(resp, &result); err != nil {
 			// Try as plain array (some Pocket ID versions)
 			if err2 := json.Unmarshal(resp, &allGroups); err2 != nil {
-				return nil, fmt.Errorf("parsing groups: %w", err)
+				return nil, fmt.Errorf("parsing groups: %w", err2)
 			}
 			break
 		}
 		allGroups = append(allGroups, result.Data...)
-		if page >= result.Pagination.TotalPages {
+		if page >= result.Pagination.TotalPages || result.Pagination.TotalPages == 0 {
 			break
 		}
 		page++

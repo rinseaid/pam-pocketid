@@ -249,5 +249,16 @@
   "deploy_key_upload": "ファイルをアップロード",
   "deploy_key_validating": "キーを検証中…",
   "deploy_key_change": "キーを変更",
-  "cancel": "キャンセル"
+  "cancel": "キャンセル",
+  "copied": "コピーしました！",
+  "deploy_success": "デプロイが正常に完了しました。",
+  "deploy_failed": "デプロイに失敗しました。",
+  "request_failed": "リクエストが失敗しました。",
+  "clipboard_empty": "クリップボードが空です。",
+  "clipboard_error": "クリップボードを読み取れません — ファイルをアップロードしてください。",
+  "deploy_user_unavailable": "(利用不可)",
+  "deploy_starting": "開始中\u2026",
+  "host_required": "ホストは必須です。",
+  "key_required": "秘密鍵は必須です。",
+  "connection_lost": "接続が切れました。"
 }

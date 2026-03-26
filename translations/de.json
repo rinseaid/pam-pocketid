@@ -249,5 +249,16 @@
   "deploy_key_upload": "Datei hochladen",
   "deploy_key_validating": "Schlüssel wird geprüft…",
   "deploy_key_change": "Schlüssel ändern",
-  "cancel": "Abbrechen"
+  "cancel": "Abbrechen",
+  "copied": "Kopiert!",
+  "deploy_success": "Deployment erfolgreich abgeschlossen.",
+  "deploy_failed": "Deployment fehlgeschlagen.",
+  "request_failed": "Anfrage fehlgeschlagen.",
+  "clipboard_empty": "Zwischenablage ist leer.",
+  "clipboard_error": "Zwischenablage konnte nicht gelesen werden — bitte Datei hochladen.",
+  "deploy_user_unavailable": "(nicht verfügbar)",
+  "deploy_starting": "Starte\u2026",
+  "host_required": "Host ist erforderlich.",
+  "key_required": "Privater Schlüssel ist erforderlich.",
+  "connection_lost": "Verbindung getrennt."
 }

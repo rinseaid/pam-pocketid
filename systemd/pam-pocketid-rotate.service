@@ -9,4 +9,4 @@ ExecStart=/usr/local/bin/pam-pocketid rotate-breakglass
 ProtectSystem=strict
 ReadWritePaths=/etc/pam-pocketid-breakglass /etc/pam-pocketid-breakglass.lock
 PrivateTmp=true
-NoNewPrivileges=false
+NoNewPrivileges=true

@@ -727,6 +727,9 @@ func (s *ChallengeStore) ExtendGraceSession(username, hostname string) time.Dura
 func (s *ChallengeStore) ForceExtendGraceSession(username, hostname string) time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.gracePeriod <= 0 {
+		return 0 // grace period disabled; extending would set expiry to "now"
+	}
 	key := graceKey(username, hostname)
 	if _, ok := s.lastApproval[key]; !ok {
 		return 0

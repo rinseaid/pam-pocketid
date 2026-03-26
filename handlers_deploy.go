@@ -33,11 +33,15 @@ const deployRequestMaxBody = 65536 // 64 KB
 // deploySemaphore limits concurrent deploy operations server-wide.
 var deploySemaphore = make(chan struct{}, deployMaxConcurrent)
 
+// deployJobTTL is how long completed jobs are retained in memory before cleanup.
+const deployJobTTL = time.Hour
+
 // deployJob tracks a running or completed remote-install job.
 type deployJob struct {
 	id        string
 	host      string
 	sshUser   string
+	initiator string // admin username who started this job
 	createdAt time.Time
 
 	mu     sync.Mutex
@@ -47,11 +51,12 @@ type deployJob struct {
 	notify chan struct{} // closed when new output is available; replaced each time
 }
 
-func newDeployJob(id, host, sshUser string) *deployJob {
+func newDeployJob(id, host, sshUser, initiator string) *deployJob {
 	return &deployJob{
 		id:        id,
 		host:      host,
 		sshUser:   sshUser,
+		initiator: initiator,
 		createdAt: time.Now(),
 		notify:    make(chan struct{}),
 	}
@@ -62,6 +67,10 @@ func newDeployJob(id, host, sshUser string) *deployJob {
 func (j *deployJob) appendOutput(p []byte) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.done {
+		// Job already finished; don't close a channel that finish() already closed.
+		return
+	}
 	avail := deployMaxOutput - j.buf.Len()
 	if avail > 0 {
 		if len(p) > avail {
@@ -81,6 +90,9 @@ func (j *deployJob) appendLine(s string) {
 func (j *deployJob) finish(failed bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.done {
+		return // already finished; avoid double-close panic
+	}
 	j.done = true
 	j.failed = failed
 	close(j.notify)
@@ -108,14 +120,21 @@ func newDeployRateLimiter() *deployRateLimiter {
 }
 
 // allow returns true if the given IP is allowed to start a deploy now,
-// and records the attempt.
+// and records the attempt. Expired entries are pruned opportunistically.
 func (r *deployRateLimiter) allow(ip string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if last, ok := r.lastSeen[ip]; ok && time.Since(last) < deployIPCooldown {
+	now := time.Now()
+	if last, ok := r.lastSeen[ip]; ok && now.Sub(last) < deployIPCooldown {
 		return false
 	}
-	r.lastSeen[ip] = time.Now()
+	// Prune stale entries to prevent unbounded map growth.
+	for k, t := range r.lastSeen {
+		if now.Sub(t) > deployIPCooldown*4 {
+			delete(r.lastSeen, k)
+		}
+	}
+	r.lastSeen[ip] = now
 	return true
 }
 
@@ -269,14 +288,17 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobID, err := randomHex(12)
+	jobID, err := randomHex(16)
 	if err != nil {
 		<-deploySemaphore
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	job := newDeployJob(jobID, req.Hostname, req.SSHUser)
+	adminUser := s.getSessionUser(r)
+	log.Printf("DEPLOY: admin %q starting deploy to %s:%d as %s from %s (job %s)", adminUser, req.Hostname, req.Port, req.SSHUser, clientIP(r), jobID)
+
+	job := newDeployJob(jobID, req.Hostname, req.SSHUser, adminUser)
 	s.deployMu.Lock()
 	s.deployJobs[jobID] = job
 	s.deployMu.Unlock()
@@ -288,6 +310,13 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		runDeployJob(job, req.Hostname, req.Port, req.SSHUser, signer, installCmd)
 		// zero the signer (best-effort, GC will handle the rest)
 		signer = nil
+		// Schedule job cleanup after TTL to prevent unbounded map growth.
+		go func() {
+			time.Sleep(deployJobTTL)
+			s.deployMu.Lock()
+			delete(s.deployJobs, jobID)
+			s.deployMu.Unlock()
+		}()
 	}()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -295,9 +324,10 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeployStream streams deploy job output as SSE.
-// GET /api/deploy/stream/{id} — admin-only
+// GET /api/deploy/stream/{id} — admin-only; only the initiating admin may stream a job.
 func (s *Server) handleDeployStream(w http.ResponseWriter, r *http.Request) {
-	if s.getSessionUser(r) == "" || s.getSessionRole(r) != "admin" {
+	currentUser := s.getSessionUser(r)
+	if currentUser == "" || s.getSessionRole(r) != "admin" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -315,6 +345,12 @@ func (s *Server) handleDeployStream(w http.ResponseWriter, r *http.Request) {
 	s.deployMu.Unlock()
 	if !ok {
 		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	// Only the admin who initiated the job may stream its output.
+	if job.initiator != currentUser {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 

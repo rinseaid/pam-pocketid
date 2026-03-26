@@ -249,5 +249,16 @@
   "deploy_key_upload": "Subir archivo",
   "deploy_key_validating": "Validando clave…",
   "deploy_key_change": "Cambiar clave",
-  "cancel": "Cancelar"
+  "cancel": "Cancelar",
+  "copied": "¡Copiado!",
+  "deploy_success": "Despliegue completado con éxito.",
+  "deploy_failed": "Despliegue fallido.",
+  "request_failed": "Solicitud fallida.",
+  "clipboard_empty": "El portapapeles está vacío.",
+  "clipboard_error": "No se pudo leer el portapapeles — intente subir el archivo.",
+  "deploy_user_unavailable": "(no disponible)",
+  "deploy_starting": "Iniciando\u2026",
+  "host_required": "Se requiere el host.",
+  "key_required": "Se requiere la clave privada.",
+  "connection_lost": "Conexión perdida."
 }
